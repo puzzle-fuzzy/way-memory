@@ -121,6 +121,13 @@ export interface NavigationState {
   updatedAt: string;
 }
 
+export interface NavigationHandoffGrant {
+  handoffId: string;
+  routeId: string;
+  token: string;
+  expiresAt: string;
+}
+
 export type ObservationMode = "learning" | "navigation";
 
 export type MotionMode =

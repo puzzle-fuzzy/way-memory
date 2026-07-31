@@ -1,4 +1,4 @@
-import type { RouteSummary } from "@way-memory/contracts";
+import type { NavigationHandoffGrant, RouteSummary } from "@way-memory/contracts";
 import { ref } from "vue";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -17,14 +17,14 @@ export function useRoutes() {
   const routeBusy = ref(false);
   const routeError = ref("");
 
-  async function request(path: string, init?: RequestInit) {
+  async function request<T = RouteSummary & { error?: string }>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(endpoint(path), {
       ...init,
       headers: { ...headers(), "content-type": "application/json", ...init?.headers },
     });
-    const body = await response.json() as RouteSummary & { error?: string };
+    const body = await response.json() as T & { error?: string };
     if (!response.ok) throw new Error(body.error ?? `API ${response.status}`);
-    return body;
+    return body as T;
   }
 
   async function refreshRoutes() {
@@ -72,5 +72,16 @@ export function useRoutes() {
     }
   }
 
-  return { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute };
+  async function createNavigationHandoff(routeId: string) {
+    routeBusy.value = true;
+    try {
+      const grant = await request(`/api/routes/${encodeURIComponent(routeId)}/handoff`, { method: "POST" }) as NavigationHandoffGrant;
+      routeError.value = "";
+      return grant;
+    } finally {
+      routeBusy.value = false;
+    }
+  }
+
+  return { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute, createNavigationHandoff };
 }

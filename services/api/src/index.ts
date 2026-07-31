@@ -7,6 +7,7 @@ import type {
   LiveSensorSnapshot,
   MotionEvent,
   MotionMode,
+  NavigationHandoffGrant,
   NavigationState,
   ObservationSession,
   PoseEstimate,
@@ -20,6 +21,7 @@ import type {
   TrackPoint,
 } from "@way-memory/contracts";
 import { AuthStore, type AuthPrincipal, type AuthRole } from "./authStore";
+import { NavigationHandoffStore } from "./navigationHandoffStore";
 import { RouteStore, type StoredRoute } from "./routeStore";
 import { SessionStore } from "./sessionStore";
 
@@ -99,6 +101,7 @@ const sessionResumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const MAX_PERSISTED_SESSIONS = 100;
 const sessionStore = new SessionStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
 const routeStore = new RouteStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
+const navigationHandoffStore = new NavigationHandoffStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
 const authMode = Bun.env.WAY_MEMORY_AUTH_MODE ?? "off";
 if (authMode !== "off" && authMode !== "enforced") throw new Error("invalid_auth_mode");
 if (authMode === "enforced" && !Bun.env.WAY_MEMORY_BOOTSTRAP_TOKEN) throw new Error("production_auth_requires_bootstrap_token");
@@ -1400,7 +1403,7 @@ const server = Bun.serve<RealtimeClient>({
       routeStore.save(route);
       return json(publicRoute(route), { status: 201 });
     }
-    const routeMatch = url.pathname.match(/^\/api\/routes\/([^/]+)(?:\/(observations|nodes|publish))?$/);
+    const routeMatch = url.pathname.match(/^\/api\/routes\/([^/]+)(?:\/(observations|nodes|publish|handoff))?$/);
     if (routeMatch) {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
       const route = routes.get(routeMatch[1]);
@@ -1450,6 +1453,11 @@ const server = Bun.serve<RealtimeClient>({
         route.updatedAt = new Date().toISOString();
         routeStore.save(route);
         return json(publicRoute(route));
+      }
+      if (action === "handoff" && request.method === "POST") {
+        if (route.status !== "verified") return json({ error: "route_not_verified" }, { status: 409 });
+        const grant: NavigationHandoffGrant = await navigationHandoffStore.create(dashboard.ownerId, route.routeId);
+        return json(grant, { status: 201 });
       }
       return json({ error: "route_not_found" }, { status: 404 });
     }
@@ -1532,12 +1540,12 @@ const server = Bun.serve<RealtimeClient>({
     open(ws) {
       if (ws.data.role === "dashboard") ws.subscribe(dashboardTopic(ws.data.ownerId));
     },
-    message(ws, raw) {
+    async message(ws, raw) {
       if (String(raw).length > MAX_JSON_BYTES) {
         ws.send(JSON.stringify({ type: "error", error: "message_too_large" }));
         return;
       }
-      let message: { type?: string; deviceId?: string; mode?: CreateSessionInput["mode"]; routeId?: string; sessionId?: string; samples?: unknown[]; sensors?: unknown[]; client?: CreateSessionInput["client"] };
+      let message: { type?: string; deviceId?: string; mode?: CreateSessionInput["mode"]; routeId?: string; handoffToken?: string; sessionId?: string; samples?: unknown[]; sensors?: unknown[]; client?: CreateSessionInput["client"] };
       try {
         message = JSON.parse(String(raw));
       } catch {
@@ -1548,16 +1556,20 @@ const server = Bun.serve<RealtimeClient>({
       if (ws.data.role === "device" && message.type === "session.start") {
         let session: ObservationSession;
         try {
+          const handoff = message.handoffToken
+            ? await navigationHandoffStore.consume(ws.data.ownerId, message.handoffToken.trim())
+            : null;
+          if (message.handoffToken && !handoff) throw new Error("invalid_navigation_handoff");
           session = createSession({
             deviceId: message.deviceId ?? ws.data.deviceId ?? "android-device",
-            mode: message.mode ?? "learning",
-            routeId: message.routeId,
+            mode: handoff ? "navigation" : message.mode ?? "learning",
+            routeId: handoff?.routeId ?? message.routeId,
             sensors: message.sensors as SensorInventoryEntry[] | undefined,
             client: message.client,
           }, ws.data.ownerId);
         } catch (error) {
           const reason = error instanceof Error ? error.message : "session_start_failed";
-          ws.send(JSON.stringify({ type: "error", error: reason === "session_limit" || reason === "invalid_route" || reason === "invalid_navigation_route" ? reason : "session_start_failed" }));
+          ws.send(JSON.stringify({ type: "error", error: reason === "session_limit" || reason === "invalid_route" || reason === "invalid_navigation_route" || reason === "invalid_navigation_handoff" ? reason : "session_start_failed" }));
           return;
         }
         ws.data.sessionId = session.sessionId;

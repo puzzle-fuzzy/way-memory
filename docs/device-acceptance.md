@@ -83,6 +83,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/collect-device-evide
 
 脚本不会覆盖已有证据目录；重复采集请更换 `-OutputRoot`。报告失败时仍保留 JSON 供诊断，不得把失败报告当作通过证据。
 
+Current evidence status (2026-08-01): the workstation has an Android emulator, but no physical Android phone is connected. Emulator tests cover protocol and lifecycle regressions only; they do not count as ARCore, GNSS, barometer, background, stairs, elevator, or rotation acceptance.
+
 The report is an audit of the server's received evidence; it cannot manufacture sensor data or prove a case that was not actually captured. The baseline also requires the session's `client` manifest to identify `com.puzzlefuzzy.waymemory`, a version/build type, and an API origin matching `WAY_MEMORY_API_URL`. This catches an APK built against the wrong server before its data is accepted as field evidence.
 
 Record at minimum:

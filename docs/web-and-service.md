@@ -46,3 +46,7 @@ Web 使用 Vue 3 + Vite + TypeScript + Tailwind CSS，开发服务器由 Vite �
 - `POST /routes/:id/publish`
 - `DELETE /routes/:id`
 - `WS /realtime`
+
+## Navigation handoff
+
+The web workspace can issue a one-time navigation code only for a verified route. Copy that short-lived code into the Android app's optional navigation handoff field; no QR marker, NFC tag, or permanent route ID is required. The Android client sends the code only in `session.start`, and the API resolves it to an owner-scoped route before creating the navigation session. The server stores only a hash, applies a five-minute expiry, and atomically rejects reuse. This handoff is intentionally separate from device enrollment credentials.

@@ -110,6 +110,7 @@ internal data class SessionStartRequest(
     val client: CaptureClientSample? = null,
     val mode: String = "learning",
     val routeId: String? = null,
+    val handoffToken: String? = null,
 )
 
 internal data class CaptureClientSample(
@@ -125,7 +126,8 @@ internal fun buildSessionStartRequest(
     client: CaptureClientSample? = null,
     mode: String = "learning",
     routeId: String? = null,
-): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory, client, mode, routeId)
+    handoffToken: String? = null,
+): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory, client, mode, routeId, handoffToken)
 
 internal fun buildSamplesMessage(sessionId: String, batch: List<CollectedSample>): JSONObject = JSONObject()
     .put("type", "samples")
@@ -197,6 +199,7 @@ private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
     .put("mode", mode)
     .apply {
         routeId?.takeIf(String::isNotBlank)?.let { put("routeId", it) }
+        handoffToken?.takeIf(String::isNotBlank)?.let { put("handoffToken", it) }
         client?.let {
             put("client", JSONObject()
                 .put("applicationId", it.applicationId)
@@ -240,6 +243,7 @@ class SessionUploader(
     private var sensorInventory: List<SensorInventorySample> = emptyList()
     private var captureMode: String = "learning"
     private var captureRouteId: String? = null
+    private var captureHandoffToken: String? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var running = false
     private var nextConnectAtMs = 0L
@@ -259,6 +263,7 @@ class SessionUploader(
         sensorInventory: List<SensorInventorySample> = emptyList(),
         mode: String = "learning",
         routeId: String? = null,
+        handoffToken: String? = null,
     ) {
         if (running) return
         this.deviceId = deviceId
@@ -269,6 +274,7 @@ class SessionUploader(
         val persistedConfig = readSessionConfig()
         captureMode = persistedConfig?.first ?: mode
         captureRouteId = persistedConfig?.second ?: routeId
+        captureHandoffToken = persistedConfig?.third ?: handoffToken
         persistSessionConfig()
         running = true
         nextConnectAtMs = 0L
@@ -494,6 +500,7 @@ class SessionUploader(
         sensorInventory = sensorInventory,
         mode = captureMode,
         routeId = captureRouteId,
+        handoffToken = captureHandoffToken,
         client = CaptureClientSample(
             applicationId = "com.puzzlefuzzy.waymemory",
             versionName = BuildConfig.VERSION_NAME,
@@ -502,12 +509,13 @@ class SessionUploader(
         ),
     ).toJson()
 
-    private fun readSessionConfig(): Pair<String, String?>? = runCatching {
+    private fun readSessionConfig(): Triple<String, String?, String?>? = runCatching {
         if (!sessionConfigFile.isFile) return@runCatching null
         val json = JSONObject(sessionConfigFile.readText())
         val mode = json.optString("mode", "learning").takeIf { it == "learning" || it == "navigation" } ?: "learning"
         val routeId = json.optString("routeId").takeIf(String::isNotBlank)
-        mode to routeId
+        val handoffToken = json.optString("handoffToken").takeIf(String::isNotBlank)
+        Triple(mode, routeId, handoffToken)
     }.getOrNull()
 
     private fun persistSessionConfig() {
@@ -516,7 +524,10 @@ class SessionUploader(
             sessionConfigFile.writeText(
                 JSONObject()
                     .put("mode", captureMode)
-                    .apply { captureRouteId?.takeIf(String::isNotBlank)?.let { put("routeId", it) } }
+                    .apply {
+                        captureRouteId?.takeIf(String::isNotBlank)?.let { put("routeId", it) }
+                        captureHandoffToken?.takeIf(String::isNotBlank)?.let { put("handoffToken", it) }
+                    }
                     .toString(),
             )
         }

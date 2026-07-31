@@ -16,6 +16,8 @@ The API now has an opt-in enforced authorization mode for the single-node MVP. S
 
 The Android client now encrypts the device token with an Android Keystore-backed AES-GCM key and exchanges it for a short-lived WebSocket ticket before connecting. It still needs a user-facing enrollment handoff and the dashboard sign-in screen before enabling it for real users; copying a token through the current diagnostic field is an acceptance bridge, not the final onboarding UX.
 
+Verified-route navigation now has a separate one-time handoff boundary. The dashboard receives a five-minute route code, the API stores only its SHA-256 hash, and the device consumes it atomically during `session.start`. The code is owner-scoped and does not replace the device token, expose a route list, or authorize raw replay. It is suitable for software-only field testing, but the final product still needs a polished authenticated enrollment and accessibility flow.
+
 ## Required production architecture
 
 1. **TLS at the edge**

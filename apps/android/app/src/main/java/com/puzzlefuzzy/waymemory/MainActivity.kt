@@ -93,9 +93,16 @@ private fun SensorScreen(collector: SensorCollector) {
     val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }
     var deviceToken by remember { mutableStateOf(collector.deviceCredential().orEmpty()) }
+    var navigationHandoffToken by remember { mutableStateOf("") }
     fun startCapture() {
         if (!collector.hasPreciseLocationPermission()) return
-        collector.start(hostActivity)
+        val handoffToken = navigationHandoffToken.trim().takeIf(String::isNotEmpty)
+        collector.start(
+            hostActivity,
+            mode = if (handoffToken != null) "navigation" else "learning",
+            handoffToken = handoffToken,
+        )
+        navigationHandoffToken = ""
         ContextCompat.startForegroundService(
             context,
             Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_START),
@@ -165,6 +172,18 @@ private fun SensorScreen(collector: SensorCollector) {
                             TextButton(onClick = { collector.saveDeviceCredential(deviceToken) }) { Text("保存到本机") }
                             if (state.deviceCredentialConfigured) TextButton(onClick = { deviceToken = ""; collector.clearDeviceCredential() }) { Text("清除") }
                         }
+                        OutlinedTextField(
+                            value = navigationHandoffToken,
+                            onValueChange = { navigationHandoffToken = it.take(256) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("导航交接码（可选）") },
+                            placeholder = { Text("从网页复制一次性导航码") },
+                        )
+                        Text(
+                            "导航码只在启动时消费一次，过期或重复使用都会被服务端拒绝。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                         Text("Pose: ${state.poseText}", style = MaterialTheme.typography.bodySmall)
                         Text("Motion mode: ${state.motionMode}", style = MaterialTheme.typography.bodySmall)
                         Text(

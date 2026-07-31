@@ -50,6 +50,19 @@ class SessionUploaderPayloadTest {
     }
 
     @Test
+    fun navigationHandoffIsCarriedOnlyOnTheSessionStartMessage() {
+        val request = buildSessionStartRequest(
+            deviceId = "device-navigation",
+            sensorInventory = emptyList(),
+            mode = "navigation",
+            handoffToken = "wm_nav_one_time",
+        )
+
+        assertEquals("navigation", request.mode)
+        assertEquals("wm_nav_one_time", request.handoffToken)
+    }
+
+    @Test
     fun persistedSessionMarkerOnlyRequestsResumeWhenItContainsAnId() {
         val directory = Files.createTempDirectory("way-memory-resume").toFile()
         try {

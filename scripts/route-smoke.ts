@@ -168,6 +168,31 @@ try {
   const published = await requestJson(`/api/routes/${routeId}/publish`, { method: "POST" });
   if (published.response.status !== 200 || published.body.status !== "verified") throw new Error(`aligned route did not publish: ${JSON.stringify(published.body)}`);
 
+  const handoff = await requestJson(`/api/routes/${routeId}/handoff`, { method: "POST" });
+  if (handoff.response.status !== 201 || typeof handoff.body.token !== "string" || handoff.body.routeId !== routeId) throw new Error(`navigation handoff was not issued: ${JSON.stringify(handoff.body)}`);
+  const handoffNavigator = new WebSocket(`${baseUrl.replace("http", "ws")}/realtime?role=device&deviceId=route-handoff-device`);
+  await waitForOpen(handoffNavigator);
+  handoffNavigator.send(JSON.stringify({
+    type: "session.start",
+    deviceId: "route-handoff-device",
+    mode: "navigation",
+    handoffToken: handoff.body.token,
+    sensors: [],
+  }));
+  const handoffStarted = await nextMessage(handoffNavigator);
+  if (handoffStarted.type !== "session.started" || handoffStarted.session?.mode !== "navigation" || handoffStarted.session?.routeId !== routeId) throw new Error(`navigation handoff did not bind route: ${JSON.stringify(handoffStarted)}`);
+  const handoffSessionId = handoffStarted.session.sessionId as string;
+  handoffNavigator.close();
+  const handoffStopped = await requestJson(`/api/sessions/${handoffSessionId}/stop`, { method: "POST" });
+  if (handoffStopped.response.status !== 200) throw new Error("handoff navigation session did not stop");
+
+  const reusedHandoff = new WebSocket(`${baseUrl.replace("http", "ws")}/realtime?role=device&deviceId=route-handoff-reuse`);
+  await waitForOpen(reusedHandoff);
+  reusedHandoff.send(JSON.stringify({ type: "session.start", deviceId: "route-handoff-reuse", mode: "navigation", handoffToken: handoff.body.token }));
+  const reusedMessage = await nextMessage(reusedHandoff);
+  if (reusedMessage.type !== "error" || reusedMessage.error !== "invalid_navigation_handoff") throw new Error(`navigation handoff was reusable: ${JSON.stringify(reusedMessage)}`);
+  reusedHandoff.close();
+
   const navigator = new WebSocket(`${baseUrl.replace("http", "ws")}/realtime?role=device&deviceId=route-navigation-device`);
   await waitForOpen(navigator);
   navigator.send(JSON.stringify({

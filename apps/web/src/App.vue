@@ -5,7 +5,7 @@ import { useRealtimeSession } from "./composables/useRealtimeSession";
 import { useRoutes } from "./composables/useRoutes";
 
 const { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, followLatest, setAuthToken, enrollDevice } = useRealtimeSession();
-const { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute } = useRoutes();
+const { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute, createNavigationHandoff } = useRoutes();
 const dashboardToken = ref("");
 const newDeviceToken = ref("");
 const enrollmentError = ref("");
@@ -13,6 +13,7 @@ const enrollmentBusy = ref(false);
 const selectedRouteId = ref("");
 const routeName = ref("盲人路线");
 const routeActionError = ref("");
+const navigationHandoff = ref<{ token: string; routeId: string; expiresAt: string } | null>(null);
 const routeManagementAvailable = computed(() => !authRequired.value || authenticated.value);
 const selectedRoute = computed(() => routes.value.find((route) => route.routeId === selectedRouteId.value));
 
@@ -55,6 +56,16 @@ async function verifySelectedRoute() {
     await publishRoute(selectedRoute.value.routeId);
   } catch (error) {
     routeActionError.value = error instanceof Error ? error.message : "路线尚未满足发布条件";
+  }
+}
+
+async function createNavigationHandoffCode() {
+  if (!selectedRoute.value || selectedRoute.value.status !== "verified") return;
+  routeActionError.value = "";
+  try {
+    navigationHandoff.value = await createNavigationHandoff(selectedRoute.value.routeId);
+  } catch (error) {
+    routeActionError.value = error instanceof Error ? error.message : "导航交接码生成失败";
   }
 }
 
@@ -837,6 +848,12 @@ const activities = computed(() => {
          <option v-for="item in availableSessions" :key="item.sessionId" :value="item.sessionId">{{ sessionHistoryLabel(item) }}</option>
         </select>
         <template v-if="routeManagementAvailable">
+          <button v-if="selectedRoute && selectedRoute.status === 'verified'" class="rounded-full border border-ember/40 bg-[#fff8ee] px-3 py-1.5 text-ember disabled:cursor-not-allowed disabled:opacity-50" type="button" :disabled="routeBusy" @click="createNavigationHandoffCode">生成导航交接码</button>
+          <div v-if="navigationHandoff" class="flex min-w-[280px] flex-1 items-center gap-2 rounded-2xl border border-[#ead7bf] bg-[#fff8ee] px-3 py-2 text-[10px] text-[#8c6845]">
+            <span class="font-semibold">一次性导航码</span>
+            <input :value="navigationHandoff.token" readonly class="min-w-0 flex-1 rounded-full border border-[#e3c9a7] bg-white px-3 py-1.5 font-mono text-[10px] text-ink" type="text" />
+            <span class="hidden whitespace-nowrap lg:inline">{{ new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(navigationHandoff.expiresAt)) }} 前有效</span>
+          </div>
           <select v-model="selectedRouteId" class="max-w-[260px] rounded-full border border-[#c8ddd0] bg-[#f8fcf8] px-3 py-1.5 outline-none" aria-label="选择路线">
             <option value="">路线工作区</option>
             <option v-for="route in routes" :key="route.routeId" :value="route.routeId">{{ route.name }} · {{ route.status }} · {{ route.observations }} 次</option>

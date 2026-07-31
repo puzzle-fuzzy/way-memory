@@ -44,6 +44,12 @@ The response contains one `deviceToken` and one `dashboardToken`. Store them in 
 
 The current Android token field is an acceptance bridge. The production enrollment UX still needs a controlled one-time handoff (for example, an authenticated dashboard enrollment action), plus a device revoke/delete flow before release.
 
+## Verified-route navigation handoff
+
+After a route is `verified`, the dashboard may call `POST /api/routes/<routeId>/handoff`. The API returns a five-minute `wm_nav_...` code once. Only the SHA-256 hash is stored; the raw code is never persisted or logged. The code is owner-scoped, consumed atomically by the device WebSocket `session.start` message, and cannot be reused after success, expiry, or a different-owner attempt.
+
+The Android acceptance screen accepts this code as plain text. It is stored only in the app-private active-session recovery file until the first successful `session.started` response, so screen rotation or process recovery does not silently downgrade the requested navigation session. A normal Stop deletes the recovery file. The handoff code is not a replacement for the device access token and does not grant route-list or raw-data access.
+
 ## Verification
 
 Run the local enforced-mode regression without using real credentials:
