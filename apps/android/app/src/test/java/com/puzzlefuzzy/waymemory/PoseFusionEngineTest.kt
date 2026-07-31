@@ -180,6 +180,30 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun elevatorEvidenceDecaysAndEmitsAnExitEvent() {
+        val engine = PoseFusionEngine()
+        var elevatorExit = false
+        var timestampNs = 1_000_000_000L
+        val baselinePressure = 1013.25f
+        engine.updatePressure(baselinePressure, timestampNs)
+        engine.updateImu(timestampNs, floatArrayOf(0.3f, 0f, 0f), 0.05f)
+        repeat(12) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(baselinePressure - (it + 1) * 0.08f, timestampNs)
+            engine.updateImu(timestampNs, floatArrayOf(0.3f, 0f, 0f), 0.05f)
+        }
+
+        repeat(40) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(baselinePressure - 0.96f, timestampNs)
+            val update = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0f)
+            if (update?.motionEvent?.type == "elevator-exit") elevatorExit = true
+        }
+
+        assertTrue(elevatorExit)
+    }
+
+    @Test
     fun sustainedVerticalMotionWithHorizontalTravelProducesStairsEvent() {
         val engine = PoseFusionEngine()
         var stairsEvent = false
@@ -196,6 +220,30 @@ class PoseFusionEngineTest {
         }
         assertTrue(stairsEvent)
         assertTrue(observedModes.contains("stairs"))
+    }
+
+    @Test
+    fun stairsEvidenceDecaysAndEmitsAnExitEvent() {
+        val engine = PoseFusionEngine()
+        var stairsExit = false
+        var timestampNs = 1_000_000_000L
+        val baselinePressure = 1013.25f
+        engine.updatePressure(baselinePressure, timestampNs)
+        engine.updateImu(timestampNs, floatArrayOf(0.4f, 0f, 0f), 0.05f)
+        repeat(30) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(baselinePressure - (it + 1) * 0.015f, timestampNs)
+            engine.updateImu(timestampNs, floatArrayOf(0.4f, 0f, 0f), 0.05f)
+        }
+
+        repeat(40) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(baselinePressure - 0.45f, timestampNs)
+            val update = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0f)
+            if (update?.motionEvent?.type == "stairs-exit") stairsExit = true
+        }
+
+        assertTrue(stairsExit)
     }
 
     @Test
