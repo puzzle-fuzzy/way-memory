@@ -387,6 +387,10 @@ class SessionUploader(
     }
 
     fun exchangeEnrollmentCode(code: String): String? {
+        if (!baseUrl.trim().startsWith("https://", ignoreCase = true)) {
+            state.update { current -> current.copy(lastError = "设备配对必须使用 HTTPS 服务端") }
+            return null
+        }
         val request = Request.Builder()
             .url("${baseUrl.trimEnd('/')}/api/auth/enrollments/consume")
             .post(okhttp3.RequestBody.create(null, JSONObject().put("code", code.trim()).toString()))
