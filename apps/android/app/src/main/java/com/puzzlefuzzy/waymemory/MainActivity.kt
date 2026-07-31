@@ -1,6 +1,7 @@
 package com.puzzlefuzzy.waymemory
 
 import android.Manifest
+import android.app.Application
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,7 +27,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,24 +34,36 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.puzzlefuzzy.waymemory.sensing.SensorCollector
 import com.puzzlefuzzy.waymemory.sensing.SensorState
 import com.puzzlefuzzy.waymemory.ui.theme.WayMemoryTheme
 
 class MainActivity : ComponentActivity() {
+    private val collectorViewModel: SensorCollectorViewModel by lazy {
+        ViewModelProvider(this)[SensorCollectorViewModel::class.java]
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { WayMemoryTheme { SensorScreen() } }
+        setContent { WayMemoryTheme { SensorScreen(collectorViewModel.collector) } }
+    }
+}
+
+private class SensorCollectorViewModel(application: Application) : AndroidViewModel(application) {
+    val collector = SensorCollector(application)
+
+    override fun onCleared() {
+        collector.stop()
+        super.onCleared()
     }
 }
 
 @Composable
-private fun SensorScreen() {
-    val context = LocalContext.current
-    val collector = remember(context) { SensorCollector(context) }
+private fun SensorScreen(collector: SensorCollector) {
     val state by collector.uiState.collectAsState()
     val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }
@@ -60,10 +72,6 @@ private fun SensorScreen() {
     ) {
         permissionRequested = true
         collector.start()
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { collector.stop() }
     }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
