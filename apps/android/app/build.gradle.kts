@@ -10,8 +10,13 @@ val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
-val apiBaseUrl = (providers.gradleProperty("wayMemoryApiUrl").orNull
-    ?: localProperties.getProperty("wayMemoryApiUrl", "http://10.0.2.2:8787"))
+val configuredApiBaseUrl = providers.gradleProperty("wayMemoryApiUrl").orNull
+    ?: localProperties.getProperty("wayMemoryApiUrl", "http://10.0.2.2:8787")
+val buildingRelease = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+if (buildingRelease && !configuredApiBaseUrl.startsWith("https://")) {
+    throw GradleException("Release builds require an HTTPS wayMemoryApiUrl")
+}
+val apiBaseUrl = configuredApiBaseUrl
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 
