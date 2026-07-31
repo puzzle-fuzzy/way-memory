@@ -1,6 +1,7 @@
 package com.puzzlefuzzy.waymemory
 
 import com.puzzlefuzzy.waymemory.sensing.PoseFusionEngine
+import com.puzzlefuzzy.waymemory.sensing.VisualPoseSample
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -33,5 +34,39 @@ class PoseFusionEngineTest {
             if (update?.motionEvent?.type == "elevator-candidate") elevatorEvent = true
         }
         assertTrue(elevatorEvent)
+    }
+
+    @Test
+    fun visualPoseIsPromotedOnlyAfterFrameAlignment() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        val firstVisual = engine.updateVisual(VisualPoseSample(1_100_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        assertEquals(null, firstVisual)
+
+        var timestampNs = 1_200_000_000L
+        repeat(12) {
+            timestampNs += 100_000_000L
+            engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
+        }
+        val aligned = engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 1.5f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        assertNotNull(aligned)
+        assertTrue(aligned?.pose?.sourceFlags?.contains("visual-aligned") == true)
+        assertEquals("local-enu", aligned?.pose?.frame)
+    }
+
+    @Test
+    fun visualReturnEmitsLoopCandidateWithoutSnappingRoute() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateVisual(VisualPoseSample(1_100_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        var timestampNs = 1_200_000_000L
+        repeat(15) {
+            timestampNs += 100_000_000L
+            engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
+        }
+        engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 4f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        engine.updateVisual(VisualPoseSample(timestampNs + 200_000_000L, 8f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        val returned = engine.updateVisual(VisualPoseSample(timestampNs + 300_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        assertEquals("loop-candidate", returned?.motionEvent?.type)
     }
 }

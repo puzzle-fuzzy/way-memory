@@ -22,6 +22,7 @@ data class SensorUiState(
     val poseText: String = "等待统一 Pose",
     val motionMode: String = "unknown",
     val poseAccuracyM: Float? = null,
+    val visualTracking: VisualTrackingStatus = VisualTrackingStatus(),
     val locationText: String = "等待定位",
     val readings: List<SensorReading> = emptyList(),
     val error: String? = null,

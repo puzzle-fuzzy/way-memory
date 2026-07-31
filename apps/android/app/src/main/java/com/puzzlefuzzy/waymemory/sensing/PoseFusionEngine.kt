@@ -3,9 +3,12 @@ package com.puzzlefuzzy.waymemory.sensing
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.atan2
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * Small, deterministic on-device fusion layer for the MVP.
@@ -35,6 +38,17 @@ class PoseFusionEngine {
     private var movingFrames = 0
     private var elevatorEvidenceFrames = 0
     private var lastMotionMode = "unknown"
+    private var hasVisual = false
+    private var lastVisualX = 0f
+    private var lastVisualY = 0f
+    private var lastVisualZ = 0f
+    private var visualTravelledM = 0f
+    private var visualYawRadians: Float? = null
+    private var visualRouteOriginX = 0f
+    private var visualRouteOriginY = 0f
+    private var visualAlignmentPositionX = 0f
+    private var visualAlignmentPositionY = 0f
+    private var visualLoopCandidateEmitted = false
 
     fun reset() {
         position.fill(0f)
@@ -56,6 +70,17 @@ class PoseFusionEngine {
         movingFrames = 0
         elevatorEvidenceFrames = 0
         lastMotionMode = "unknown"
+        hasVisual = false
+        lastVisualX = 0f
+        lastVisualY = 0f
+        lastVisualZ = 0f
+        visualTravelledM = 0f
+        visualYawRadians = null
+        visualRouteOriginX = 0f
+        visualRouteOriginY = 0f
+        visualAlignmentPositionX = 0f
+        visualAlignmentPositionY = 0f
+        visualLoopCandidateEmitted = false
     }
 
     fun updatePressure(pressureHpa: Float, timestampNs: Long) {
@@ -121,6 +146,58 @@ class PoseFusionEngine {
         return buildUpdate(timestampNs, force = true)
     }
 
+    /**
+     * Correct the inertial track with ARCore's session-local metric pose.
+     * ARCore has no guaranteed relationship to magnetic north, so estimate a
+     * yaw alignment from the first meaningful visual/inertial displacement.
+     * Until that alignment exists, no visual point is promoted to the unified
+     * route; this avoids mixing two incompatible coordinate frames.
+     */
+    fun updateVisual(sample: VisualPoseSample): PoseUpdate? {
+        if (!sample.xM.isFinite() || !sample.yM.isFinite() || !sample.zM.isFinite()) return null
+        if (!hasVisual) {
+            hasVisual = true
+            lastVisualX = sample.xM
+            lastVisualY = sample.yM
+            lastVisualZ = sample.zM
+            visualAlignmentPositionX = position[0]
+            visualAlignmentPositionY = position[1]
+            return null
+        }
+
+        val deltaVisualX = sample.xM - lastVisualX
+        val deltaVisualY = sample.yM - lastVisualY
+        val deltaVisualDistance = hypot(deltaVisualX.toDouble(), deltaVisualY.toDouble()).toFloat()
+        visualTravelledM += deltaVisualDistance
+        lastVisualX = sample.xM
+        lastVisualY = sample.yM
+        lastVisualZ = sample.zM
+
+        if (visualYawRadians == null) {
+            val inertialDeltaX = position[0] - visualAlignmentPositionX
+            val inertialDeltaY = position[1] - visualAlignmentPositionY
+            val inertialDistance = hypot(inertialDeltaX.toDouble(), inertialDeltaY.toDouble()).toFloat()
+            if (deltaVisualDistance > 1.2f && inertialDistance > 0.3f) {
+                visualYawRadians = atan2(inertialDeltaY, inertialDeltaX) - atan2(deltaVisualY, deltaVisualX)
+                val rotated = rotateVisual(sample.xM, sample.yM)
+                visualRouteOriginX = position[0] - rotated.first
+                visualRouteOriginY = position[1] - rotated.second
+            }
+        }
+
+        visualYawRadians ?: return null
+        val target = rotateVisual(sample.xM, sample.yM)
+        val targetX = visualRouteOriginX + target.first
+        val targetY = visualRouteOriginY + target.second
+        position[0] += (targetX - position[0]) * 0.58f
+        position[1] += (targetY - position[1]) * 0.58f
+        position[2] += (sample.zM - position[2]) * 0.58f
+        velocity[0] = velocity[0] * 0.42f + (targetX - position[0]) * 0.58f
+        velocity[1] = velocity[1] * 0.42f + (targetY - position[1]) * 0.58f
+
+        return buildUpdate(sample.deviceTimestampNs, force = true, visualAligned = true)
+    }
+
     fun updateImu(timestampNs: Long, worldAcceleration: FloatArray, angularRateMagnitude: Float): PoseUpdate? {
         if (worldAcceleration.size < 3) return null
         if (lastMotionTimestampNs == 0L) {
@@ -165,7 +242,7 @@ class PoseFusionEngine {
         return buildUpdate(timestampNs, force = false)
     }
 
-    private fun buildUpdate(timestampNs: Long, force: Boolean): PoseUpdate? {
+    private fun buildUpdate(timestampNs: Long, force: Boolean, visualAligned: Boolean = false): PoseUpdate? {
         if (!force && timestampNs - lastEmitTimestampNs < 100_000_000L) return null
         lastEmitTimestampNs = timestampNs
         val horizontalSpeed = hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat()
@@ -177,6 +254,14 @@ class PoseFusionEngine {
             else -> "unknown"
         }
         val event = when {
+            visualAligned && !visualLoopCandidateEmitted && visualTravelledM >= 8f
+                && hypot(lastVisualX.toDouble(), lastVisualY.toDouble()) <= 1.5 -> MotionEventSample(
+                eventId = UUID.randomUUID().toString(),
+                deviceTimestampNs = timestampNs,
+                type = "loop-candidate",
+                confidence = 0.68f,
+                details = mapOf("visualTravelledM" to visualTravelledM),
+            ).also { visualLoopCandidateEmitted = true }
             motionMode != lastMotionMode && motionMode == "elevator" -> MotionEventSample(
                 eventId = UUID.randomUUID().toString(),
                 deviceTimestampNs = timestampNs,
@@ -207,13 +292,15 @@ class PoseFusionEngine {
         lastMotionMode = motionMode
 
         val positionMagnitude = magnitude(position)
-        val baseAccuracy = if (hasGnss) lastGnssAccuracyM else 1.5f
-        val driftPenalty = if (hasGnss) 0.02f else 0.08f
+        val baseAccuracy = if (visualAligned) 0.7f else if (hasGnss) lastGnssAccuracyM else 1.5f
+        val driftPenalty = if (visualAligned) 0.01f else if (hasGnss) 0.02f else 0.08f
         val accuracy = (baseAccuracy + positionMagnitude * driftPenalty + if (hasBarometer) 0.3f else 1.2f).coerceAtMost(50f)
         val sourceFlags = buildList {
             add("imu")
             if (hasGnss) add("gnss")
             if (hasBarometer) add("barometer")
+            if (hasVisual) add("visual")
+            if (visualAligned) add("visual-aligned")
         }
         val confidence = (1f - accuracy / 50f).coerceIn(0.05f, 0.98f)
         return PoseUpdate(
@@ -229,12 +316,20 @@ class PoseFusionEngine {
                 verticalAccuracyM = if (hasBarometer) 1.5f else null,
                 confidence = confidence,
                 source = "fused",
+                frame = "local-enu",
                 sourceFlags = sourceFlags,
                 motionMode = motionMode,
                 stationary = stationaryNow,
             ),
             motionEvent = event,
         )
+    }
+
+    private fun rotateVisual(x: Float, y: Float): Pair<Float, Float> {
+        val yaw = visualYawRadians ?: 0f
+        val east = x * cos(yaw) - y * sin(yaw)
+        val north = x * sin(yaw) + y * cos(yaw)
+        return east to north
     }
 
     private fun magnitude(values: FloatArray): Float =

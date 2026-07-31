@@ -2,6 +2,7 @@ package com.puzzlefuzzy.waymemory
 
 import android.Manifest
 import android.app.Application
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -35,6 +36,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.puzzlefuzzy.waymemory.sensing.SensorCollector
@@ -51,6 +54,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent { WayMemoryTheme { SensorScreen(collectorViewModel.collector) } }
     }
+
+    override fun onResume() {
+        super.onResume()
+        collectorViewModel.collector.onHostResume(this)
+    }
+
+    override fun onPause() {
+        collectorViewModel.collector.onHostPause()
+        super.onPause()
+    }
 }
 
 class SensorCollectorViewModel(application: Application) : AndroidViewModel(application) {
@@ -64,6 +77,7 @@ class SensorCollectorViewModel(application: Application) : AndroidViewModel(appl
 
 @Composable
 private fun SensorScreen(collector: SensorCollector) {
+    val hostActivity = LocalContext.current as? Activity
     val state by collector.uiState.collectAsState()
     val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }
@@ -71,7 +85,7 @@ private fun SensorScreen(collector: SensorCollector) {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
         permissionRequested = true
-        collector.start()
+        collector.start(hostActivity)
     }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -106,20 +120,29 @@ private fun SensorScreen(collector: SensorCollector) {
                             style = MaterialTheme.typography.bodySmall,
                         )
                         sync.lastError?.let { Text("同步错误：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                         Text("Pose: ${state.poseText}", style = MaterialTheme.typography.bodySmall)
-                         Text("Motion mode: ${state.motionMode}", style = MaterialTheme.typography.bodySmall)
+                        Text("Pose: ${state.poseText}", style = MaterialTheme.typography.bodySmall)
+                        Text("Motion mode: ${state.motionMode}", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "视觉：${state.visualTracking.detail} · ${state.visualTracking.trackingState}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        AndroidView(
+                            factory = { collector.createVisualView(it) },
+                            modifier = Modifier.fillMaxWidth().height(1.dp),
+                        )
                          Spacer(Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = {
                                 if (state.collecting) {
                                     collector.stop()
-                                } else if (collector.hasPreciseLocationPermission()) {
-                                    collector.start()
+                                } else if (collector.hasPreciseLocationPermission() && collector.hasCameraPermission()) {
+                                    collector.start(hostActivity)
                                 } else {
                                     permissionLauncher.launch(
                                         arrayOf(
                                             Manifest.permission.ACCESS_FINE_LOCATION,
                                             Manifest.permission.ACCESS_COARSE_LOCATION,
+                                            Manifest.permission.CAMERA,
                                         ),
                                     )
                                 }
@@ -131,6 +154,7 @@ private fun SensorScreen(collector: SensorCollector) {
                                         arrayOf(
                                             Manifest.permission.ACCESS_FINE_LOCATION,
                                             Manifest.permission.ACCESS_COARSE_LOCATION,
+                                            Manifest.permission.CAMERA,
                                         ),
                                     )
                                 }) { Text("重新授权") }

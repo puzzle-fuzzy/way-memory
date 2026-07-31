@@ -39,8 +39,8 @@ try {
         type: "samples",
         sessionId: session.sessionId,
         samples: [
-          { deviceTimestampNs: 1, sensorType: "accelerometer", values: [0, 0, 9.8], relativePosition: { xM: 0, yM: 0, zM: 0, accuracyM: 2 }, pose: { deviceTimestampNs: 1, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 2, confidence: 0.9, source: "fused", sourceFlags: ["imu"], motionMode: "stationary", stationary: true } },
-          { deviceTimestampNs: 2, sensorType: "android.sensor.pressure", values: [1013.25], relativePosition: { xM: 0.2, yM: 0.1, zM: 0.05, accuracyM: 2 }, pose: { deviceTimestampNs: 2, xM: 0.2, yM: 0.1, zM: 0.05, velocityXMps: 0.2, velocityYMps: 0.1, velocityZMps: 0, accuracyM: 2.2, confidence: 0.88, source: "fused", sourceFlags: ["imu", "barometer"], motionMode: "walking", stationary: false }, motionEvent: { eventId: "smoke-elevator", deviceTimestampNs: 2, type: "elevator-candidate", confidence: 0.7, details: { barometerVerticalSpeedMps: 0.4 } } },
+          { deviceTimestampNs: 1, sensorType: "accelerometer", values: [0, 0, 9.8], relativePosition: { xM: 0, yM: 0, zM: 0, accuracyM: 2 }, pose: { deviceTimestampNs: 1, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 2, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu"], motionMode: "stationary", stationary: true } },
+          { deviceTimestampNs: 2, sensorType: "android.sensor.pressure", values: [1013.25], relativePosition: { xM: 0.2, yM: 0.1, zM: 0.05, accuracyM: 2 }, pose: { deviceTimestampNs: 2, xM: 0.2, yM: 0.1, zM: 0.05, velocityXMps: 0.2, velocityYMps: 0.1, velocityZMps: 0, accuracyM: 2.2, confidence: 0.88, source: "fused", frame: "local-enu", sourceFlags: ["imu", "barometer"], motionMode: "walking", stationary: false }, motionEvent: { eventId: "smoke-elevator", deviceTimestampNs: 2, type: "elevator-candidate", confidence: 0.7, details: { barometerVerticalSpeedMps: 0.4 } } },
           { deviceTimestampNs: 3, sensorType: "android.sensor.pressure", values: [1012.5] },
           { deviceTimestampNs: 7, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4 } },
           { deviceTimestampNs: 5, sensorType: "location", values: [], location: { lat: 31.2301, lng: 121.4703, accuracyM: 4 } },
@@ -51,7 +51,7 @@ try {
       }));
       const accepted = await waitForMessage(device);
       const updated = await waitForMessage(dashboard);
-      const updatedDelta = updated as { type: string; sampleCount: number; rawSampleCount: number; droppedSampleCount: number; trackPoints: Array<{ deviceTimestampNs?: number; lat: number; lng: number; altitudeM?: number; altitudeSource?: string }>; relativePoints: Array<{ xM: number; yM: number; zM: number }>; posePoints: Array<{ xM: number; yM: number; zM: number; motionMode: string }>; motionEvents: unknown[]; motionMode: string; latestAltitudeM?: number; altitudeSource?: string; latestSensors: unknown[] };
+      const updatedDelta = updated as { type: string; sampleCount: number; rawSampleCount: number; droppedSampleCount: number; trackPoints: Array<{ deviceTimestampNs?: number; lat: number; lng: number; altitudeM?: number; altitudeSource?: string }>; relativePoints: Array<{ xM: number; yM: number; zM: number }>; posePoints: Array<{ xM: number; yM: number; zM: number; motionMode: string; frame?: string }>; motionEvents: unknown[]; motionMode: string; latestAltitudeM?: number; altitudeSource?: string; latestSensors: unknown[] };
       if (
         accepted.type !== "samples.accepted"
         || updatedDelta.type !== "session.delta"
@@ -67,6 +67,7 @@ try {
         || updatedDelta.relativePoints[1].xM !== 0.2
         || updatedDelta.posePoints.length !== 2
         || updatedDelta.posePoints[1].motionMode !== "walking"
+        || updatedDelta.posePoints[1].frame !== "local-enu"
         || updatedDelta.motionEvents.length !== 1
         || updatedDelta.motionMode !== "walking"
         || typeof updatedDelta.trackPoints[0].altitudeM !== "number"

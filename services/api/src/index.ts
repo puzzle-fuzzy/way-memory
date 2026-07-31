@@ -184,6 +184,7 @@ const normalizeRelativePosition = (value: unknown): SensorSample["relativePositi
 
 const motionModes = new Set<MotionMode>(["stationary", "walking", "stairs", "elevator", "vehicle", "unknown"]);
 const poseSources = new Set<PoseEstimate["source"]>(["imu", "gnss", "barometer", "visual", "fused"]);
+const poseFrames = new Set(["local-enu", "arcore-local"]);
 
 const normalizePose = (value: unknown): PoseEstimate | null => {
   if (!isRecord(value)) return null;
@@ -198,6 +199,7 @@ const normalizePose = (value: unknown): PoseEstimate | null => {
   const verticalAccuracyM = value.verticalAccuracyM === undefined ? undefined : finiteNumber(value.verticalAccuracyM);
   const confidence = finiteNumber(value.confidence);
   const source = value.source;
+  const frame = value.frame === undefined ? "local-enu" : value.frame;
   const motionMode = value.motionMode;
   const sourceFlags = value.sourceFlags;
   if (
@@ -207,6 +209,7 @@ const normalizePose = (value: unknown): PoseEstimate | null => {
     || accuracyM === null || accuracyM < 0 || accuracyM > 100_000
     || confidence === null || confidence < 0 || confidence > 1
     || typeof source !== "string" || !poseSources.has(source as PoseEstimate["source"])
+    || typeof frame !== "string" || !poseFrames.has(frame)
     || typeof motionMode !== "string" || !motionModes.has(motionMode as MotionMode)
     || !Array.isArray(sourceFlags) || sourceFlags.length > 16
     || sourceFlags.some((item) => typeof item !== "string" || item.length > 32)
@@ -225,6 +228,7 @@ const normalizePose = (value: unknown): PoseEstimate | null => {
     ...(verticalAccuracyM === undefined || verticalAccuracyM === null ? {} : { verticalAccuracyM }),
     confidence,
     source: source as PoseEstimate["source"],
+    frame: frame as NonNullable<PoseEstimate["frame"]>,
     sourceFlags: sourceFlags as string[],
     motionMode: motionMode as MotionMode,
     stationary: value.stationary,

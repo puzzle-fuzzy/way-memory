@@ -139,6 +139,13 @@ const altitudeSourceLabel = computed(() => {
   return session.value?.altitudeSource === "gnss" ? "GNSS 相对高度" : session.value?.altitudeSource === "barometer" ? "气压计相对高度" : "尚未建立 Z 轴";
 });
 
+const poseFrameLabel = computed(() => {
+  const frame = session.value?.latestPose?.frame;
+  if (frame === "arcore-local") return "ARCore 局部坐标 · 尚未对齐 ENU";
+  if (frame === "local-enu") return "统一局部 ENU 坐标";
+  return "等待坐标参考系";
+});
+
 const confidencePercent = computed(() => {
   const accuracyM = session.value?.latestLocation?.accuracyM;
   if (typeof accuracyM !== "number") return null;
@@ -731,6 +738,7 @@ const activities = computed(() => {
         <div class="flex shrink-0 items-center gap-2 text-[10px] text-muted sm:gap-3">
           <span class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 sm:inline-flex">{{ displayedPointCount }} points · {{ routeDistanceM }}m</span>
            <span class="rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5">{{ motionModeLabel }}</span>
+           <span class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 md:inline-flex">{{ poseFrameLabel }}</span>
            <span class="rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5">{{ closureLabel }}</span>
            <span class="connection-pill"><span :class="['connection-dot', connection === 'connected' ? 'bg-sage' : connection === 'connecting' ? 'bg-amber' : 'bg-ember']" />{{ connectionLabel }}</span>
         </div>

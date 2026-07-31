@@ -1,42 +1,51 @@
-# Pose 融合与路线闭环
+# Pose fusion and route closure
 
-## 当前实现
+## Current implementation
 
-way-memory 的主轨迹现在使用 `PoseEstimate`，不再由网页在 GNSS 和惯性轨迹之间二选一。
+`way-memory` now uses `PoseEstimate` as the primary live route stream. A pose contains:
 
-`PoseEstimate` 包含：
+- session-local `xM / yM / zM` coordinates;
+- three-axis velocity;
+- horizontal and vertical uncertainty;
+- source and source flags;
+- `motionMode`: stationary, walking, stairs, elevator, vehicle, or unknown;
+- a coordinate `frame`: `local-enu` or `arcore-local`.
 
-- 本地 ENU 坐标 `xM / yM / zM`
-- 三轴速度
-- 水平和垂直精度
-- `source` 与 `sourceFlags`
-- `motionMode`：静止、步行、楼梯候选、电梯候选、交通工具或未知
-- `stationary` 静止判断
+Raw sensor samples are still validated by the server and only the latest 1,024 normalized samples are retained per session for short replay. Long-term route storage must use a persistent store rather than process memory.
 
-原始传感器样本仍然经过服务端校验，并按会话保留最近 1024 个样本用于短时回放。服务端内存不会随采集时间无限增长；完整长期存储应在后续接入持久化对象存储时完成。
+## Android fusion inputs
 
-## 闭环规则
+The Android client combines:
 
-服务端记录起始 Pose、累计行进距离和当前 Pose 的三维间隙：
+1. IMU acceleration transformed by the best available rotation vector;
+2. GNSS position and accuracy when precise location is available;
+3. barometric relative altitude and vertical speed;
+4. optional ARCore session-local visual-inertial pose.
 
-- `open`：尚未发现回到起点的证据
-- `candidate`：当前点接近起点，但还没有视觉闭环证据
-- `closed`：未来由视觉/ARCore 提供 `loop-closure` 来源后确认
+The output is an uncertainty-bearing estimate, not a promise of centimeter-level accuracy. IMU double integration is corrected when external observations are available, and stationary periods learn a small acceleration bias.
 
-当前不会为了让图形闭合而移动原始点。这样可以区分真实测量误差和算法修正，后续加入视觉闭环后再生成平滑修正轨迹。
+## ARCore boundary
 
-## 电梯候选
+ARCore 1.54.0 is integrated as an optional feature. It starts only after camera permission, device support, and Google Play Services for AR are available. Unsupported devices continue with GNSS, IMU, and barometer.
 
-Android 端结合气压垂直速度、水平速度和运动状态生成 `elevator-candidate` 与 `elevator-exit` 事件。它表达的是“疑似电梯段”，不是绝对楼层结论。气压受天气、空调和建筑气流影响，楼层确认需要 ARCore 视觉、楼层标识识别或路线人工标注共同确认。
+ARCore uses a session-local metric frame. The adapter converts `+X right, +Y up, -Z forward` into the display frame `X right, Y forward, Z up`. It waits for meaningful visual and inertial displacement before estimating horizontal alignment. Samples before alignment remain diagnostic and are not promoted into the unified route. Promoted poses carry `visual` and `visual-aligned` source flags.
 
-## 后续接入 ARCore
+The server defaults legacy payloads without `frame` to `local-enu`. The web console shows the active coordinate reference so an ARCore local pose cannot silently be mistaken for a geographic coordinate.
 
-ARCore 作为新的视觉 Pose 来源接入，不改变网络协议。接入后需要：
+## Loop closure
 
-1. 在支持的设备上启动相机位姿采集。
-2. 将 ARCore 相对 Pose 转换到会话 ENU 坐标。
-3. 用视觉位姿校正 IMU 漂移。
-4. 用视觉环境特征确认回到已访问地点。
-5. 通过 Pose Graph 生成平滑闭环轨迹，原始数据保持不变。
+The server keeps three closure states:
 
-摄像头被遮挡、低光、无纹理墙面或应用退到后台时，系统必须降低定位置信度，不能继续输出看似精确的路线。
+- `open`: there is no evidence of returning to the start;
+- `candidate`: the current pose is close to the start after enough travel, but there is no visual place evidence;
+- `closed`: a trusted visual loop-closure source authorizes correction.
+
+The current Android client emits `loop-candidate` when the aligned ARCore track returns near its visual origin. It does not move the original point or rewrite raw samples. A later place-recognition or pose-graph stage may turn that candidate into a corrected route while preserving the original measurement track.
+
+## Elevator and stairs
+
+Pressure vertical speed, horizontal speed, and motion state can emit `elevator-candidate` and `elevator-exit`. Weather, air conditioning, and building airflow make pressure alone insufficient for floor confirmation. Floor transitions need visual structure, a floor plan/annotation, or explicit user confirmation. Stairs should be inferred from repeated vertical steps and walking cadence, not from a single pressure spike.
+
+## Failure policy
+
+Camera occlusion, low light, textureless surfaces, background restrictions, or missing ARCore must lower confidence and expose the active source. The system must not continue drawing a visually precise path after its uncertainty has exceeded the route's acceptance threshold.

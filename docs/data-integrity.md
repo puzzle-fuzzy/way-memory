@@ -12,6 +12,7 @@ The live route is built from the `poseTrack` array returned by the API. The web 
 - `sampleCount` counts all accepted sensor samples. The `track` length counts only accepted samples that contain a latitude/longitude pair; accelerometer, gyroscope, and rotation-vector samples are not position points.
 - `rawSampleCount` counts normalized samples accepted into the bounded replay ring. The `/api/sessions/:id/raw` endpoint exposes only the retained tail, never an unbounded history.
 - `poseTrack` counts unified fused-pose points in local ENU meters. Each Pose includes source flags, accuracy, velocity, motion mode and stationary state.
+- Each Pose may carry a `frame`: `local-enu` for the unified route frame or `arcore-local` for raw session-local visual coordinates. Legacy payloads default to `local-enu`; Android promotes ARCore samples only after horizontal frame alignment.
 - `relativeTrack` counts legacy device-side sensor-fusion motion points. These are local meters from the session origin, not geographic coordinates; the web console uses them only when no unified Pose stream exists.
 
 ## Filtering and 3D data

@@ -1,6 +1,7 @@
 package com.puzzlefuzzy.waymemory.sensing
 
 import android.Manifest
+import android.app.Activity
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
@@ -28,6 +29,11 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val readings = linkedMapOf<String, SensorReading>()
     private val uploader = SessionUploader()
     private val poseFusion = PoseFusionEngine()
+    private val visualCollector = ArCorePoseCollector(
+        appContext = appContext,
+        onPose = ::onVisualPose,
+        onStatus = ::onVisualStatus,
+    )
     private var lastPublishedLocation: Location? = null
     private val rotationMatrix = FloatArray(9)
     private val gravity = FloatArray(3)
@@ -55,7 +61,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         Manifest.permission.ACCESS_COARSE_LOCATION,
     ) == PackageManager.PERMISSION_GRANTED
 
-    fun start() {
+    fun start(activity: Activity? = null) {
         if (state.value.collecting) return
 
         readings.clear()
@@ -81,6 +87,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         )
 
         uploader.start(Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device")
+        activity?.let(visualCollector::start)
 
         if (hasPreciseLocationPermission()) requestLocationUpdates()
         else updateError("请允许精确位置权限，近似位置无法建立可靠行走轨迹")
@@ -91,6 +98,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         locationManager.removeUpdates(this)
         lastPublishedLocation = null
         resetMotionState()
+        visualCollector.stop()
         uploader.stop()
         state.value = state.value.copy(collecting = false)
     }
@@ -199,6 +207,40 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             motionMode = pose.motionMode,
             poseAccuracyM = pose.accuracyM,
         )
+    }
+
+    fun createVisualView(context: Context) = visualCollector.createView(context)
+
+    fun onHostResume(activity: Activity) {
+        if (state.value.collecting) visualCollector.onHostResume(activity)
+    }
+
+    fun onHostPause() {
+        visualCollector.onHostPause()
+    }
+
+    fun hasCameraPermission(): Boolean = ContextCompat.checkSelfPermission(
+        appContext,
+        Manifest.permission.CAMERA,
+    ) == PackageManager.PERMISSION_GRANTED
+
+    private fun onVisualStatus(status: VisualTrackingStatus) {
+        state.value = state.value.copy(visualTracking = status)
+    }
+
+    private fun onVisualPose(sample: VisualPoseSample) {
+        val poseUpdate = poseFusion.updateVisual(sample)
+        uploader.enqueue(
+            CollectedSample(
+                deviceTimestampNs = sample.deviceTimestampNs,
+                sensorType = "arcore.visual-pose",
+                values = listOf(sample.xM, sample.yM, sample.zM),
+                accuracy = sample.accuracyM,
+                pose = poseUpdate?.pose,
+                motionEvent = poseUpdate?.motionEvent,
+            ),
+        )
+        poseUpdate?.let(::publishPose)
     }
 
     private fun publishSample() {

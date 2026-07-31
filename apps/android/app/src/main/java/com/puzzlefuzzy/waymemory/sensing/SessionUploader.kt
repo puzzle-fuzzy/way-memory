@@ -59,6 +59,7 @@ data class PoseEstimateSample(
     val verticalAccuracyM: Float? = null,
     val confidence: Float,
     val source: String,
+    val frame: String = "local-enu",
     val sourceFlags: List<String>,
     val motionMode: String,
     val stationary: Boolean,
@@ -218,6 +219,7 @@ class SessionUploader(
                 it.verticalAccuracyM?.let { value -> put("verticalAccuracyM", value) }
                 put("confidence", it.confidence)
                 put("source", it.source)
+                put("frame", it.frame)
                 put("sourceFlags", JSONArray(it.sourceFlags))
                 put("motionMode", it.motionMode)
                 put("stationary", it.stationary)

@@ -74,6 +74,7 @@ export type MotionMode =
   | "unknown";
 
 export type PoseSource = "imu" | "gnss" | "barometer" | "visual" | "fused";
+export type PoseFrame = "local-enu" | "arcore-local";
 
 /**
  * The only trajectory point the product is allowed to use as its primary
@@ -91,6 +92,7 @@ export interface PoseEstimate {
   verticalAccuracyM?: number;
   confidence: number;
   source: PoseSource;
+  frame?: PoseFrame;
   sourceFlags: string[];
   motionMode: MotionMode;
   stationary: boolean;
