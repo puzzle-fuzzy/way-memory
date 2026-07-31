@@ -82,6 +82,11 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         return saved
     }
 
+    fun exchangePairingCode(code: String): Boolean {
+        val token = uploader.exchangeEnrollmentCode(code) ?: return false
+        return saveDeviceCredential(token)
+    }
+
     fun clearDeviceCredential() {
         credentialStore.clear()
         state.value = state.value.copy(deviceCredentialConfigured = false)

@@ -23,9 +23,16 @@ export interface IssuedAccessToken {
   expiresAt: string;
 }
 
+export interface EnrollmentCode {
+  code: string;
+  expiresAt: string;
+}
+
 const ACCESS_TOKEN_TTL_MS = 180 * 24 * 60 * 60 * 1_000;
 const WS_TICKET_TTL_MS = 60 * 1_000;
+const ENROLLMENT_CODE_TTL_MS = 10 * 60 * 1_000;
 const MAX_AUTH_TOKENS = 10_000;
+const ENROLLMENT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 const hashSecret = async (secret: string) => {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
@@ -33,6 +40,15 @@ const hashSecret = async (secret: string) => {
 };
 
 const randomSecret = (prefix: string) => `${prefix}${crypto.randomUUID()}${crypto.randomUUID()}`;
+
+const normalizeEnrollmentCode = (code: string) => code.trim().toUpperCase().replace(/[\s-]/g, "");
+
+const randomEnrollmentCode = () => {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  const characters = [...bytes].map((byte) => ENROLLMENT_ALPHABET[byte % ENROLLMENT_ALPHABET.length]).join("");
+  return `WM-${characters.slice(0, 4)}-${characters.slice(4, 8)}-${characters.slice(8, 12)}`;
+};
 
 export class AuthStore {
   private readonly database: Database;
@@ -52,6 +68,16 @@ export class AuthStore {
       );
       CREATE INDEX IF NOT EXISTS auth_tokens_lookup
         ON auth_tokens(token_hash, revoked_at, expires_at);
+      CREATE TABLE IF NOT EXISTS auth_enrollment_codes (
+        code_hash TEXT PRIMARY KEY,
+        enrollment_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        consumed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS auth_enrollment_codes_expiry
+        ON auth_enrollment_codes(expires_at, consumed_at);
       CREATE TABLE IF NOT EXISTS auth_metadata (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -79,6 +105,51 @@ export class AuthStore {
     const expiresAt = Date.now() + ACCESS_TOKEN_TTL_MS;
     await this.insertToken(token, ownerId, role, "access", ACCESS_TOKEN_TTL_MS, tokenId);
     return { tokenId, token, expiresAt: new Date(expiresAt).toISOString() };
+  }
+
+  async createEnrollmentCode(ownerId: string): Promise<EnrollmentCode> {
+    const code = randomEnrollmentCode();
+    const expiresAt = Date.now() + ENROLLMENT_CODE_TTL_MS;
+    this.prune();
+    this.database.query(`
+      INSERT INTO auth_enrollment_codes(code_hash, enrollment_id, owner_id, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(await hashSecret(normalizeEnrollmentCode(code)), crypto.randomUUID(), ownerId, Date.now(), expiresAt);
+    return { code, expiresAt: new Date(expiresAt).toISOString() };
+  }
+
+  async consumeEnrollmentCode(input: string): Promise<(IssuedAccessToken & { ownerId: string }) | null> {
+    const normalizedCode = normalizeEnrollmentCode(input);
+    if (!normalizedCode || normalizedCode.length > 64) return null;
+    const codeHash = await hashSecret(normalizedCode);
+    const row = this.database.query(`
+      SELECT owner_id
+      FROM auth_enrollment_codes
+      WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ?
+    `).get(codeHash, Date.now()) as { owner_id: string } | null;
+    if (!row) return null;
+
+    const token = randomSecret("wm_device_");
+    const tokenId = crypto.randomUUID();
+    const createdAt = Date.now();
+    const expiresAt = createdAt + ACCESS_TOKEN_TTL_MS;
+    const tokenHash = await hashSecret(token);
+    this.prune();
+    const consume = this.database.transaction(() => {
+      const consumed = this.database.query(`
+        UPDATE auth_enrollment_codes
+        SET consumed_at = ?
+        WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ?
+      `).run(createdAt, codeHash, createdAt);
+      if (consumed.changes !== 1) return false;
+      this.database.query(`
+        INSERT INTO auth_tokens(token_hash, token_id, owner_id, role, kind, created_at, expires_at)
+        VALUES (?, ?, ?, 'device', 'access', ?, ?)
+      `).run(tokenHash, tokenId, row.owner_id, createdAt, expiresAt);
+      return true;
+    });
+    if (!consume()) return null;
+    return { ownerId: row.owner_id, tokenId, token, expiresAt: new Date(expiresAt).toISOString() };
   }
 
   listAccessTokens(ownerId: string, role: AuthRole = "device") {
@@ -158,6 +229,7 @@ export class AuthStore {
   private prune() {
     const now = Date.now();
     this.database.query("DELETE FROM auth_tokens WHERE expires_at <= ? OR revoked_at IS NOT NULL").run(now);
+    this.database.query("DELETE FROM auth_enrollment_codes WHERE expires_at <= ? OR consumed_at IS NOT NULL").run(now);
     const count = (this.database.query("SELECT COUNT(*) AS count FROM auth_tokens").get() as { count: number }).count;
     if (count > MAX_AUTH_TOKENS) {
       this.database.query(`

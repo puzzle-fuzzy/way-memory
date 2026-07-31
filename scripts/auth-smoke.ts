@@ -76,6 +76,12 @@ try {
   if (revoked.response.status !== 200) throw new Error("device revoke failed");
   const revokedDeviceTicket = await json("/api/auth/ws-ticket", { method: "POST", headers: authHeaders(enrolled.body.deviceToken) });
   if (revokedDeviceTicket.response.status !== 401) throw new Error("revoked device token remained usable");
+  const pairing = await json("/api/auth/enrollments", { method: "POST", headers: authHeaders(dashboardToken) });
+  if (pairing.response.status !== 201 || typeof pairing.body.code !== "string" || !/^WM-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(pairing.body.code)) throw new Error("device pairing code creation failed");
+  const paired = await json("/api/auth/enrollments/consume", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: pairing.body.code }) });
+  if (paired.response.status !== 201 || !paired.body.deviceToken || !paired.body.tokenId || paired.body.ownerId !== ownerId) throw new Error(`device pairing exchange failed: ${JSON.stringify(paired.body)}`);
+  const reusedPairing = await json("/api/auth/enrollments/consume", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: pairing.body.code }) });
+  if (reusedPairing.response.status !== 401) throw new Error("device pairing code was reusable");
   const dashboardTicketResponse = await json("/api/auth/ws-ticket", { method: "POST", headers: authHeaders(dashboardToken) });
   const deviceTicketResponse = await json("/api/auth/ws-ticket", { method: "POST", headers: authHeaders(deviceToken) });
   if (dashboardTicketResponse.response.status !== 200 || deviceTicketResponse.response.status !== 200) throw new Error("WebSocket ticket issuance failed");

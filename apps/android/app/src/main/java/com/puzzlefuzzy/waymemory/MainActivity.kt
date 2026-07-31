@@ -34,6 +34,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.puzzlefuzzy.waymemory.sensing.SensorCollector
 import com.puzzlefuzzy.waymemory.sensing.SensorState
 import com.puzzlefuzzy.waymemory.ui.theme.WayMemoryTheme
@@ -93,6 +97,10 @@ private fun SensorScreen(collector: SensorCollector) {
     val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }
     var deviceToken by remember { mutableStateOf(collector.deviceCredential().orEmpty()) }
+    var pairingCode by remember { mutableStateOf("") }
+    var pairingError by remember { mutableStateOf<String?>(null) }
+    var pairingBusy by remember { mutableStateOf(false) }
+    val pairingScope = rememberCoroutineScope()
     var navigationHandoffToken by remember { mutableStateOf("") }
     fun startCapture() {
         if (!collector.hasPreciseLocationPermission()) return
@@ -111,6 +119,21 @@ private fun SensorScreen(collector: SensorCollector) {
     fun stopCapture() {
         collector.stop()
         context.stopService(Intent(context, CaptureForegroundService::class.java))
+    }
+    fun pairDevice() {
+        if (pairingCode.trim().isEmpty() || pairingBusy) return
+        pairingBusy = true
+        pairingError = null
+        pairingScope.launch {
+            val paired = withContext(Dispatchers.IO) { collector.exchangePairingCode(pairingCode) }
+            pairingBusy = false
+            if (paired) {
+                pairingCode = ""
+                deviceToken = collector.deviceCredential().orEmpty()
+            } else {
+                pairingError = "配对码无效、已过期或网络不可用"
+            }
+        }
     }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -160,12 +183,26 @@ private fun SensorScreen(collector: SensorCollector) {
                             style = MaterialTheme.typography.bodySmall,
                         )
                         OutlinedTextField(
+                            value = pairingCode,
+                            onValueChange = { pairingCode = it.take(32) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("一次性设备配对码") },
+                            placeholder = { Text("从网页复制 10 分钟有效的 WM 配对码") },
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Button(onClick = ::pairDevice, enabled = pairingCode.isNotBlank() && !pairingBusy && !state.collecting) {
+                                Text(if (pairingBusy) "配对中…" else "完成设备配对")
+                            }
+                            pairingError?.let { Text("  $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        }
+                        OutlinedTextField(
                             value = deviceToken,
                             onValueChange = { deviceToken = it.take(512) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
-                            label = { Text("生产设备访问凭据") },
-                            placeholder = { Text("粘贴服务端生成的 device token") },
+                            label = { Text("兼容模式：长期 device token") },
+                            placeholder = { Text("仅用于旧版服务端或诊断，不建议手工复制") },
                             visualTransformation = PasswordVisualTransformation(),
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {

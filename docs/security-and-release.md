@@ -15,7 +15,7 @@ The API now has an opt-in enforced authorization mode for the single-node MVP. S
 - A dashboard can export its own bounded session snapshot and retained raw replay through `GET /api/sessions/<id>/export`. It can delete a stopped session through `DELETE /api/sessions/<id>`; active sessions are rejected, and a session already attached to a route must be removed from that route first so derived route data is not silently left behind.
 - `bun run smoke:auth` exercises the unauthorized, bootstrap, owner binding, role separation, ticket, rotation, and in-memory deletion/export paths. `bun run smoke:lifecycle` repeats the export, route-attachment guard, deletion, and post-restart deletion check against SQLite.
 
-The Android client now encrypts the device token with an Android Keystore-backed AES-GCM key and exchanges it for a short-lived WebSocket ticket before connecting. It still needs a user-facing enrollment handoff and the dashboard sign-in screen before enabling it for real users; copying a token through the current diagnostic field is an acceptance bridge, not the final onboarding UX.
+The Android client now exchanges a ten-minute dashboard-generated pairing code over HTTPS, encrypts the resulting device token with an Android Keystore-backed AES-GCM key, and exchanges that token for a short-lived WebSocket ticket before connecting. The dashboard sign-in and pairing-code flow are implemented; the long-term token field remains a legacy acceptance bridge, not the normal onboarding path.
 
 Verified-route navigation now has a separate one-time handoff boundary. The dashboard receives a five-minute route code, the API stores only its SHA-256 hash, and the device consumes it atomically during `session.start`. The code is owner-scoped and does not replace the device token, expose a route list, or authorize raw replay. It is suitable for software-only field testing, but the final product still needs a polished authenticated enrollment and accessibility flow.
 
@@ -30,7 +30,7 @@ Verified-route navigation now has a separate one-time handoff boundary. The dash
 
 2. **User and device authorization**
    - Add an account/session identity before exposing the session list.
-   - Register a phone to a user through a one-time enrollment flow; do not identify a device by `ANDROID_ID` alone.
+   - Register a phone to a user through the one-time enrollment-code flow; do not identify a device by `ANDROID_ID` alone.
    - Store the device credential in Android Keystore-backed storage and rotate/revoke it.
    - Authorize every session, route, raw replay, annotation, and export by owner/role. A session ID is not a credential.
 

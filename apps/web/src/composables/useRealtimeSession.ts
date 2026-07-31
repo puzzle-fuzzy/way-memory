@@ -233,7 +233,7 @@ export function useRealtimeSession() {
   }
 
   async function enrollDevice() {
-    const response = await fetch(endpoint("/api/auth/devices"), {
+    const response = await fetch(endpoint("/api/auth/enrollments"), {
       method: "POST",
       headers: { ...requestHeaders(), "content-type": "application/json" },
       body: "{}",
@@ -243,7 +243,7 @@ export function useRealtimeSession() {
       throw new Error("dashboard authorization expired");
     }
     if (!response.ok) throw new Error(`API ${response.status}`);
-    return await response.json() as { ownerId: string; tokenId: string; deviceToken: string; expiresAt: string };
+    return await response.json() as { code: string; expiresAt: string };
   }
 
   onUnmounted(() => {

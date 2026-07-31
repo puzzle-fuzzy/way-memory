@@ -36,13 +36,14 @@ The response contains one `deviceToken` and one `dashboardToken`. Store them in 
 
 ## Client handoff
 
-- After dashboard authentication, `POST /api/auth/devices` issues a new one-time device token for the same owner. `GET /api/auth/devices` lists only token metadata, never token plaintext; `POST /api/auth/devices/<tokenId>/revoke` revokes a device without exposing its credential.
-- Paste `deviceToken` into the Android diagnostic credential field. The app encrypts it with Android Keystore and only uses it to obtain a short-lived WebSocket ticket.
+- After dashboard authentication, `POST /api/auth/devices` remains available for operator rotation and legacy diagnostics. `GET /api/auth/devices` lists only token metadata, never token plaintext; `POST /api/auth/devices/<tokenId>/revoke` revokes a device without exposing its credential.
+- Prefer `POST /api/auth/enrollments`: the dashboard displays a ten-minute one-time pairing code, and Android exchanges it over HTTPS before encrypting the returned device credential with Android Keystore. The long-lived device token is not rendered by the web client.
 - Paste `dashboardToken` into the web console when the protected-service prompt appears. The web console keeps it in the current browser session and sends it only over HTTPS to obtain a ticket; it is not part of the Vite build output.
 - The device role can start/resume/write its own sessions. The dashboard role can list/read/raw-replay sessions for the same owner but cannot write sensor samples.
+- A dashboard can create a ten-minute, one-time text enrollment code with `POST /api/auth/enrollments`. The Android app exchanges it once through `POST /api/auth/enrollments/consume`; only the resulting long-lived device credential is stored in Android Keystore. The code is not a route marker and does not require a QR sticker, NFC tag, or other fixed hardware.
 - Rotate a token with `POST /api/auth/rotate` and revoke it with `POST /api/auth/revoke`, both using the current bearer token. A rotated token invalidates the previous token immediately.
 
-The current Android token field is an acceptance bridge. The production enrollment UX still needs a controlled one-time handoff (for example, an authenticated dashboard enrollment action), plus a device revoke/delete flow before release.
+The Android long-term token field remains an acceptance bridge for legacy operators. The normal enrollment path is the short one-time pairing code; device credentials remain revocable from the dashboard.
 
 ## Verified-route navigation handoff
 

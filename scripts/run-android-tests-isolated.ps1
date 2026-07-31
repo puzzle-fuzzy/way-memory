@@ -1,3 +1,7 @@
+param(
+    [switch]$Full
+)
+
 $ErrorActionPreference = "Stop"
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -38,8 +42,17 @@ try {
     try {
         Push-Location (Join-Path $repo "apps\android")
         try {
-            & .\gradlew.bat :app:testDebugUnitTest --offline --no-daemon --no-parallel
-            if ($LASTEXITCODE -ne 0) { throw "Android unit tests failed with exit code $LASTEXITCODE" }
+            $gradleTasks = @(":app:testDebugUnitTest")
+            if ($Full) {
+                $gradleTasks += @(
+                    ":app:connectedDebugAndroidTest",
+                    ":app:assembleRelease",
+                    "-PwayMemoryApiUrl=https://way-memory.yxswy.com",
+                    "--rerun-tasks"
+                )
+            }
+            & .\gradlew.bat @gradleTasks --offline --no-daemon --no-parallel
+            if ($LASTEXITCODE -ne 0) { throw "Android verification failed with exit code $LASTEXITCODE" }
         } finally {
             Pop-Location
         }

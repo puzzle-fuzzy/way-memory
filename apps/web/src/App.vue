@@ -7,7 +7,7 @@ import { useRoutes } from "./composables/useRoutes";
 const { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, followLatest, setAuthToken, enrollDevice } = useRealtimeSession();
 const { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute, createNavigationHandoff } = useRoutes();
 const dashboardToken = ref("");
-const newDeviceToken = ref("");
+const newEnrollmentCode = ref("");
 const enrollmentError = ref("");
 const enrollmentBusy = ref(false);
 const selectedRouteId = ref("");
@@ -21,7 +21,7 @@ async function createDeviceCredential() {
   enrollmentBusy.value = true;
   enrollmentError.value = "";
   try {
-    newDeviceToken.value = (await enrollDevice()).deviceToken;
+    newEnrollmentCode.value = (await enrollDevice()).code;
   } catch (error) {
     enrollmentError.value = error instanceof Error ? error.message : "设备 enrollment 失败";
   } finally {
@@ -863,7 +863,7 @@ const activities = computed(() => {
           <button v-if="selectedRoute && session?.status === 'stopped'" class="rounded-full border border-[#cddbd1] bg-white/80 px-3 py-1.5 text-muted disabled:cursor-not-allowed disabled:opacity-50" type="button" :disabled="routeBusy" @click="bindCurrentObservation">绑定当前记录</button>
           <button v-if="selectedRoute && selectedRoute.status === 'draft'" class="rounded-full bg-ink px-3 py-1.5 text-paper disabled:cursor-not-allowed disabled:opacity-50" type="button" :disabled="routeBusy" @click="verifySelectedRoute">发布验证</button>
         </template>
-        <button v-if="authenticated" class="rounded-full border border-[#cddbd1] bg-white/80 px-3 py-1.5 text-muted" type="button" :disabled="enrollmentBusy" @click="createDeviceCredential">{{ enrollmentBusy ? "生成中" : "生成设备凭据" }}</button>
+        <button v-if="authenticated" class="rounded-full border border-[#cddbd1] bg-white/80 px-3 py-1.5 text-muted" type="button" :disabled="enrollmentBusy" @click="createDeviceCredential">{{ enrollmentBusy ? "生成中" : "生成配对码" }}</button>
       </div>
       <div v-if="routeManagementAvailable && (routeActionError || routeError)" class="z-10 border-b border-[#ead7bf] bg-[#fff8ee] px-4 py-1.5 text-[10px] text-[#8c6845] sm:px-7">路线工作区：{{ routeActionError || routeError }}</div>
 
@@ -872,9 +872,9 @@ const activities = computed(() => {
         <input v-model="dashboardToken" class="min-w-[240px] flex-1 rounded-full border border-[#e3c9a7] bg-white px-3 py-2 font-mono text-[10px] outline-none" type="password" autocomplete="off" placeholder="dashboard token" @keyup.enter="setAuthToken(dashboardToken)" />
         <button class="rounded-full bg-ink px-4 py-2 text-[10px] text-paper" type="button" @click="setAuthToken(dashboardToken)">安全连接</button>
       </div>
-      <div v-if="newDeviceToken || enrollmentError" class="z-10 flex flex-wrap items-center gap-3 border-b border-[#d7e4db] bg-[#f3f8f3] px-4 py-3 text-xs text-[#4d715c] sm:px-7">
-        <span v-if="newDeviceToken">请立即复制 device token 到 Android；它只在这里明文显示一次：</span>
-        <input v-if="newDeviceToken" :value="newDeviceToken" readonly class="min-w-[280px] flex-1 rounded-full border border-[#c9ddce] bg-white px-3 py-2 font-mono text-[10px] text-ink" type="text" />
+      <div v-if="newEnrollmentCode || enrollmentError" class="z-10 flex flex-wrap items-center gap-3 border-b border-[#d7e4db] bg-[#f3f8f3] px-4 py-3 text-xs text-[#4d715c] sm:px-7">
+        <span v-if="newEnrollmentCode">请将 10 分钟有效的一次性设备配对码输入到 Android；长期 device token 不会在网页中显示：</span>
+        <input v-if="newEnrollmentCode" :value="newEnrollmentCode" readonly class="min-w-[280px] flex-1 rounded-full border border-[#c9ddce] bg-white px-3 py-2 font-mono text-[10px] text-ink" type="text" />
         <span v-if="enrollmentError" class="text-ember">{{ enrollmentError }}</span>
       </div>
 

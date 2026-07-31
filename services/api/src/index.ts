@@ -1377,7 +1377,7 @@ const server = Bun.serve<RealtimeClient>({
       });
       return upgraded ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
     }
-    if (request.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, x-way-memory-bootstrap", "access-control-allow-methods": "GET,POST,OPTIONS" } });
+    if (request.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, x-way-memory-bootstrap", "access-control-allow-methods": "GET,POST,DELETE,OPTIONS" } });
     if (url.pathname === "/health" || url.pathname === "/api/health") {
       return json({ ok: true, service: "way-memory-api", time: new Date().toISOString() });
     }
@@ -1418,6 +1418,20 @@ const server = Bun.serve<RealtimeClient>({
       }
       const issued = await authStore.issueAccessToken(principal.ownerId, "device");
       return json({ ownerId: principal.ownerId, tokenId: issued.tokenId, deviceToken: issued.token, expiresAt: issued.expiresAt }, { status: 201 });
+    }
+    if (url.pathname === "/api/auth/enrollments" && request.method === "POST") {
+      if (authMode !== "enforced") return json({ error: "auth_disabled" }, { status: 404 });
+      const principal = await authStore.authenticate(bearerToken(request), "dashboard");
+      if (!principal) return json({ error: "unauthorized" }, { status: 401 });
+      return json(await authStore.createEnrollmentCode(principal.ownerId), { status: 201, headers: { "cache-control": "no-store" } });
+    }
+    if (url.pathname === "/api/auth/enrollments/consume" && request.method === "POST") {
+      if (authMode !== "enforced") return json({ error: "auth_disabled" }, { status: 404 });
+      const body = await parseJson<{ code?: unknown }>(request);
+      const code = typeof body?.code === "string" ? body.code : "";
+      const issued = await authStore.consumeEnrollmentCode(code);
+      if (!issued) return json({ error: "invalid_or_expired_enrollment_code" }, { status: 401 });
+      return json({ ownerId: issued.ownerId, tokenId: issued.tokenId, deviceToken: issued.token, expiresAt: issued.expiresAt }, { status: 201, headers: { "cache-control": "no-store" } });
     }
     const revokeDeviceMatch = url.pathname.match(/^\/api\/auth\/devices\/([^/]+)\/revoke$/);
     if (revokeDeviceMatch && request.method === "POST") {

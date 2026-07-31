@@ -386,6 +386,25 @@ class SessionUploader(
         }
     }
 
+    fun exchangeEnrollmentCode(code: String): String? {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/auth/enrollments/consume")
+            .post(okhttp3.RequestBody.create(null, JSONObject().put("code", code.trim()).toString()))
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    state.update { current -> current.copy(lastError = "设备配对失败：HTTP ${response.code}") }
+                    return@use null
+                }
+                response.body?.string()?.let { JSONObject(it).optString("deviceToken").takeIf(String::isNotBlank) }
+            }
+        }.getOrElse {
+            state.update { current -> current.copy(lastError = "无法连接服务端完成设备配对") }
+            null
+        }
+    }
+
     override fun onOpen(webSocket: WebSocket, response: Response) {
         if (!running) {
             webSocket.close(1000, "session stopped")
