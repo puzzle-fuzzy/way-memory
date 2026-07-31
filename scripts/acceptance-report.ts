@@ -41,6 +41,36 @@ try {
   const motionModes = [...new Set(poses.map((pose) => pose.motionMode).filter((item): item is string => typeof item === "string"))].sort();
   const eventTypes = [...new Set(motionEvents.map((event) => event.type).filter((item): item is string => typeof item === "string"))].sort();
   const rawSensorTypes = [...new Set(rawSamples.map((sample) => sample.sensorType).filter((item): item is string => typeof item === "string"))].sort();
+  const rawSensorTypeCounts = Object.fromEntries(rawSamples.reduce((counts, sample) => {
+    if (typeof sample.sensorType === "string") counts.set(sample.sensorType, (counts.get(sample.sensorType) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>()));
+  const poseTimestamps = poses
+    .map((pose) => pose.deviceTimestampNs)
+    .filter((timestamp): timestamp is number => typeof timestamp === "number" && Number.isSafeInteger(timestamp) && timestamp > 0);
+  const poseTimestampMonotonic = poseTimestamps.length === poses.length
+    && poseTimestamps.every((timestamp, index) => index === 0 || timestamp >= poseTimestamps[index - 1]);
+  const latestPoseTimestampNs = poseTimestamps.length ? Math.max(...poseTimestamps) : null;
+  const poseSourceCounts = poses.reduce((counts, pose) => {
+    if (Array.isArray(pose.sourceFlags)) {
+      for (const flag of pose.sourceFlags) {
+        if (typeof flag === "string") counts[flag] = (counts[flag] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, {} as Record<string, number>);
+  const sourceLastTimestampNs = poses.reduce((latest, pose) => {
+    const timestamp = pose.deviceTimestampNs;
+    if (!Number.isSafeInteger(timestamp) || timestamp <= 0 || !Array.isArray(pose.sourceFlags)) return latest;
+    for (const flag of pose.sourceFlags) {
+      if (typeof flag === "string") latest[flag] = Math.max(latest[flag] ?? 0, timestamp);
+    }
+    return latest;
+  }, {} as Record<string, number>);
+  const sourceAgeSeconds = Object.fromEntries(Object.entries(sourceLastTimestampNs).map(([source, timestamp]) => [
+    source,
+    latestPoseTimestampNs === null ? null : Number(((latestPoseTimestampNs - timestamp) / 1_000_000_000).toFixed(3)),
+  ]));
   const axes = {
     xM: rangeFor(finiteNumbers(poses.map((pose) => pose.xM))),
     yM: rangeFor(finiteNumbers(poses.map((pose) => pose.yM))),
@@ -67,6 +97,7 @@ try {
     sensorTransportBudget: transportBudgetSensors === registeredSensors && registeredSensors > 0,
     rawReplayBounded: rawSamples.length > 0 && rawSamples.length <= 1024 && Number(session.rawSampleCount ?? 0) <= 1024,
     poseStream: poses.length > 0,
+    poseTimestampMonotonic,
     threeAxisMovement: axes.xM.span >= minimumAxisM && axes.yM.span >= minimumAxisM && axes.zM.span >= minimumAxisM,
     rotationSensorEvidence: hasGyroscopeSample || hasRotationSample,
     rotationTranslationBounded: maximumPoseTranslationSpan <= maximumRotationTranslationM,
@@ -75,7 +106,7 @@ try {
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
   };
   const caseChecks: Record<string, boolean> = {
-    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.sampleIdsUniqueInReplay && checks.serverBounds,
+    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.serverBounds,
     "3d": checks.poseStream && checks.threeAxisMovement,
     rotation: checks.rotationSensorEvidence && checks.rotationTranslationBounded,
     loop: checks.closureConsistent && closure.status === "closed" && closure.adjusted === true && corrected.length > 0,
@@ -101,9 +132,18 @@ try {
       dropped: session.droppedSampleCount ?? 0,
     },
     axes,
+    pose: {
+      firstTimestampNs: poseTimestamps[0] ?? null,
+      lastTimestampNs: poseTimestamps.at(-1) ?? null,
+      spanSeconds: poseTimestamps.length > 1 ? Number(((poseTimestamps.at(-1)! - poseTimestamps[0]) / 1_000_000_000).toFixed(3)) : 0,
+      timestampMonotonic: poseTimestampMonotonic,
+      sourceCounts: poseSourceCounts,
+      sourceAgeSeconds,
+    },
     motionModes,
     eventTypes,
     rawSensorTypes,
+    rawSensorTypeCounts,
     rotation: {
       hasGyroscopeSample,
       hasRotationSample,

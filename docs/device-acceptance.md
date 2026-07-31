@@ -73,7 +73,8 @@ Record at minimum:
 
 - `sampleCount`, `rawSampleCount`, `droppedSampleCount`;
 - `poseTrack` count and the min/max of `xM`, `yM`, `zM`;
-- `sourceFlags`, `frame`, `motionMode`, and `motionEvents`;
+- Pose timestamp monotonicity, time span, per-source counts and source age;
+- raw sensor type counts, `sourceFlags`, `frame`, `motionMode`, and `motionEvents`;
 - `closure.status`, `closure.adjusted`, and whether `correctedPoseTrack` is present;
 - the web page screenshot showing the same session ID and point count.
 
