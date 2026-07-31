@@ -6,6 +6,21 @@ const dbPath = resolve(cwd, ".data/closure-check.sqlite");
 const files = [dbPath, `${dbPath}-shm`, `${dbPath}-wal`];
 const baseUrl = "http://127.0.0.1:8800";
 const removeFiles = () => Promise.all(files.map((path) => rm(path, { force: true })));
+const startApi = () => Bun.spawn(["bun", "run", "services/api/src/index.ts"], {
+  cwd,
+  env: { ...process.env, PORT: "8800", WAY_MEMORY_DB_PATH: dbPath },
+  stdout: "pipe",
+  stderr: "pipe",
+});
+const waitForHealth = async () => {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      if ((await (await fetch(`${baseUrl}/health`)).json() as { ok: boolean }).ok) return;
+    } catch {}
+    await Bun.sleep(100);
+  }
+  throw new Error("closure API did not start");
+};
 const request = async (path: string, init?: RequestInit) => {
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
@@ -34,18 +49,8 @@ const pose = (timestamp: number, x: number, flags: string[]) => ({
 let child: ReturnType<typeof Bun.spawn> | undefined;
 try {
   await removeFiles();
-  child = Bun.spawn(["bun", "run", "services/api/src/index.ts"], {
-    cwd,
-    env: { ...process.env, PORT: "8800", WAY_MEMORY_DB_PATH: dbPath },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      if ((await (await fetch(`${baseUrl}/health`)).json() as { ok: boolean }).ok) break;
-    } catch {}
-    await Bun.sleep(100);
-  }
+  child = startApi();
+  await waitForHealth();
   const session = await request("/api/sessions", { method: "POST", body: JSON.stringify({ deviceId: "closure-check", mode: "learning" }) });
   await request(`/api/sessions/${session.sessionId}/samples`, {
     method: "POST",
@@ -54,14 +59,25 @@ try {
       { deviceTimestampNs: 2, sensorType: "pose", values: [4, 0, 0], pose: pose(2, 4, ["imu", "visual-aligned"]) },
       { deviceTimestampNs: 3, sensorType: "pose", values: [8, 0, 0], pose: pose(3, 8, ["imu", "visual-aligned"]) },
       { deviceTimestampNs: 4, sensorType: "pose", values: [1, 0, 0], pose: pose(4, 1, ["imu", "visual-aligned", "loop-closure"]), motionEvent: { eventId: "closure-check", deviceTimestampNs: 4, type: "loop-closed", confidence: 0.72 } },
+      { deviceTimestampNs: 5, sensorType: "pose", values: [2, 0, 0], pose: pose(5, 2, ["imu", "visual-aligned"]) },
     ] }),
   });
   const restored = await request(`/api/sessions/${session.sessionId}`) as { closure: { status: string; adjusted: boolean }; poseTrack: Array<{ xM: number }>; correctedPoseTrack: Array<{ xM: number }> };
   const corrected = restored.correctedPoseTrack;
-  if (restored.closure.status !== "closed" || !restored.closure.adjusted || restored.poseTrack.at(-1)?.xM !== 1 || corrected.at(-1)?.xM !== 0) {
+  if (restored.closure.status !== "closed" || !restored.closure.adjusted || restored.poseTrack.at(-1)?.xM !== 2 || corrected.at(-1)?.xM !== 1 || corrected[3]?.xM !== 0) {
     throw new Error("loop correction assertion failed");
   }
-  console.log("Closure smoke passed", { rawEndM: restored.poseTrack.at(-1)?.xM, correctedEndM: corrected.at(-1)?.xM, points: corrected.length });
+  await Bun.sleep(2_200);
+  child.kill();
+  await child.exited;
+  child = undefined;
+  child = startApi();
+  await waitForHealth();
+  const afterRestart = await request(`/api/sessions/${session.sessionId}`) as typeof restored;
+  if (afterRestart.closure.status !== "closed" || !afterRestart.closure.adjusted || afterRestart.correctedPoseTrack.at(-1)?.xM !== 1) {
+    throw new Error("loop correction did not survive restart");
+  }
+  console.log("Closure smoke passed", { rawEndM: afterRestart.poseTrack.at(-1)?.xM, correctedEndM: afterRestart.correctedPoseTrack.at(-1)?.xM, points: afterRestart.correctedPoseTrack.length, restart: true });
 } finally {
   if (child && !child.killed) child.kill();
   await child?.exited;

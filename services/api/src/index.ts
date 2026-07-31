@@ -103,6 +103,18 @@ const MAX_PERSISTED_SESSIONS = 100;
 const sessionStore = new SessionStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
 const dirtySessionIds = new Set<string>();
 
+const poseDistanceM = (left: PoseEstimate, right: PoseEstimate) => Math.sqrt(
+  (left.xM - right.xM) ** 2
+  + (left.yM - right.yM) ** 2
+  + (left.zM - right.zM) ** 2,
+);
+
+const poseTrackDistanceM = (poses: PoseEstimate[]) => {
+  let distanceM = 0;
+  for (let index = 1; index < poses.length; index += 1) distanceM += poseDistanceM(poses[index - 1], poses[index]);
+  return distanceM;
+};
+
 const persistSession = (session: ObservationSession) => {
   const runtime = sessionRuntime.get(session.sessionId);
   sessionStore.save(session, runtime?.rawSamples ?? []);
@@ -128,7 +140,16 @@ for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
   snapshot.session.sensorInventory ??= [];
   snapshot.session.status = "stopped";
   sessions.set(snapshot.session.sessionId, snapshot.session);
-  sessionRuntime.set(snapshot.session.sessionId, { rawSamples: snapshot.rawSamples });
+  const poses = snapshot.session.poseTrack ?? [];
+  const sampleIds = snapshot.rawSamples.map((sample) => sample.sampleId).filter((sampleId): sampleId is string => Boolean(sampleId));
+  sessionRuntime.set(snapshot.session.sessionId, {
+    rawSamples: snapshot.rawSamples,
+    startPose: poses[0],
+    lastPose: poses.at(-1),
+    travelledM: poseTrackDistanceM(poses),
+    seenSampleIds: new Set(sampleIds.slice(-MAX_SEEN_SAMPLE_IDS)),
+    seenSampleIdOrder: sampleIds.slice(-MAX_SEEN_SAMPLE_IDS),
+  });
 }
 sessionStore.prune(MAX_PERSISTED_SESSIONS);
 const persistenceTimer = setInterval(flushDirtySessions, 2_000);
@@ -556,11 +577,17 @@ const toRelativeMotionPoint = (relativePosition: NonNullable<SensorSample["relat
   };
 };
 
-const poseDistanceM = (left: PoseEstimate, right: PoseEstimate) => Math.sqrt(
-  (left.xM - right.xM) ** 2
-  + (left.yM - right.yM) ** 2
-  + (left.zM - right.zM) ** 2,
-);
+const applyPoseLoopCorrection = (pose: PoseEstimate, correction: NonNullable<ClosureState["correction"]>) => {
+  const durationNs = Math.max(1, correction.endTimestampNs - correction.startTimestampNs);
+  const ratio = clamp((pose.deviceTimestampNs - correction.startTimestampNs) / durationNs, 0, 1);
+  return {
+    ...pose,
+    xM: pose.xM - correction.xM * ratio,
+    yM: pose.yM - correction.yM * ratio,
+    zM: pose.zM - correction.zM * ratio,
+    sourceFlags: [...new Set([...pose.sourceFlags, "loop-corrected"])],
+  };
+};
 
 const applyLoopCorrection = (session: ObservationSession) => {
   if (session.poseTrack.length < 2) return;
@@ -571,18 +598,11 @@ const applyLoopCorrection = (session: ObservationSession) => {
     xM: end.xM - start.xM,
     yM: end.yM - start.yM,
     zM: end.zM - start.zM,
+    startTimestampNs: start.deviceTimestampNs,
+    endTimestampNs: end.deviceTimestampNs,
   };
-  const denominator = Math.max(1, session.poseTrack.length - 1);
-  session.correctedPoseTrack = session.poseTrack.map((pose, index) => {
-    const ratio = index / denominator;
-    return {
-      ...pose,
-      xM: pose.xM - correction.xM * ratio,
-      yM: pose.yM - correction.yM * ratio,
-      zM: pose.zM - correction.zM * ratio,
-      sourceFlags: [...new Set([...pose.sourceFlags, "loop-corrected"])],
-    };
-  });
+  session.closure = { ...session.closure, correction };
+  session.correctedPoseTrack = session.poseTrack.map((pose) => applyPoseLoopCorrection(pose, correction));
 };
 
 const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => {
@@ -605,7 +625,15 @@ const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => 
   const travelledM = runtime.travelledM ?? 0;
   const candidate = travelledM >= 8 && gapM <= Math.max(2, uncertaintyM * 0.75);
   const visualLoop = pose.sourceFlags.includes("loop-closure") && pose.sourceFlags.includes("visual-aligned");
-  const wasAdjusted = session.closure.adjusted;
+  if (session.closure.adjusted) {
+    session.closure = {
+      ...session.closure,
+      status: "closed",
+      gapM,
+      adjusted: true,
+    } satisfies ClosureState;
+    return;
+  }
   const confidence = candidate
     ? clamp(1 - gapM / Math.max(2, uncertaintyM), 0, 1) * 0.85
     : 0;
@@ -616,7 +644,7 @@ const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => 
     // Never alter raw points until a visual loop-closure source is present.
     adjusted: false,
   } satisfies ClosureState;
-  if (session.closure.status === "closed" && !wasAdjusted) {
+  if (session.closure.status === "closed") {
     applyLoopCorrection(session);
     session.closure = {
       ...session.closure,
@@ -710,6 +738,10 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
       session.latestPose = sample.pose;
       session.motionMode = sample.pose.motionMode;
       updateClosureState(session, sample.pose);
+      const correction = session.closure.correction;
+      if (correction && session.correctedPoseTrack?.length) {
+        session.correctedPoseTrack[session.correctedPoseTrack.length - 1] = applyPoseLoopCorrection(sample.pose, correction);
+      }
     }
     if (sample.motionEvent) {
       session.motionEvents.push(sample.motionEvent);
@@ -742,7 +774,11 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   if (session.poseTrack.length > MAX_POSE_TRACK_POINTS) session.poseTrack = session.poseTrack.slice(-MAX_POSE_TRACK_POINTS);
   if (session.correctedPoseTrack && session.correctedPoseTrack.length > MAX_POSE_TRACK_POINTS) session.correctedPoseTrack = session.correctedPoseTrack.slice(-MAX_POSE_TRACK_POINTS);
   if (session.motionEvents.length > MAX_MOTION_EVENTS) session.motionEvents = session.motionEvents.slice(-MAX_MOTION_EVENTS);
-  if (!wasClosureAdjusted && session.closure.adjusted) correctedPosePoints.push(...(session.correctedPoseTrack ?? []));
+  if (!wasClosureAdjusted && session.closure.adjusted) {
+    correctedPosePoints.push(...(session.correctedPoseTrack ?? []));
+  } else if (wasClosureAdjusted && posePoints.length) {
+    correctedPosePoints.push(...(session.correctedPoseTrack?.slice(-posePoints.length) ?? []));
+  }
   device.lastSeen = session.lastReceivedAt ?? device.lastSeen;
   device.connected = true;
   return { accepted: samples.length, dropped: session.droppedSampleCount, session, trackPoints, relativePoints, posePoints, correctedPosePoints, motionEvents };

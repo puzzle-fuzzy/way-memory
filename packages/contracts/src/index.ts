@@ -106,11 +106,20 @@ export interface MotionEvent {
   details?: Record<string, number | string | boolean>;
 }
 
+export interface LoopCorrection {
+  xM: number;
+  yM: number;
+  zM: number;
+  startTimestampNs: number;
+  endTimestampNs: number;
+}
+
 export interface ClosureState {
   status: "open" | "candidate" | "closed";
   gapM?: number;
   confidence: number;
   adjusted: boolean;
+  correction?: LoopCorrection;
 }
 
 export interface SensorSample {

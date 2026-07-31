@@ -40,7 +40,7 @@ The server keeps three closure states:
 - `candidate`: the current pose is close to the start after enough travel, but there is no visual place evidence;
 - `closed`: a trusted visual loop-closure source authorizes correction.
 
-The Android client emits `loop-closed` only after an aligned ARCore metric track has travelled at least 8m and returns within 1.5m of its visual origin. The service keeps the raw `poseTrack` immutable and generates a separate `correctedPoseTrack` using a distributed endpoint correction; the web console uses the corrected track only when `closure.adjusted=true`. This is metric session closure, not a global place-recognition guarantee; low-light or relocalization failures must remain visible through uncertainty and source flags.
+The Android client emits `loop-closed` only after an aligned ARCore metric track has travelled at least 8m and returns within 1.5m of its visual origin. The service keeps the raw `poseTrack` immutable and generates a separate `correctedPoseTrack` using a distributed endpoint correction. The correction stores its three-axis displacement and timestamp interval in the session snapshot, so points received after closure continue from the corrected frame and a service restart does not reopen or lose the closure. The web console uses the corrected track only when `closure.adjusted=true`. This is metric session closure, not a global place-recognition guarantee; low-light or relocalization failures must remain visible through uncertainty and source flags.
 
 ## Elevator and stairs
 
