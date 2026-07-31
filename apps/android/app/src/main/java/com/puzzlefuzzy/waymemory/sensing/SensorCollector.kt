@@ -42,6 +42,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private var lastMotionTimestampNs = 0L
     private var lastMotionEmitTimestampNs = 0L
     private var lastLinearAccelerationTimestampNs = 0L
+    private var angularRateMagnitude = 0f
     private var firstPressureHpa: Float? = null
     private var barometerRelativeAltitudeM = 0f
 
@@ -161,6 +162,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_GRAVITY -> updateGravity(values)
             Sensor.TYPE_MAGNETIC_FIELD -> updateMagneticField(values)
+            Sensor.TYPE_GYROSCOPE -> updateAngularRate(values)
             Sensor.TYPE_GAME_ROTATION_VECTOR,
             Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR,
             Sensor.TYPE_ROTATION_VECTOR -> updateRotationMatrix(values)
@@ -266,6 +268,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         lastMotionTimestampNs = 0L
         lastMotionEmitTimestampNs = 0L
         lastLinearAccelerationTimestampNs = 0L
+        angularRateMagnitude = 0f
         firstPressureHpa = null
         barometerRelativeAltitudeM = 0f
     }
@@ -297,6 +300,12 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             values.take(3).forEachIndexed { index, value -> magneticField[index] = magneticField[index] * 0.8f + value * 0.2f }
         }
         updateFallbackRotationMatrix()
+    }
+
+    private fun updateAngularRate(values: List<Float>) {
+        if (values.size < 3) return
+        val currentMagnitude = sqrt((values[0] * values[0] + values[1] * values[1] + values[2] * values[2]).toDouble()).toFloat()
+        angularRateMagnitude = angularRateMagnitude * 0.75f + currentMagnitude * 0.25f
     }
 
     private fun updateFallbackRotationMatrix() {
@@ -335,10 +344,18 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         )
         val magnitude = vectorMagnitude(worldAcceleration)
         val noiseFloor = 0.12f
+        val rotationDominant = angularRateMagnitude > 1.25f && magnitude < 0.55f
         val scale = if (magnitude <= noiseFloor) 0f else (magnitude - noiseFloor) / magnitude
         for (index in 0..2) {
+            if (rotationDominant) {
+                motionVelocity[index] = 0f
+                continue
+            }
             motionVelocity[index] += worldAcceleration[index] * scale * deltaSeconds
-            motionVelocity[index] *= if (magnitude <= 0.2f) 0.65f else 0.985f
+            motionVelocity[index] *= when {
+                magnitude <= 0.2f -> 0.5f
+                else -> 0.985f
+            }
             motionVelocity[index] = motionVelocity[index].coerceIn(-15f, 15f)
             motionPosition[index] += motionVelocity[index] * deltaSeconds
         }

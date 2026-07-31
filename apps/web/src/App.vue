@@ -196,76 +196,130 @@ type WorldPoint = {
   accuracyM: number;
 };
 
-const projectWorldPoints = (worldPoints: WorldPoint[]) => {
-  if (!worldPoints.length) return [];
-  const eastCenter = (Math.min(...worldPoints.map((point) => point.eastM)) + Math.max(...worldPoints.map((point) => point.eastM))) / 2;
-  const northCenter = (Math.min(...worldPoints.map((point) => point.northM)) + Math.max(...worldPoints.map((point) => point.northM))) / 2;
-  const altitudeValues = worldPoints.filter((point) => point.hasAltitude).map((point) => point.altitudeM);
-  const altitudeCenter = altitudeValues.length ? (Math.min(...altitudeValues) + Math.max(...altitudeValues)) / 2 : 0;
-  const centeredWorldPoints = worldPoints.map((point) => ({
-    ...point,
-    eastM: point.eastM - eastCenter,
-    northM: point.northM - northCenter,
-    altitudeM: point.hasAltitude ? point.altitudeM - altitudeCenter : 0,
-  }));
+type ProjectedWorldPoint = WorldPoint & {
+  x: number;
+  y: number;
+  depth: number;
+  perspective: number;
+};
+
+type ProjectionScene = {
+  points: ProjectedWorldPoint[];
+  projectPoint: (point: WorldPoint) => ProjectedWorldPoint;
+  gridRadiusM: number;
+  gridStepM: number;
+  axisLengthM: number;
+  altitudeMinM: number;
+  altitudeMaxM: number;
+};
+
+const chooseGridStep = (radiusM: number) => {
+  if (radiusM <= 3) return 0.5;
+  if (radiusM <= 12) return 1;
+  if (radiusM <= 30) return 5;
+  if (radiusM <= 75) return 10;
+  return 25;
+};
+
+const buildProjectionScene = (worldPoints: WorldPoint[]): ProjectionScene => {
+  if (!worldPoints.length) {
+    const emptyPoint = { index: -1, eastM: 0, northM: 0, altitudeM: 0, hasAltitude: true, accuracyM: 0 };
+    return {
+      points: [],
+      projectPoint: (point) => ({ ...point, x: 310, y: 165, depth: 0, perspective: 1 }),
+      gridRadiusM: 2,
+      gridStepM: 0.5,
+      axisLengthM: 2.4,
+      altitudeMinM: emptyPoint.altitudeM,
+      altitudeMaxM: emptyPoint.altitudeM,
+    };
+  }
+
+  const eastValues = worldPoints.map((point) => point.eastM).concat(0);
+  const northValues = worldPoints.map((point) => point.northM).concat(0);
+  const altitudeValues = worldPoints.filter((point) => point.hasAltitude).map((point) => point.altitudeM).concat(0);
+  const eastMin = Math.min(...eastValues);
+  const eastMax = Math.max(...eastValues);
+  const northMin = Math.min(...northValues);
+  const northMax = Math.max(...northValues);
+  const altitudeMinM = Math.min(...altitudeValues);
+  const altitudeMaxM = Math.max(...altitudeValues);
+  const eastCenter = (eastMin + eastMax) / 2;
+  const northCenter = (northMin + northMax) / 2;
+  const altitudeCenter = (altitudeMinM + altitudeMaxM) / 2;
+  const horizontalRadius = Math.max(Math.abs(eastMin), Math.abs(eastMax), Math.abs(northMin), Math.abs(northMax), 2);
+  const gridRadiusM = Math.min(100, Math.max(2, horizontalRadius * 1.15));
+  const gridStepM = chooseGridStep(gridRadiusM);
+  const axisLengthM = gridRadiusM * 1.08;
+  const worldExtent = Math.max(eastMax - eastMin, northMax - northMin, (altitudeMaxM - altitudeMinM) * 1.35, 4);
+  const viewScale = 92 / worldExtent;
+  const focalLength = Math.max(8, worldExtent * 2.4);
   const yawCos = Math.cos(cameraYaw.value);
   const yawSin = Math.sin(cameraYaw.value);
   const pitchSin = Math.sin(cameraPitch.value);
   const pitchCos = Math.cos(cameraPitch.value);
-  const rotatedWorldPoints = centeredWorldPoints.map((point) => ({
-    ...point,
-    rotatedX: point.eastM * yawCos - point.northM * yawSin,
-    rotatedY: point.eastM * yawSin + point.northM * yawCos,
-  }));
-  const hasZ = worldPoints.some((point) => point.hasAltitude);
-  const horizontalXExtent = Math.max(...rotatedWorldPoints.map((point) => Math.abs(point.rotatedX)), 1);
-  const verticalScreenExtent = Math.max(...rotatedWorldPoints.map((point) => Math.abs(
-    point.rotatedY * (hasZ ? pitchSin : 1) + point.altitudeM * 2.2 * (hasZ ? pitchCos : 0),
-  )), 1);
-  const scale = Math.min(260 / horizontalXExtent, 112 / verticalScreenExtent);
-  return rotatedWorldPoints.map((point) => {
-    const displayAltitude = point.altitudeM * 2.2;
-    const groundY = 165 - point.rotatedY * (hasZ ? pitchSin : 1) * scale;
+
+  const projectPoint = (point: WorldPoint): ProjectedWorldPoint => {
+    const centeredEast = point.eastM - eastCenter;
+    const centeredNorth = point.northM - northCenter;
+    const centeredAltitude = (point.hasAltitude ? point.altitudeM : 0) - altitudeCenter;
+    const rotatedX = centeredEast * yawCos - centeredNorth * yawSin;
+    const forward = centeredEast * yawSin + centeredNorth * yawCos;
+    const vertical = forward * pitchSin + centeredAltitude * pitchCos;
+    const depth = forward * pitchCos - centeredAltitude * pitchSin;
+    const perspective = Math.min(1.45, Math.max(0.68, focalLength / (focalLength + depth)));
     return {
       ...point,
-      x: 310 + point.rotatedX * scale,
-      y: hasZ ? groundY - displayAltitude * pitchCos * scale : groundY,
-      groundY,
-      depth: point.rotatedY * pitchCos - displayAltitude * pitchSin,
+      x: 310 + rotatedX * viewScale * perspective,
+      y: 165 - vertical * viewScale * perspective,
+      depth,
+      perspective,
     };
-  });
+  };
+
+  return {
+    points: worldPoints.map(projectPoint),
+    projectPoint,
+    gridRadiusM,
+    gridStepM,
+    axisLengthM,
+    altitudeMinM,
+    altitudeMaxM,
+  };
 };
 
-const projectedTrack = computed(() => {
+const geographicWorldTrack = computed(() => {
   if (!track.value.length) return [];
   const origin = track.value[0];
   const originLatRad = origin.lat * Math.PI / 180;
-  return projectWorldPoints(track.value.map((point, index) => ({
+  return track.value.map((point, index) => ({
     index,
     eastM: (point.lng - origin.lng) * Math.PI / 180 * 6371000 * Math.cos(originLatRad),
     northM: (point.lat - origin.lat) * Math.PI / 180 * 6371000,
     altitudeM: point.altitudeM ?? 0,
     hasAltitude: typeof point.altitudeM === "number",
     accuracyM: point.accuracyM,
-  })));
+  }));
 });
 
-const projectedRelativeTrack = computed(() => projectWorldPoints(relativeTrack.value.map((point, index) => ({
+const inertialWorldTrack = computed(() => relativeTrack.value.map((point, index) => ({
   index,
   eastM: point.xM,
   northM: point.yM,
   altitudeM: point.zM,
   hasAltitude: true,
   accuracyM: point.accuracyM,
-}))));
+})));
 
-const displayedTrack = computed(() => visualMode.value === "inertial" ? projectedRelativeTrack.value : projectedTrack.value);
+const displayedWorldTrack = computed(() => visualMode.value === "inertial" ? inertialWorldTrack.value : geographicWorldTrack.value);
+const projectionScene = computed(() => buildProjectionScene(displayedWorldTrack.value));
+const displayedTrack = computed(() => projectionScene.value.points);
 
 const routeRenderModeLabel = computed(() => visualMode.value === "inertial"
   ? "传感器融合相对运动点 · 每个圆点对应一个真实样本"
   : "实时定位点展示 · 每个圆点对应一个真实样本");
 
-const drawPointCanvas = () => {
+const drawPointCanvasLegacy = () => {
   const canvas = pointCanvas.value;
   const host = pointCanvasHost.value;
   if (!canvas || !host) return;
@@ -348,6 +402,166 @@ const drawPointCanvas = () => {
   context.fill();
 };
 
+const drawPointCanvas = () => {
+  const canvas = pointCanvas.value;
+  const host = pointCanvasHost.value;
+  if (!canvas || !host) return;
+
+  const bounds = host.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(bounds.width));
+  const cssHeight = Math.max(1, Math.round(bounds.height));
+  const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelWidth = Math.max(1, Math.round(cssWidth * devicePixelRatio));
+  const pixelHeight = Math.max(1, Math.round(cssHeight * devicePixelRatio));
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  context.clearRect(0, 0, cssWidth, cssHeight);
+  context.fillStyle = "#e8f0eb";
+  context.fillRect(0, 0, cssWidth, cssHeight);
+
+  const viewWidth = 620;
+  const viewHeight = 300;
+  const canvasScale = Math.min(cssWidth / viewWidth, cssHeight / viewHeight);
+  const offsetX = (cssWidth - viewWidth * canvasScale) / 2;
+  const offsetY = (cssHeight - viewHeight * canvasScale) / 2;
+  const toCanvasPoint = (x: number, y: number) => ({
+    x: offsetX + x * canvasScale,
+    y: offsetY + y * canvasScale,
+  });
+
+  const scene = projectionScene.value;
+  const worldPoint = (eastM: number, northM: number, altitudeM: number): WorldPoint => ({
+    index: -1,
+    eastM,
+    northM,
+    altitudeM,
+    hasAltitude: true,
+    accuracyM: 0,
+  });
+  const drawSegment = (left: WorldPoint, right: WorldPoint, color: string, alpha: number, width: number, dashed = false) => {
+    const startProjection = scene.projectPoint(left);
+    const endProjection = scene.projectPoint(right);
+    const start = toCanvasPoint(startProjection.x, startProjection.y);
+    const end = toCanvasPoint(endProjection.x, endProjection.y);
+    context.save();
+    context.globalAlpha = alpha;
+    context.strokeStyle = color;
+    context.lineWidth = Math.max(0.5, width * canvasScale);
+    context.setLineDash(dashed ? [3 * canvasScale, 5 * canvasScale] : []);
+    context.beginPath();
+    context.moveTo(start.x, start.y);
+    context.lineTo(end.x, end.y);
+    context.stroke();
+    context.restore();
+  };
+
+  const gridSegments: Array<{ left: WorldPoint; right: WorldPoint; depth: number }> = [];
+  for (let coordinate = -scene.gridRadiusM; coordinate <= scene.gridRadiusM + scene.gridStepM * 0.5; coordinate += scene.gridStepM) {
+    const xLeft = scene.projectPoint(worldPoint(coordinate, -scene.gridRadiusM, 0));
+    const xRight = scene.projectPoint(worldPoint(coordinate, scene.gridRadiusM, 0));
+    const yLeft = scene.projectPoint(worldPoint(-scene.gridRadiusM, coordinate, 0));
+    const yRight = scene.projectPoint(worldPoint(scene.gridRadiusM, coordinate, 0));
+    gridSegments.push(
+      { left: worldPoint(coordinate, -scene.gridRadiusM, 0), right: worldPoint(coordinate, scene.gridRadiusM, 0), depth: (xLeft.depth + xRight.depth) / 2 },
+      { left: worldPoint(-scene.gridRadiusM, coordinate, 0), right: worldPoint(scene.gridRadiusM, coordinate, 0), depth: (yLeft.depth + yRight.depth) / 2 },
+    );
+  }
+  gridSegments.sort((left, right) => left.depth - right.depth);
+  gridSegments.forEach((segment) => drawSegment(segment.left, segment.right, "#b9cec0", 0.34, 0.7, true));
+
+  const origin = worldPoint(0, 0, 0);
+  const axes = [
+    { end: worldPoint(scene.axisLengthM, 0, 0), color: "#e05c3b", label: "X" },
+    { end: worldPoint(0, scene.axisLengthM, 0), color: "#3f8b68", label: "Y" },
+    { end: worldPoint(0, 0, scene.axisLengthM), color: "#6384a5", label: "Z" },
+  ];
+  const drawAxis = (axis: (typeof axes)[number]) => {
+    const originProjection = scene.projectPoint(origin);
+    const endProjection = scene.projectPoint(axis.end);
+    const start = toCanvasPoint(originProjection.x, originProjection.y);
+    const end = toCanvasPoint(endProjection.x, endProjection.y);
+    const direction = Math.atan2(end.y - start.y, end.x - start.x);
+    const headSize = 7 * canvasScale;
+    context.save();
+    context.globalAlpha = 0.96;
+    context.strokeStyle = axis.color;
+    context.fillStyle = axis.color;
+    context.lineWidth = Math.max(1.1, 2 * canvasScale);
+    context.beginPath();
+    context.moveTo(start.x, start.y);
+    context.lineTo(end.x, end.y);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(end.x, end.y);
+    context.lineTo(end.x - Math.cos(direction - 0.5) * headSize, end.y - Math.sin(direction - 0.5) * headSize);
+    context.lineTo(end.x - Math.cos(direction + 0.5) * headSize, end.y - Math.sin(direction + 0.5) * headSize);
+    context.closePath();
+    context.fill();
+    context.font = `${Math.max(10, 12 * canvasScale)}px Manrope, sans-serif`;
+    context.textAlign = "center";
+    context.fillText(axis.label, end.x, end.y - 8 * canvasScale);
+    context.restore();
+  };
+  axes.forEach(drawAxis);
+
+  const points = displayedTrack.value;
+  if (!points.length) return;
+
+  const currentIndex = points.length - 1;
+  const orderedPoints = [...points]
+    .filter((point) => point.index !== currentIndex)
+    .sort((left, right) => left.depth - right.depth || left.index - right.index);
+  const altitudeRange = Math.max(0.001, scene.altitudeMaxM - scene.altitudeMinM);
+
+  for (const point of orderedPoints) {
+    const position = toCanvasPoint(point.x, point.y);
+    const heightRatio = Math.max(0, Math.min(1, (point.altitudeM - scene.altitudeMinM) / altitudeRange));
+    const radius = Math.max(1.8, Math.min(4.8, 5.8 - point.accuracyM * 0.04) * canvasScale * point.perspective);
+    context.beginPath();
+    context.arc(position.x, position.y, radius, 0, Math.PI * 2);
+    context.globalAlpha = 0.32 + ((point.index + 1) / Math.max(points.length, 1)) * 0.68;
+    context.fillStyle = heightRatio > 0.58 ? "#e07a4e" : "#3f8b68";
+    context.fill();
+    context.globalAlpha = Math.min(1, context.globalAlpha + 0.15);
+    context.lineWidth = Math.max(0.75, 1.5 * canvasScale);
+    context.strokeStyle = "#ffffff";
+    context.stroke();
+  }
+
+  const firstPoint = toCanvasPoint(points[0].x, points[0].y);
+  context.globalAlpha = 1;
+  context.beginPath();
+  context.arc(firstPoint.x, firstPoint.y, Math.max(4, 8 * canvasScale), 0, Math.PI * 2);
+  context.fillStyle = "#ffffff";
+  context.fill();
+  context.lineWidth = Math.max(2, 4 * canvasScale);
+  context.strokeStyle = "#e05c3b";
+  context.stroke();
+  context.fillStyle = "#19352d";
+  context.font = `${Math.max(9, 10 * canvasScale)}px Manrope, sans-serif`;
+  context.textAlign = "center";
+  context.fillText("START", firstPoint.x, firstPoint.y - Math.max(10, 16 * canvasScale));
+
+  const latestPoint = toCanvasPoint(points[currentIndex].x, points[currentIndex].y);
+  context.beginPath();
+  context.arc(latestPoint.x, latestPoint.y, Math.max(9, 15 * canvasScale), 0, Math.PI * 2);
+  context.fillStyle = "#e05c3b33";
+  context.fill();
+  context.lineWidth = Math.max(1, 2 * canvasScale);
+  context.strokeStyle = "#e05c3b99";
+  context.stroke();
+  context.beginPath();
+  context.arc(latestPoint.x, latestPoint.y, Math.max(3.5, 6 * canvasScale), 0, Math.PI * 2);
+  context.fillStyle = "#e05c3b";
+  context.fill();
+};
+
 const scheduleCanvasDraw = () => {
   if (canvasDrawFrame !== undefined) window.cancelAnimationFrame(canvasDrawFrame);
   canvasDrawFrame = window.requestAnimationFrame(() => {
@@ -426,13 +640,13 @@ const activities = computed(() => {
           <div class="flex items-start justify-between gap-3"><div><p class="section-label">当前路线</p><h2 class="mt-1 text-xl font-extrabold tracking-[-0.05em]">{{ routeLabel }}</h2></div><span class="status-pill">{{ routeStatusLabel }}</span></div>
           <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前相对轨迹</span></div><div><strong class="metric">{{ displayedPointCount }}</strong><span class="metric-label">个当前显示点</span></div><div><strong class="metric">{{ totalSampleCount }}</strong><span class="metric-label">个传感器样本</span></div></div>
           <div class="map-frame mt-6 overflow-hidden">
-            <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">{{ visualMode === 'inertial' ? '实时传感器运动点 · X / Y / Z' : '实时定位点 · X / Y / Z' }}</p><p class="mt-1 text-[11px] text-muted">每个圆点都是服务端收到的真实位置或相对运动样本</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
+            <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">{{ visualMode === 'inertial' ? '3D 实时运动点 · X / Y / Z' : '3D 实时定位点 · X / Y / Z' }}</p><p class="mt-1 text-[11px] text-muted">X 左右 · Y 前后 · Z 上下；点的大小代表深度，颜色代表高度</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
             <div ref="pointCanvasHost" class="relative touch-none select-none bg-[#e9f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
                <canvas ref="pointCanvas" class="point-canvas block w-full" width="620" height="300" role="img" aria-label="可旋转的三维实时定位点" />
                <div v-if="!displayedTrack.length" class="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-muted">等待 Android 上报位置或传感器运动样本</div>
                <div class="pointer-events-none absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1.5 text-[9px] text-muted shadow-sm backdrop-blur">按住拖动旋转 · 高度视觉放大 2.2×</div>
              </div>
-            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-sage" />{{ visualMode === 'inertial' ? '传感器相对运动点' : '真实定位点' }}</span><span><i class="legend-dot bg-ember" />最新点</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
+            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-ember" />X 左右</span><span><i class="legend-dot bg-sage" />Y 前后</span><span><i class="legend-dot bg-[#6384a5]" />Z 上下</span><span><i class="legend-dot bg-[#3f8b68]" />{{ visualMode === 'inertial' ? '传感器运动点' : '真实定位点' }}</span><span><i class="legend-dot bg-ember" />最新点</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
           </div>
           <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ displayedPointCount }} displayed points · {{ locationPointCount }} location · {{ motionPointCount }} inertial · {{ totalSampleCount }} total samples · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
           <div class="mt-2 px-1 text-[10px] text-muted">{{ routeRenderModeLabel }}<span v-if="hasAltitude"> · {{ altitudeSourceLabel }}</span><span v-else> · 当前按经纬度平面路线显示</span></div>
