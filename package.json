@@ -9,6 +9,6 @@
   ],
   "scripts": {
     "check": "bun run check:docs",
-    "check:docs": "bun -e \"const files = [...new Bun.Glob('docs/**/*.md').scanSync()]; if (!files.length) throw new Error('No documentation files found'); console.log('Checked', files.length, 'documentation files')\""
+    "check:docs": "bun run scripts/check-docs.ts"
   }
 }
