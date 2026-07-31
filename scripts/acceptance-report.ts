@@ -44,6 +44,7 @@ try {
   const motionEvents = Array.isArray(session.motionEvents) ? session.motionEvents as JsonRecord[] : [];
   const sourceFlags = [...new Set(poses.flatMap((pose) => Array.isArray(pose.sourceFlags) ? pose.sourceFlags.filter((item): item is string => typeof item === "string") : []))].sort();
   const motionModes = [...new Set(poses.map((pose) => pose.motionMode).filter((item): item is string => typeof item === "string"))].sort();
+  const rotationMotionModesSafe = poses.length > 0 && poses.every((pose) => pose.motionMode === "stationary" || pose.motionMode === "unknown");
   const eventTypes = [...new Set(motionEvents.map((event) => event.type).filter((item): item is string => typeof item === "string"))].sort();
   const rawSensorTypes = [...new Set(rawSamples.map((sample) => sample.sensorType).filter((item): item is string => typeof item === "string"))].sort();
   const rawSensorTypeCounts = Object.fromEntries(rawSamples.reduce((counts, sample) => {
@@ -111,6 +112,7 @@ try {
     threeAxisMovement: axes.xM.span >= minimumAxisM && axes.yM.span >= minimumAxisM && axes.zM.span >= minimumAxisM,
     rotationSensorEvidence: hasGyroscopeSample || hasRotationSample,
     rotationTranslationBounded: maximumPoseTranslationSpan <= maximumRotationTranslationM,
+    rotationMotionModeSafe: rotationMotionModesSafe,
     sampleIdsUniqueInReplay: duplicateSampleIds === 0,
     routeOrderingClean: Number(session.outOfOrderSampleCount ?? 0) <= maximumOutOfOrderSampleCount,
     closureConsistent: closure.adjusted !== true || (closure.status === "closed" && corrected.length >= poses.length),
@@ -123,7 +125,7 @@ try {
   const caseChecks: Record<string, boolean> = {
     baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.routeOrderingClean && checks.serverBounds && checks.clientManifest,
     "3d": checks.poseStream && checks.threeAxisMovement,
-    rotation: checks.rotationSensorEvidence && checks.rotationTranslationBounded,
+    rotation: checks.rotationSensorEvidence && checks.rotationTranslationBounded && checks.rotationMotionModeSafe,
     loop: checks.closureConsistent && closure.status === "closed" && closure.adjusted === true && corrected.length > 0,
     stairs: (motionModes.includes("stairs") || eventTypes.includes("stairs-enter")) && axes.zM.span >= minimumAxisM,
     elevator: eventTypes.includes("elevator-candidate") && eventTypes.includes("elevator-exit") && axes.zM.span >= minimumAxisM,
@@ -166,6 +168,7 @@ try {
       hasRotationSample,
       maximumPoseTranslationSpan,
       limitM: maximumRotationTranslationM,
+      motionModesSafe: rotationMotionModesSafe,
     },
     sourceFlags,
     client,

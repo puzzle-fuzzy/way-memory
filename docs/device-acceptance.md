@@ -86,6 +86,7 @@ Record at minimum:
 - `outOfOrderSampleCount` defaults to a strict zero-tolerance baseline; use `--max-out-of-order=<N>` only when a field test explicitly records and accepts bounded transport reordering.
 - `poseTrack` count and the min/max of `xM`, `yM`, `zM`;
 - Pose timestamp monotonicity, time span, per-source counts and source age;
+- For the rotation case, every pose must keep `motionMode` at `stationary` or `unknown` in addition to staying inside the translation limit;
 - raw sensor type counts, `sourceFlags`, `frame`, `motionMode`, and `motionEvents`;
 - `closure.status`, `closure.adjusted`, and whether `correctedPoseTrack` is present;
 - `client.applicationId`, `client.versionName`, `client.buildType`, and normalized `client.apiBaseUrl`;
