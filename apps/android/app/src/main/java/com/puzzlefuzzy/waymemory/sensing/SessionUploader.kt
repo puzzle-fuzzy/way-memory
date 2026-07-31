@@ -106,7 +106,7 @@ class SessionUploader(
     private val queue = PersistentSampleQueue(storageDirectory)
     private val sessionIdFile = File(storageDirectory, "active-session.id")
     private val state = MutableStateFlow(SessionSyncState(pendingSamples = queue.size()))
-    private var socket: WebSocket? = null
+    @Volatile private var socket: WebSocket? = null
     private var connectionJob: Job? = null
     private var deviceId: String = "android-device"
     private var sensorInventory: List<SensorInventorySample> = emptyList()
@@ -115,6 +115,8 @@ class SessionUploader(
     private var nextConnectAtMs = 0L
     private var reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
     private var lastQueueUiPublishMs = 0L
+    @Volatile private var inFlightBatchSize = 0
+    @Volatile private var inFlightSocket: WebSocket? = null
 
     val syncState: StateFlow<SessionSyncState> = state.asStateFlow()
 
@@ -170,6 +172,8 @@ class SessionUploader(
         connectionJob = null
         socket?.close(1000, "session stopped")
         socket = null
+        inFlightBatchSize = 0
+        inFlightSocket = null
         sessionIdFile.delete()
         activeSessionId = null
         state.value = state.value.copy(
@@ -240,9 +244,18 @@ class SessionUploader(
                     activeSessionId?.let(sessionIdFile::writeText)
                     state.value = state.value.copy(sessionId = activeSessionId, lastError = null)
                 }
-                "samples.accepted" -> state.value = state.value.copy(
-                    uploadedSamples = message.optLong("sampleCount", state.value.uploadedSamples),
-                )
+                "samples.accepted" -> {
+                    if (inFlightSocket === webSocket && inFlightBatchSize > 0) {
+                        val acknowledged = inFlightBatchSize
+                        inFlightBatchSize = 0
+                        inFlightSocket = null
+                        queue.acknowledge(acknowledged)
+                        state.value = state.value.copy(
+                            uploadedSamples = message.optLong("sampleCount", state.value.uploadedSamples + acknowledged),
+                            pendingSamples = queue.size(),
+                        )
+                    }
+                }
                 "error" -> {
                     val error = message.optString("error")
                     if (error == "session_resume_failed" && activeSessionId != null && running) {
@@ -267,12 +280,20 @@ class SessionUploader(
     }
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-        if (socket === webSocket) socket = null
+        if (socket === webSocket) {
+            socket = null
+            inFlightBatchSize = 0
+            inFlightSocket = null
+        }
         scheduleReconnect(t.message ?: "WebSocket 连接失败")
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-        if (socket === webSocket) socket = null
+        if (socket === webSocket) {
+            socket = null
+            inFlightBatchSize = 0
+            inFlightSocket = null
+        }
         scheduleReconnect(if (reason.isBlank()) "WebSocket 已断开" else reason)
     }
 
@@ -286,6 +307,7 @@ class SessionUploader(
     private fun flush() {
         val sessionId = activeSessionId ?: return
         val currentSocket = socket ?: return
+        if (inFlightBatchSize > 0) return
         val batch = queue.peek(MAX_BATCH)
         if (batch.isEmpty()) return
 
@@ -294,14 +316,11 @@ class SessionUploader(
             .put("sessionId", sessionId)
             .put("samples", JSONArray().apply { batch.forEach { put(CollectedSampleCodec.encode(it)) } })
         if (currentSocket.send(payload.toString())) {
-            // OkHttp accepted the frame. If the process dies before the cursor
-            // advances, the batch is sent again on recovery; duplicate delivery
-            // is safer than losing a route segment.
-            queue.acknowledge(batch.size)
-            state.value = state.value.copy(
-                uploadedSamples = state.value.uploadedSamples + batch.size,
-                pendingSamples = queue.size(),
-            )
+            // Keep the batch in the durable queue until the server confirms it.
+            // If the process or socket dies first, the same sampleIds are replayed
+            // and the server's bounded dedupe window prevents double counting.
+            inFlightBatchSize = batch.size
+            inFlightSocket = currentSocket
         }
     }
 

@@ -13,7 +13,7 @@ import java.nio.file.StandardCopyOption
  * A bounded, append-only write-ahead queue for samples waiting for the server.
  *
  * The queue is intentionally app-private and capped. A process crash may cause
- * a small number of acknowledged samples to be sent again, which is safer than
+ * a small number of unacknowledged samples to be sent again, which is safer than
  * losing a route segment; the server's bounded replay model remains unchanged.
  */
 internal class PersistentSampleQueue(
