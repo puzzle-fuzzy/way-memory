@@ -410,9 +410,21 @@ class SessionUploader(
             val message = JSONObject(text)
             when (message.optString("type")) {
                 "session.started", "session.resumed" -> {
-                    activeSessionId = message.getJSONObject("session").getString("sessionId")
+                    val session = message.getJSONObject("session")
+                    activeSessionId = session.getString("sessionId")
+                    // The server resolves a one-time handoff into a normal,
+                    // owner-scoped route binding. Persist only that resolved
+                    // non-secret binding so a later session replacement can
+                    // remain in navigation mode without retaining the raw
+                    // handoff token.
+                    captureMode = session.optString("mode", captureMode).takeIf { it == "learning" || it == "navigation" } ?: captureMode
+                    captureRouteId = session.optString("routeId").takeIf(String::isNotBlank)
                     sessionIdFile.parentFile?.mkdirs()
                     activeSessionId?.let(sessionIdFile::writeText)
+                    // The one-time navigation code is only needed until the
+                    // server accepts the session start. Do not retain the raw
+                    // code in the app-private recovery file after that point.
+                    captureHandoffToken = null
                     persistSessionConfig()
                     state.update { current -> current.copy(sessionId = activeSessionId, lastError = null) }
                     parseSessionLifecycleEvent(message)?.let { onSessionLifecycle?.invoke(it) }
