@@ -111,4 +111,20 @@ class PoseFusionEngineTest {
         assertEquals("loop-closed", returned?.motionEvent?.type)
         assertTrue(returned?.pose?.sourceFlags?.contains("loop-closure") == true)
     }
+
+    @Test
+    fun visualReturnUsesTheInitialVisualOriginInsteadOfWorldZero() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateVisual(VisualPoseSample(1_100_000_000L, 10f, 20f, 3f, 0.15f, 0.9f, "tracking"))
+        var timestampNs = 1_200_000_000L
+        repeat(14) {
+            timestampNs += 100_000_000L
+            engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
+        }
+        engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 12f, 20f, 3f, 0.15f, 0.9f, "tracking"))
+        engine.updateVisual(VisualPoseSample(timestampNs + 200_000_000L, 18f, 20f, 3f, 0.15f, 0.9f, "tracking"))
+        val returned = engine.updateVisual(VisualPoseSample(timestampNs + 300_000_000L, 10f, 20f, 3f, 0.15f, 0.9f, "tracking"))
+        assertEquals("loop-closed", returned?.motionEvent?.type)
+    }
 }

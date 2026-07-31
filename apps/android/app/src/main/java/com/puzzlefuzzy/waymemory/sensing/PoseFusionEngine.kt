@@ -279,7 +279,10 @@ class PoseFusionEngine {
         val visualLoopClosure = visualAligned
             && !visualLoopClosureEmitted
             && visualTravelledM >= 8f
-            && hypot(lastVisualX.toDouble(), lastVisualY.toDouble()) <= 1.5
+            && hypot(
+                (lastVisualX - visualOriginX).toDouble(),
+                (lastVisualY - visualOriginY).toDouble(),
+            ) <= 1.5
         if (visualLoopClosure) visualLoopClosureEmitted = true
         val event = when {
             visualLoopClosure -> MotionEventSample(
