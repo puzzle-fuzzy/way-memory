@@ -16,10 +16,11 @@ const sessionId = Bun.env.WAY_MEMORY_SESSION_ID ?? valueFor("--session");
 const acceptanceCase = valueFor("--case") ?? "baseline";
 const minimumAxisM = Number(valueFor("--min-axis-m") ?? "0.2");
 const maximumRotationTranslationM = Number(valueFor("--max-translation-m") ?? "0.75");
+const maximumRecoveryJumpM = Number(valueFor("--max-recovery-jump-m") ?? "1.5");
 const maximumOutOfOrderSampleCount = Number(valueFor("--max-out-of-order") ?? "0");
 
 if (!sessionId) {
-  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|loop|stairs|elevator] [--max-out-of-order=0] [--out=<file>]");
+  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|rotation|loop|stairs|elevator|recovery] [--max-out-of-order=0] [--max-recovery-jump-m=1.5] [--out=<file>]");
   process.exit(2);
 }
 
@@ -33,6 +34,11 @@ const finiteNumbers = (values: unknown[]) => values.filter((value): value is num
 const rangeFor = (values: number[]) => values.length
   ? { min: Math.min(...values), max: Math.max(...values), span: Math.max(...values) - Math.min(...values) }
   : { min: null, max: null, span: 0 };
+const poseDistanceM = (left: JsonRecord, right: JsonRecord) => {
+  const coordinates = ["xM", "yM", "zM"] as const;
+  if (coordinates.some((key) => typeof left[key] !== "number" || typeof right[key] !== "number")) return null;
+  return Math.sqrt(coordinates.reduce((sum, key) => sum + (left[key] - right[key]) ** 2, 0));
+};
 
 try {
   const session = await getJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
@@ -73,6 +79,15 @@ try {
     }
     return latest;
   }, {} as Record<string, number>);
+  const recoveryPoseIndex = poses.findIndex((pose) => Array.isArray(pose.sourceFlags) && pose.sourceFlags.includes("recovered-anchor"));
+  const recoveryPreviousPose = recoveryPoseIndex > 0 ? poses[recoveryPoseIndex - 1] : null;
+  const recoveryFirstPose = recoveryPoseIndex >= 0 ? poses[recoveryPoseIndex] : null;
+  const recoveryJumpM = recoveryFirstPose && recoveryPreviousPose
+    ? poseDistanceM(recoveryFirstPose, recoveryPreviousPose)
+    : null;
+  const recoveryAnchorContinuity = recoveryPoseIndex > 0
+    && recoveryJumpM !== null
+    && recoveryJumpM <= maximumRecoveryJumpM;
   const sourceAgeSeconds = Object.fromEntries(Object.entries(sourceLastTimestampNs).map(([source, timestamp]) => [
     source,
     latestPoseTimestampNs === null ? null : Number(((latestPoseTimestampNs - timestamp) / 1_000_000_000).toFixed(3)),
@@ -116,6 +131,7 @@ try {
     sampleIdsUniqueInReplay: duplicateSampleIds === 0,
     routeOrderingClean: Number(session.outOfOrderSampleCount ?? 0) <= maximumOutOfOrderSampleCount,
     closureConsistent: closure.adjusted !== true || (closure.status === "closed" && corrected.length >= poses.length),
+    recoveryAnchorContinuity,
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
     clientManifest: client.applicationId === "com.puzzlefuzzy.waymemory"
       && typeof client.versionName === "string"
@@ -129,6 +145,7 @@ try {
     loop: checks.closureConsistent && closure.status === "closed" && closure.adjusted === true && corrected.length > 0,
     stairs: (motionModes.includes("stairs") || eventTypes.includes("stairs-enter")) && axes.zM.span >= minimumAxisM,
     elevator: eventTypes.includes("elevator-candidate") && eventTypes.includes("elevator-exit") && axes.zM.span >= minimumAxisM,
+    recovery: checks.sessionLoaded && checks.poseStream && recoveryAnchorContinuity,
   };
   const report = {
     generatedAt: new Date().toISOString(),
@@ -169,6 +186,14 @@ try {
       maximumPoseTranslationSpan,
       limitM: maximumRotationTranslationM,
       motionModesSafe: rotationMotionModesSafe,
+    },
+    recovery: {
+      firstRecoveredPoseIndex: recoveryPoseIndex >= 0 ? recoveryPoseIndex : null,
+      jumpM: recoveryJumpM,
+      limitM: maximumRecoveryJumpM,
+      continuity: recoveryAnchorContinuity,
+      firstRecoveredTimestampNs: recoveryFirstPose?.deviceTimestampNs ?? null,
+      previousTimestampNs: recoveryPreviousPose?.deviceTimestampNs ?? null,
     },
     sourceFlags,
     client,
