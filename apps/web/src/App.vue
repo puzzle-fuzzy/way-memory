@@ -208,7 +208,9 @@ const sensors = computed(() => (session.value?.latestSensors ?? []).map((sensor)
   icon: sensorIcons[sensor.sensorType] ?? "·",
   detail: formatSensorValues(sensor),
 })));
-const sensorTypeCount = computed(() => session.value?.sensorStats?.length ?? sensors.value.length);
+const sensorInventory = computed(() => session.value?.sensorInventory ?? []);
+const registeredSensorCount = computed(() => sensorInventory.value.filter((sensor) => sensor.registered).length);
+const sensorTypeCount = computed(() => Math.max(sensorInventory.value.length, session.value?.sensorStats?.length ?? 0, sensors.value.length));
 
 const cameraYaw = ref(-0.72);
 const cameraPitch = ref(0.62);
@@ -840,7 +842,7 @@ const activities = computed(() => {
       </section>
 
       <section class="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
-        <article class="panel p-5 sm:p-7"><div class="flex items-start justify-between"><div><p class="section-label">实时遥测</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">设备传感器</h3><p class="mt-1 text-[10px] text-muted">已覆盖 {{ sensorTypeCount }} 类；下方显示最近活跃的 {{ sensors.length }} 类</p></div><span class="live-label"><i />{{ connection === 'connected' ? 'LIVE' : 'WAITING' }}</span></div><div v-if="sensors.length" class="mt-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-3"><div v-for="sensor in sensors" :key="sensor.sensorType" class="sensor-card"><span class="text-lg text-sage">{{ sensor.icon }}</span><div><strong class="block text-[11px]">{{ sensor.label }}</strong><small class="mt-1 block text-[10px] text-muted">{{ sensor.detail }}</small></div><b class="ml-auto text-[10px] text-sage">●</b></div></div><div v-else class="mt-6 rounded-xl border border-dashed border-line px-4 py-8 text-center text-xs leading-6 text-muted">尚未收到 Android 传感器样本<br />开始采集后，这里会显示真实数值与样本计数。</div></article>
+        <article class="panel p-5 sm:p-7"><div class="flex items-start justify-between"><div><p class="section-label">实时遥测</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">设备传感器</h3><p class="mt-1 text-[10px] text-muted">设备发现 {{ sensorInventory.length }} 类，成功注册 {{ registeredSensorCount }} 类；已收到样本 {{ sensors.length }} 类</p></div><span class="live-label"><i />{{ connection === 'connected' ? 'LIVE' : 'WAITING' }}</span></div><div v-if="sensors.length" class="mt-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-3"><div v-for="sensor in sensors" :key="sensor.sensorType" class="sensor-card"><span class="text-lg text-sage">{{ sensor.icon }}</span><div><strong class="block text-[11px]">{{ sensor.label }}</strong><small class="mt-1 block text-[10px] text-muted">{{ sensor.detail }}</small></div><b class="ml-auto text-[10px] text-sage">●</b></div></div><div v-else class="mt-6 rounded-xl border border-dashed border-line px-4 py-8 text-center text-xs leading-6 text-muted">尚未收到 Android 传感器样本<br />开始采集后，这里会显示真实数值与样本计数。</div></article>
         <article class="panel p-5 sm:p-7"><div class="flex items-start justify-between"><div><p class="section-label">最近活动</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">实时会话</h3></div><span class="text-[10px] text-muted">{{ session ? formatTime(session.lastReceivedAt) : '暂无' }}</span></div><div v-if="activities.length"><div v-for="activity in activities" :key="activity.title" class="activity-row"><span :class="['activity-mark', activity.tone]">{{ activity.icon }}</span><div><strong>{{ activity.title }}</strong><small>{{ activity.detail }}</small></div></div></div><div v-else class="mt-6 rounded-xl border border-dashed border-line px-4 py-8 text-center text-xs leading-6 text-muted">暂无会话活动<br />等待 Android 通过局域网连接服务端。</div></article>
       </section>
       <footer class="mt-8 flex flex-col justify-between gap-2 px-1 font-mono text-[9px] text-[#9aa79f] sm:flex-row"><span>way-memory / LAN realtime console</span><span>页面数据来自 API 与 WebSocket，不使用演示轨迹</span></footer>

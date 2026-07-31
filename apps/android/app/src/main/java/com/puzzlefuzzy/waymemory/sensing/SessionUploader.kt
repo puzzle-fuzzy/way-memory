@@ -85,6 +85,18 @@ data class SessionSyncState(
     val lastError: String? = null,
 )
 
+data class SensorInventorySample(
+    val sensorType: String,
+    val name: String,
+    val vendor: String? = null,
+    val version: Int? = null,
+    val powerMa: Float? = null,
+    val minDelayUs: Int? = null,
+    val maxDelayUs: Int? = null,
+    val reportingMode: Int? = null,
+    val registered: Boolean,
+)
+
 class SessionUploader(
     private val baseUrl: String = BuildConfig.API_BASE_URL,
     storageDirectory: File,
@@ -97,6 +109,7 @@ class SessionUploader(
     private var socket: WebSocket? = null
     private var connectionJob: Job? = null
     private var deviceId: String = "android-device"
+    private var sensorInventory: List<SensorInventorySample> = emptyList()
     private var activeSessionId: String? = null
     private var running = false
     private var nextConnectAtMs = 0L
@@ -105,9 +118,10 @@ class SessionUploader(
 
     val syncState: StateFlow<SessionSyncState> = state.asStateFlow()
 
-    fun start(deviceId: String) {
+    fun start(deviceId: String, sensorInventory: List<SensorInventorySample> = emptyList()) {
         if (running) return
         this.deviceId = deviceId
+        this.sensorInventory = sensorInventory.take(MAX_SENSOR_INVENTORY)
         activeSessionId = runCatching {
             sessionIdFile.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
         }.getOrNull()
@@ -192,6 +206,21 @@ class SessionUploader(
                 .put("type", "session.start")
                 .put("deviceId", deviceId)
                 .put("mode", "learning")
+                .put("sensors", JSONArray().apply {
+                    sensorInventory.forEach { sensor ->
+                        put(JSONObject().apply {
+                            put("sensorType", sensor.sensorType)
+                            put("name", sensor.name)
+                            sensor.vendor?.let { put("vendor", it) }
+                            sensor.version?.let { put("version", it) }
+                            sensor.powerMa?.let { put("powerMa", it) }
+                            sensor.minDelayUs?.let { put("minDelayUs", it) }
+                            sensor.maxDelayUs?.let { put("maxDelayUs", it) }
+                            sensor.reportingMode?.let { put("reportingMode", it) }
+                            put("registered", sensor.registered)
+                        })
+                    }
+                })
         } else {
             JSONObject()
                 .put("type", "session.resume")
@@ -279,6 +308,7 @@ class SessionUploader(
     companion object {
         private const val TAG = "WayMemorySync"
         private const val MAX_BATCH = 100
+        private const val MAX_SENSOR_INVENTORY = 128
         private const val FLUSH_INTERVAL_MS = 80L
         private const val QUEUE_UI_INTERVAL_MS = 250L
         private const val INITIAL_RECONNECT_DELAY_MS = 250L

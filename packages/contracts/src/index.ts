@@ -155,10 +155,23 @@ export interface SensorSampleStats {
   lastSensorAccuracy?: number;
 }
 
+export interface SensorInventoryEntry {
+  sensorType: string;
+  name: string;
+  vendor?: string;
+  version?: number;
+  powerMa?: number;
+  minDelayUs?: number;
+  maxDelayUs?: number;
+  reportingMode?: number;
+  registered: boolean;
+}
+
 export interface CreateSessionInput {
   deviceId: string;
   mode: ObservationMode;
   routeId?: string;
+  sensors?: SensorInventoryEntry[];
 }
 
 export interface ObservationSession {
@@ -183,6 +196,7 @@ export interface ObservationSession {
   motionMode: MotionMode;
   closure: ClosureState;
   motionEvents: MotionEvent[];
+  sensorInventory: SensorInventoryEntry[];
   sensorStats: SensorSampleStats[];
   latestRelativePosition?: RelativeMotionPoint;
   latestSensors: LiveSensorSnapshot[];
@@ -210,6 +224,7 @@ export interface SessionDelta {
   motionMode: ObservationSession["motionMode"];
   closure: ObservationSession["closure"];
   motionEvents: MotionEvent[];
+  sensorInventory: SensorInventoryEntry[];
   sensorStats: SensorSampleStats[];
   latestSensors: LiveSensorSnapshot[];
 }

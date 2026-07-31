@@ -11,6 +11,7 @@ import type {
   RouteSummary,
   SessionDelta,
   SensorSample,
+  SensorInventoryEntry,
   TrackPoint,
 } from "@way-memory/contracts";
 import { SessionStore } from "./sessionStore";
@@ -68,6 +69,7 @@ const MAX_POSE_TRACK_POINTS = 1_200;
 const MAX_MOTION_EVENTS = 128;
 const MAX_RAW_REPLAY_SAMPLES = 1_024;
 const MAX_SENSOR_STATS = 128;
+const MAX_SENSOR_INVENTORY = 128;
 const MAX_LIVE_SENSORS = 32;
 const MAX_SENSOR_VALUES = 16;
 const MAX_JSON_BYTES = 512 * 1024;
@@ -123,6 +125,7 @@ const flushDirtySessions = () => {
 for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
   // A restart cannot prove that a previously active capture ended cleanly.
   snapshot.session.sensorStats ??= [];
+  snapshot.session.sensorInventory ??= [];
   snapshot.session.status = "stopped";
   sessions.set(snapshot.session.sessionId, snapshot.session);
   sessionRuntime.set(snapshot.session.sessionId, { rawSamples: snapshot.rawSamples });
@@ -372,6 +375,44 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
   };
 };
 
+const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
+  if (!Array.isArray(value)) return [];
+  const result: SensorInventoryEntry[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.sensorType !== "string" || typeof item.name !== "string" || typeof item.registered !== "boolean") continue;
+    const sensorType = item.sensorType.trim().slice(0, 64);
+    const name = item.name.trim().slice(0, 128);
+    if (!sensorType || !name) continue;
+    const vendor = item.vendor === undefined ? undefined : typeof item.vendor === "string" ? item.vendor.trim().slice(0, 128) : null;
+    const version = item.version === undefined ? undefined : finiteNumber(item.version);
+    const powerMa = item.powerMa === undefined ? undefined : finiteNumber(item.powerMa);
+    const minDelayUs = item.minDelayUs === undefined ? undefined : finiteNumber(item.minDelayUs);
+    const maxDelayUs = item.maxDelayUs === undefined ? undefined : finiteNumber(item.maxDelayUs);
+    const reportingMode = item.reportingMode === undefined ? undefined : finiteNumber(item.reportingMode);
+    if (
+      vendor === null
+      || (version !== undefined && (version === null || !Number.isInteger(version) || version < 0 || version > 1_000_000))
+      || (powerMa !== undefined && (powerMa === null || powerMa < 0 || powerMa > 100_000))
+      || (minDelayUs !== undefined && (minDelayUs === null || !Number.isInteger(minDelayUs) || minDelayUs < 0 || minDelayUs > 1_000_000_000))
+      || (maxDelayUs !== undefined && (maxDelayUs === null || !Number.isInteger(maxDelayUs) || maxDelayUs < 0 || maxDelayUs > 1_000_000_000))
+      || (reportingMode !== undefined && (reportingMode === null || !Number.isInteger(reportingMode) || reportingMode < 0 || reportingMode > 16))
+    ) continue;
+    result.push({
+      sensorType,
+      name,
+      ...(vendor ? { vendor } : {}),
+      ...(version === undefined || version === null ? {} : { version }),
+      ...(powerMa === undefined || powerMa === null ? {} : { powerMa }),
+      ...(minDelayUs === undefined || minDelayUs === null ? {} : { minDelayUs }),
+      ...(maxDelayUs === undefined || maxDelayUs === null ? {} : { maxDelayUs }),
+      ...(reportingMode === undefined || reportingMode === null ? {} : { reportingMode }),
+      registered: item.registered,
+    });
+    if (result.length >= MAX_SENSOR_INVENTORY) break;
+  }
+  return result;
+};
+
 const haversineDistanceM = (left: { lat: number; lng: number }, right: { lat: number; lng: number }) => {
   const earthRadiusM = 6_371_000;
   const toRadians = (value: number) => value * Math.PI / 180;
@@ -606,6 +647,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     motionMode: "unknown",
     closure: { status: "open", confidence: 0, adjusted: false },
     motionEvents: [],
+    sensorInventory: normalizeSensorInventory(input.sensors),
     sensorStats: [],
     latestSensors: [],
     status: "active",
@@ -736,6 +778,7 @@ const publishSessionDelta = (
     motionMode: session.motionMode,
     closure: session.closure,
     motionEvents: result.motionEvents,
+    sensorInventory: session.sensorInventory,
     sensorStats: session.sensorStats,
     latestSensors: session.latestSensors,
   };
@@ -837,7 +880,7 @@ const server = Bun.serve<RealtimeClient>({
         ws.send(JSON.stringify({ type: "error", error: "message_too_large" }));
         return;
       }
-      let message: { type?: string; deviceId?: string; mode?: CreateSessionInput["mode"]; routeId?: string; sessionId?: string; samples?: unknown[] };
+      let message: { type?: string; deviceId?: string; mode?: CreateSessionInput["mode"]; routeId?: string; sessionId?: string; samples?: unknown[]; sensors?: unknown[] };
       try {
         message = JSON.parse(String(raw));
       } catch {
@@ -852,6 +895,7 @@ const server = Bun.serve<RealtimeClient>({
             deviceId: message.deviceId ?? ws.data.deviceId ?? "android-device",
             mode: message.mode ?? "learning",
             routeId: message.routeId,
+            sensors: message.sensors as SensorInventoryEntry[] | undefined,
           });
         } catch (error) {
           ws.send(JSON.stringify({ type: "error", error: error instanceof Error && error.message === "session_limit" ? "session_limit" : "session_start_failed" }));

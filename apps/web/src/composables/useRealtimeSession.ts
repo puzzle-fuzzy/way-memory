@@ -67,6 +67,7 @@ export function useRealtimeSession() {
       motionMode: delta.motionMode,
       closure: delta.closure,
       motionEvents: [...current.motionEvents, ...delta.motionEvents].slice(-128),
+      sensorInventory: delta.sensorInventory ?? current.sensorInventory,
       sensorStats: delta.sensorStats,
       latestSensors: delta.latestSensors,
     });

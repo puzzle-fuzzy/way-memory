@@ -28,6 +28,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val locationManager = appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private val state = MutableStateFlow(SensorUiState())
     private val readings = linkedMapOf<String, SensorReading>()
+    private val sensorInventory = mutableListOf<SensorInventorySample>()
     private val registeredSensorKeys = mutableSetOf<String>()
     private val uploader = SessionUploader(storageDirectory = File(appContext.filesDir, "capture-queue"))
     private val poseFusion = PoseFusionEngine()
@@ -70,6 +71,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         if (state.value.collecting) return
 
         readings.clear()
+        sensorInventory.clear()
         registeredSensorKeys.clear()
         lastPublishedLocation = null
         totalCollectedSamples = 0L
@@ -91,7 +93,10 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             error = null,
         )
 
-        uploader.start(Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device")
+        uploader.start(
+            deviceId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device",
+            sensorInventory = sensorInventory.toList(),
+        )
         activity?.let(visualCollector::start)
 
         if (hasPreciseLocationPermission()) requestLocationUpdates()
@@ -125,6 +130,17 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         val registered = runCatching {
             sensorManager.registerListener(this, sensor, delay)
         }.getOrDefault(false)
+        sensorInventory += SensorInventorySample(
+            sensorType = sensorWireType(sensor),
+            name = sensor.name.take(128),
+            vendor = sensor.vendor.takeIf { it.isNotBlank() }?.take(128),
+            version = sensor.version,
+            powerMa = sensor.power.takeIf { it.isFinite() && it >= 0f },
+            minDelayUs = sensor.minDelay.takeIf { it >= 0 },
+            maxDelayUs = sensor.maxDelay.takeIf { it >= 0 },
+            reportingMode = sensor.reportingMode,
+            registered = registered,
+        )
         readings[key] = if (registered) {
             SensorReading(label, SensorState.LIMITED, "Waiting for data")
         } else {

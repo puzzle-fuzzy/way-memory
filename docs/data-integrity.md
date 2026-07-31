@@ -12,6 +12,7 @@ The live route is built from the `poseTrack` array returned by the API. The web 
 - `sampleCount` counts all accepted sensor samples. The `track` length counts only accepted samples that contain a latitude/longitude pair; accelerometer, gyroscope, and rotation-vector samples are not position points.
 - Android samples carry a stable `sampleId`. The server keeps a bounded per-session seen-ID window (8,192 IDs) and ignores repeats, so a crash between WebSocket send and local cursor commit cannot duplicate route points or sensor counts. Legacy samples without an ID remain accepted but cannot receive this idempotency guarantee.
 - `rawSampleCount` counts normalized samples accepted into the bounded replay ring. The `/api/sessions/:id/raw` endpoint exposes only the retained tail, never an unbounded history.
+- `sensorInventory` is the bounded capability snapshot sent at session start. It records the Android sensor string type, name, vendor metadata, timing/power hints, and whether listener registration succeeded; `sensorStats` remains the separate observed-sample count.
 - The Android uploader persists a bounded app-private offline queue capped at 4,096 samples and 8 MiB. It drops the oldest samples after either hard limit and surfaces the drop count in the capture UI. The active session ID is persisted too, so a process restart can attempt to resume the same server session. If the server grace window has expired, the client creates a new session and drains the retained samples there. A crash between WebSocket send and the local cursor commit may duplicate a small batch; this is intentionally safer than losing a route segment.
 - `poseTrack` counts unified fused-pose points in local ENU meters. Each Pose includes source flags, accuracy, velocity, motion mode and stationary state.
 - Each Pose may carry a `frame`: `local-enu` for the unified route frame or `arcore-local` for raw session-local visual coordinates. Legacy payloads default to `local-enu`; Android promotes ARCore samples only after horizontal frame alignment.
@@ -40,6 +41,7 @@ The MVP is intentionally memory-bounded because sessions are currently in memory
 - 1,024 normalized raw samples per session for short replay.
 - 32 latest sensor types per session, with at most 16 values per sensor snapshot.
 - 128 bounded sensor-stat entries per session, retaining counts and first/last device timestamps without retaining every raw value.
+- 128 sensor-inventory entries per session.
 - 500 samples per batch.
 - 512 KiB maximum JSON request/WebSocket message budget.
 

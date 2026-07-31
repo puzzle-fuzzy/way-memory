@@ -33,9 +33,20 @@ try {
       const dashboard = new WebSocket("ws://127.0.0.1:8787/realtime?role=dashboard");
       const device = new WebSocket("ws://127.0.0.1:8787/realtime?role=device&deviceId=smoke-device");
       await Promise.all([waitForOpen(dashboard), waitForOpen(device)]);
-      device.send(JSON.stringify({ type: "session.start", deviceId: "smoke-device", mode: "learning" }));
+      device.send(JSON.stringify({
+        type: "session.start",
+        deviceId: "smoke-device",
+        mode: "learning",
+        sensors: [
+          { sensorType: "android.sensor.accelerometer", name: "Smoke Accelerometer", vendor: "test", version: 1, minDelayUs: 10_000, registered: true },
+          { sensorType: "android.sensor.protected", name: "Protected Sensor", registered: false },
+        ],
+      }));
       const started = await waitForMessage(device);
-      const session = started.session as { sessionId: string };
+      const session = started.session as { sessionId: string; sensorInventory?: Array<{ sensorType: string; registered: boolean }> };
+      if (started.type !== "session.started" || session.sensorInventory?.length !== 2 || session.sensorInventory[1]?.registered !== false) {
+        throw new Error("sensor inventory was not preserved")
+      }
       await waitForMessage(dashboard);
       device.send(JSON.stringify({
         type: "samples",
