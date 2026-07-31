@@ -40,23 +40,27 @@ try {
         sessionId: session.sessionId,
         samples: [
           { deviceTimestampNs: 1, sensorType: "accelerometer", values: [0, 0, 9.8] },
-          { deviceTimestampNs: 2, sensorType: "location", values: [], location: { lat: 31.23, lng: 121.47, accuracyM: 4 } },
+          { deviceTimestampNs: 2, sensorType: "android.sensor.pressure", values: [1013.25] },
+          { deviceTimestampNs: 3, sensorType: "android.sensor.pressure", values: [1012.5] },
+          { deviceTimestampNs: 4, sensorType: "location", values: [], location: { lat: 31.23, lng: 121.47, accuracyM: 4 } },
         ],
       }));
       const accepted = await waitForMessage(device);
       const updated = await waitForMessage(dashboard);
-      const updatedSession = updated.session as { sampleCount: number; track: unknown[]; latestSensors: unknown[] };
+      const updatedSession = updated.session as { sampleCount: number; track: Array<{ altitudeM?: number; altitudeSource?: string }>; latestSensors: unknown[] };
       if (
         accepted.type !== "samples.accepted"
-        || updatedSession.sampleCount !== 2
+        || updatedSession.sampleCount !== 4
         || updatedSession.track.length !== 1
-        || updatedSession.latestSensors.length !== 2
+        || typeof updatedSession.track[0].altitudeM !== "number"
+        || updatedSession.track[0].altitudeSource !== "barometer"
+        || updatedSession.latestSensors.length !== 3
       ) {
         throw new Error("Unexpected realtime session update");
       }
       dashboard.close();
       device.close();
-      console.log("API and WebSocket smoke passed", { routes: routes.length, samples: 2 });
+      console.log("API and WebSocket smoke passed", { routes: routes.length, samples: 4, altitude: "barometer" });
       process.exitCode = 0;
       break;
     } catch (error) {

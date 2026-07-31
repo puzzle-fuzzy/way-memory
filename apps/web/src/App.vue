@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import type { LiveSensorSnapshot, TrackPoint } from "@way-memory/contracts";
 import { useRealtimeSession } from "./composables/useRealtimeSession";
 
@@ -22,7 +22,9 @@ const sessionLabel = computed(() => {
 const locationLabel = computed(() => {
   const location = session.value?.latestLocation;
   if (!location) return "等待位置样本";
-  return `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`;
+  const altitudeM = session.value?.latestAltitudeM;
+  const altitude = typeof altitudeM === "number" ? ` · Z ${altitudeM >= 0 ? "+" : ""}${altitudeM.toFixed(1)}m` : "";
+  return `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}${altitude}`;
 });
 
 const routeLabel = computed(() => {
@@ -52,10 +54,25 @@ const haversineDistanceM = (left: TrackPoint, right: TrackPoint) => {
 const routeDistanceM = computed(() => {
   let distance = 0;
   for (let index = 1; index < track.value.length; index += 1) {
-    distance += haversineDistanceM(track.value[index - 1], track.value[index]);
+    const planarDistance = haversineDistanceM(track.value[index - 1], track.value[index]);
+    const heightDelta = (track.value[index].altitudeM ?? 0) - (track.value[index - 1].altitudeM ?? 0);
+    distance += Math.sqrt(planarDistance ** 2 + heightDelta ** 2);
   }
   return Math.round(distance);
 });
+
+const altitudeValues = computed(() => track.value.flatMap((point) => typeof point.altitudeM === "number" ? [point.altitudeM] : []));
+const hasAltitude = computed(() => altitudeValues.value.length > 0);
+const altitudeDeltaM = computed(() => {
+  if (!altitudeValues.value.length) return null;
+  return Math.max(...altitudeValues.value) - Math.min(...altitudeValues.value);
+});
+const latestAltitudeLabel = computed(() => {
+  const altitudeM = session.value?.latestAltitudeM;
+  if (typeof altitudeM !== "number") return "等待高度数据";
+  return `${altitudeM >= 0 ? "+" : ""}${altitudeM.toFixed(1)}m`;
+});
+const altitudeSourceLabel = computed(() => session.value?.altitudeSource === "gnss" ? "GNSS 相对高度" : session.value?.altitudeSource === "barometer" ? "气压计相对高度" : "尚未建立 Z 轴");
 
 const confidencePercent = computed(() => {
   const accuracyM = session.value?.latestLocation?.accuracyM;
@@ -105,27 +122,63 @@ const sensors = computed(() => (session.value?.latestSensors ?? []).map((sensor)
   detail: formatSensorValues(sensor),
 })));
 
-const mapPoints = computed(() => {
+const cameraYaw = ref(-0.72);
+const cameraPitch = ref(0.62);
+const dragState = ref<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
+
+const beginCameraDrag = (event: PointerEvent) => {
+  const target = event.currentTarget as HTMLElement | null;
+  target?.setPointerCapture(event.pointerId);
+  dragState.value = { x: event.clientX, y: event.clientY, yaw: cameraYaw.value, pitch: cameraPitch.value };
+};
+
+const moveCameraDrag = (event: PointerEvent) => {
+  if (!dragState.value) return;
+  cameraYaw.value = dragState.value.yaw + (event.clientX - dragState.value.x) * 0.008;
+  cameraPitch.value = Math.min(1.15, Math.max(0.3, dragState.value.pitch + (event.clientY - dragState.value.y) * 0.006));
+};
+
+const endCameraDrag = () => { dragState.value = null; };
+const resetCamera = () => { cameraYaw.value = -0.72; cameraPitch.value = 0.62; };
+
+const projectedTrack = computed(() => {
   if (!track.value.length) return [];
-  const lats = track.value.map((point) => point.lat);
-  const lngs = track.value.map((point) => point.lng);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-  const latRange = Math.max(maxLat - minLat, 0.00001);
-  const lngRange = Math.max(maxLng - minLng, 0.00001);
-  const padding = 48;
-  const width = 620 - padding * 2;
-  const height = 300 - padding * 2;
-  return track.value.map((point) => ({
-    x: padding + ((point.lng - minLng) / lngRange) * width,
-    y: padding + (1 - (point.lat - minLat) / latRange) * height,
+  const origin = track.value[0];
+  const originLatRad = origin.lat * Math.PI / 180;
+  const worldPoints = track.value.map((point, index) => ({
+    index,
+    eastM: (point.lng - origin.lng) * 111320 * Math.cos(originLatRad),
+    northM: (point.lat - origin.lat) * 110540,
+    altitudeM: point.altitudeM ?? 0,
+    hasAltitude: typeof point.altitudeM === "number",
   }));
+  const horizontalExtent = Math.max(...worldPoints.map((point) => Math.hypot(point.eastM, point.northM)), 1);
+  const verticalExtent = Math.max(...worldPoints.map((point) => Math.abs(point.altitudeM * 2.2)), 1);
+  const scale = 220 / Math.max(horizontalExtent, verticalExtent);
+  const yawCos = Math.cos(cameraYaw.value);
+  const yawSin = Math.sin(cameraYaw.value);
+  const pitchSin = Math.sin(cameraPitch.value);
+  const pitchCos = Math.cos(cameraPitch.value);
+  return worldPoints.map((point) => {
+    const rotatedX = point.eastM * yawCos - point.northM * yawSin;
+    const rotatedY = point.eastM * yawSin + point.northM * yawCos;
+    const displayAltitude = point.altitudeM * 2.2;
+    const groundY = 210 - rotatedY * pitchSin * scale;
+    return {
+      ...point,
+      x: 310 + rotatedX * scale,
+      y: groundY - displayAltitude * pitchCos * scale,
+      groundY,
+      depth: rotatedY * pitchCos - displayAltitude * pitchSin,
+    };
+  });
 });
 
-const mapPath = computed(() => mapPoints.value.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" "));
-const currentMapPoint = computed(() => mapPoints.value.at(-1));
+const projectedPath = computed(() => projectedTrack.value.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" "));
+const projectedGroundPath = computed(() => projectedTrack.value.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.groundY.toFixed(1)}`).join(" "));
+const currentMapPoint = computed(() => projectedTrack.value.at(-1));
+const mapPoints = projectedTrack;
+const mapPath = projectedPath;
 const hasTrack = computed(() => track.value.length > 1);
 
 const activities = computed(() => {
@@ -184,7 +237,32 @@ const activities = computed(() => {
         <article class="panel p-5 sm:p-7">
           <div class="flex items-start justify-between gap-3"><div><p class="section-label">当前路线</p><h2 class="mt-1 text-xl font-extrabold tracking-[-0.05em]">{{ routeLabel }}</h2></div><span class="status-pill">{{ routeStatusLabel }}</span></div>
           <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前会话轨迹</span></div><div><strong class="metric">{{ session?.sampleCount ?? 0 }}</strong><span class="metric-label">个实时样本</span></div><div><strong class="metric">{{ confidencePercent === null ? '—' : `${confidencePercent}%` }}</strong><span class="metric-label">位置置信度</span></div></div>
-          <div class="map-frame mt-6">
+          <div class="map-frame mt-6 overflow-hidden">
+            <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">三维轨迹 · X / Y / Z</p><p class="mt-1 text-[11px] text-muted">经纬度平面 + 相对高度</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
+            <div class="relative touch-none select-none bg-[#e9f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
+              <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="可旋转的三维实时路线轨迹">
+                <defs><linearGradient id="route3dGradient" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#e05c3b" /><stop offset="55%" stop-color="#c47b4b" /><stop offset="100%" stop-color="#3f8b68" /></linearGradient><filter id="route3dShadow"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".2" /></filter></defs>
+                <rect width="620" height="300" fill="#e9f0eb" />
+                <path d="M72 246 L310 178 L548 246 L310 288 Z" fill="#dce8df" opacity=".72" />
+                <path d="M72 246 L310 178 M548 246 L310 178 M72 246 L310 288 M548 246 L310 288" fill="none" stroke="#c4d4ca" stroke-width="1" />
+                <path d="M132 229 L310 191 L488 229 M190 246 L310 213 L430 246 M248 263 L310 246 L372 263" fill="none" stroke="#cbd9d0" stroke-width="1" opacity=".8" />
+                <path v-if="projectedTrack.length" :d="projectedGroundPath" fill="none" stroke="#99aa9f" stroke-width="2" stroke-dasharray="4 5" opacity=".72" />
+                <g v-for="point in projectedTrack" :key="`height-${point.index}`"><line v-if="point.hasAltitude" :x1="point.x" :y1="point.groundY" :x2="point.x" :y2="point.y" stroke="#c47b4b" stroke-width="1.5" stroke-dasharray="3 4" opacity=".8" /></g>
+                <path v-if="hasTrack" :d="projectedPath" fill="none" stroke="#f8fbf7" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" filter="url(#route3dShadow)" />
+                <path v-if="hasTrack" :d="projectedPath" fill="none" stroke="url(#route3dGradient)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+                <template v-if="projectedTrack.length">
+                  <g class="map-node"><circle :cx="projectedTrack[0].x" :cy="projectedTrack[0].y" r="8" /><text :x="projectedTrack[0].x" :y="projectedTrack[0].y - 16">起点</text></g>
+                  <g v-if="currentMapPoint" class="current-pos"><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="15" /><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="6" /></g>
+                </template>
+                <text v-else x="310" y="145" text-anchor="middle" fill="#75857d" font-size="13">等待 Android 上报位置样本</text>
+                <text x="558" y="259" fill="#75857d" font-size="10">X 东西</text><text x="304" y="174" fill="#75857d" font-size="10">Y 南北</text><text x="320" y="60" fill="#c47b4b" font-size="10">Z 高度</text>
+                <text v-if="projectedTrack.length && !hasAltitude" x="310" y="278" text-anchor="middle" fill="#75857d" font-size="10">尚未收到 GNSS 海拔或气压高度，当前为平面投影</text>
+              </svg>
+              <div class="pointer-events-none absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1.5 text-[9px] text-muted shadow-sm backdrop-blur">按住拖动旋转 · 高度视觉放大 2.2×</div>
+            </div>
+            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-ember" />三维融合轨迹</span><span><i class="legend-dot bg-[#c47b4b]" />高度投影</span><span><i class="legend-dot bg-sage" />当前手机位置</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
+          </div>
+          <div class="map-frame mt-6 hidden">
             <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="实时路线轨迹">
               <defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="#dce4df" stroke-width="1" /></pattern><filter id="shadow"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".16" /></filter></defs>
               <rect width="620" height="300" fill="#edf2ed" /><rect width="620" height="300" fill="url(#grid)" />

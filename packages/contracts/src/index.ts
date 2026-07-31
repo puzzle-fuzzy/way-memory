@@ -24,6 +24,8 @@ export interface TrackPoint {
   accuracyM: number;
   confidence: number;
   source: "gnss" | "fused" | "visual" | "manual";
+  altitudeM?: number;
+  altitudeSource?: "gnss" | "barometer";
 }
 
 export interface DeviceSnapshot {
@@ -89,6 +91,8 @@ export interface ObservationSession {
   lastSampleAt?: string;
   sampleCount: number;
   latestLocation?: SensorSample["location"];
+  latestAltitudeM?: number;
+  altitudeSource?: "gnss" | "barometer";
   track: TrackPoint[];
   latestSensors: LiveSensorSnapshot[];
   status: "active" | "stopped";

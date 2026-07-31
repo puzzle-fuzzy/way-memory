@@ -52,6 +52,7 @@ const route: RouteSummary = {
 };
 
 const sessions = new Map<string, ObservationSession>();
+const altitudeReferences = new Map<string, { gnssM?: number; pressureHpa?: number }>();
 
 type RealtimeClient = {
   role: "device" | "dashboard";
@@ -80,6 +81,20 @@ const normalizeSensorType = (sensorType: string) => {
   }[normalized] ?? normalized;
 };
 
+const pressureToRelativeAltitudeM = (pressureHpa: number, referenceHpa: number) =>
+  44330 * (1 - Math.pow(pressureHpa / referenceHpa, 0.190294957));
+
+const updateBarometerAltitude = (session: ObservationSession, sample: SensorSample) => {
+  if (session.altitudeSource === "gnss") return;
+  const pressureHpa = sample.values[0];
+  if (typeof pressureHpa !== "number" || !Number.isFinite(pressureHpa) || pressureHpa < 300 || pressureHpa > 1100) return;
+  const reference = altitudeReferences.get(session.sessionId) ?? {};
+  reference.pressureHpa ??= pressureHpa;
+  altitudeReferences.set(session.sessionId, reference);
+  session.latestAltitudeM = pressureToRelativeAltitudeM(pressureHpa, reference.pressureHpa);
+  session.altitudeSource = "barometer";
+};
+
 const upsertSensor = (
   session: ObservationSession,
   sample: SensorSample,
@@ -106,14 +121,26 @@ const upsertSensor = (
   };
 };
 
-const toTrackPoint = (location: NonNullable<SensorSample["location"]>): TrackPoint => {
+const toTrackPoint = (session: ObservationSession, location: NonNullable<SensorSample["location"]>): TrackPoint => {
   const accuracyM = Math.max(0.1, location.accuracyM ?? 50);
+  const reference = altitudeReferences.get(session.sessionId) ?? {};
+  let altitudeM = session.latestAltitudeM;
+  let altitudeSource = session.altitudeSource;
+  if (typeof location.altitudeM === "number" && Number.isFinite(location.altitudeM)) {
+    reference.gnssM ??= location.altitudeM;
+    altitudeM = location.altitudeM - reference.gnssM;
+    altitudeSource = "gnss";
+    session.latestAltitudeM = altitudeM;
+    session.altitudeSource = altitudeSource;
+    altitudeReferences.set(session.sessionId, reference);
+  }
   return {
     lat: location.lat,
     lng: location.lng,
     accuracyM,
     confidence: clamp(1 - accuracyM / 50, 0, 1),
     source: "fused",
+    ...(typeof altitudeM === "number" && altitudeSource ? { altitudeM, altitudeSource } : {}),
   };
 };
 
@@ -130,6 +157,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     status: "active",
   };
   sessions.set(session.sessionId, session);
+  altitudeReferences.set(session.sessionId, {});
   device.connected = true;
   device.lastSeen = session.startedAt;
   return session;
@@ -141,8 +169,11 @@ const acceptSamples = (session: ObservationSession, samples: SensorSample[]) => 
   session.lastReceivedAt = receivedAt;
   session.lastSampleAt = receivedAt;
   for (const sample of samples) {
+    if (normalizeSensorType(sample.sensorType) === "barometer") updateBarometerAltitude(session, sample);
+  }
+  for (const sample of samples) {
     if (sample.location) {
-      const point = toTrackPoint(sample.location);
+      const point = toTrackPoint(session, sample.location);
       session.latestLocation = sample.location;
       session.track.push(point);
       upsertSensor(session, sample, receivedAt, "gnss");
@@ -204,6 +235,7 @@ const server = Bun.serve<RealtimeClient>({
       if (url.pathname.endsWith("/stop") && request.method === "POST") {
         session.status = "stopped";
         session.lastReceivedAt = new Date().toISOString();
+        altitudeReferences.delete(session.sessionId);
         device.connected = false;
         return json(session);
       }
@@ -261,6 +293,7 @@ const server = Bun.serve<RealtimeClient>({
         if (session) {
           session.status = "stopped";
           session.lastReceivedAt = new Date().toISOString();
+          altitudeReferences.delete(session.sessionId);
           device.connected = false;
           publishSession(server, session);
         }
@@ -274,6 +307,7 @@ const server = Bun.serve<RealtimeClient>({
       if (session && session.status === "active") {
         session.status = "stopped";
         session.lastReceivedAt = new Date().toISOString();
+        altitudeReferences.delete(session.sessionId);
         device.connected = false;
         publishSession(server, session);
       }
