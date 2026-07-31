@@ -13,7 +13,7 @@ The API now has an opt-in enforced authorization mode for the single-node MVP. S
 - Access-token and ticket rows are pruned on insert and capped at 10,000 rows; expired/revoked tickets cannot grow the SQLite file without bound.
 - `POST /api/auth/rotate` revokes the old access token immediately and returns a replacement; `POST /api/auth/revoke` revokes the current token.
 - A dashboard can export its own bounded session snapshot and retained raw replay through `GET /api/sessions/<id>/export`. It can delete a stopped session through `DELETE /api/sessions/<id>`; active sessions are rejected, and a session already attached to a route must be removed from that route first so derived route data is not silently left behind.
-- `bun run smoke:auth` exercises the unauthorized, bootstrap, owner binding, role separation, ticket, rotation, and in-memory deletion/export paths. `bun run smoke:lifecycle` repeats the export, route-attachment guard, deletion, and post-restart deletion check against SQLite.
+- `bun run smoke:auth` exercises the unauthorized, bootstrap, owner binding, cross-owner resource isolation, role separation, ticket, rotation, deletion/export, three-observation route alignment, verified publication, and one-time navigation handoff paths. `bun run smoke:lifecycle` repeats the export, route-attachment guard, deletion, and post-restart deletion check against SQLite.
 
 The Android client now exchanges a ten-minute dashboard-generated pairing code over HTTPS, encrypts the resulting device token with an Android Keystore-backed AES-GCM key, and exchanges that token for a short-lived WebSocket ticket before connecting. The dashboard sign-in and pairing-code flow are implemented; the long-term token field remains a legacy acceptance bridge, not the normal onboarding path.
 
@@ -79,6 +79,6 @@ $env:WAY_MEMORY_DASHBOARD_TOKEN = "<dashboard token>"
 bun run smoke:public-auth
 ```
 
-This creates and stops one disposable session, verifies dashboard broadcast, uploads one pose, reconnects with `session.resume`, reads the session and raw replay, and asserts device-read/dashboard-write role separation. It does not rotate or consume bootstrap credentials and never prints token values.
+This creates and stops one disposable session, verifies dashboard broadcast, uploads one pose, reconnects with `session.resume`, reads the session and raw replay, and asserts device-read/dashboard-write role separation. It then creates three disposable route observations, verifies repeat alignment and route publication, consumes a one-time navigation handoff, and rejects handoff reuse. It does not rotate or consume bootstrap credentials and never prints token values.
 
 Until these gates exist, public smoke tests may use the IP-based HTTP/WS deployment, but real user route data must not be sent there.
