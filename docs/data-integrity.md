@@ -40,7 +40,7 @@ The live route is built from the `poseTrack` array returned by the API. The web 
 The MVP is intentionally memory-bounded because sessions are currently in memory:
 
 - 20 sessions maximum; stopped sessions are evicted oldest-first when capacity is needed.
-- 100 persisted routes maximum; each route retains at most 50 observation summaries, 500 reference location points, and 1,200 reference Pose points.
+- 100 persisted routes maximum; each route retains at most 50 observation summaries, 128 manual nodes, 500 reference location points, and 1,200 reference Pose points.
 - 500 track points per session.
 - 1,200 unified Pose points per session.
 - 128 motion events per session.

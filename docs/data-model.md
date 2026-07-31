@@ -59,11 +59,13 @@
 
 - `nodeId`
 - `routeId`
-- `position`
+- `xM / yM / zM`（路线局部三维坐标）
+- `lat / lng`（可选的 GNSS 锚点）
 - `nodeType`: start / turn / door / stairs / elevator / crossing / landmark / hazard / end
 - `instruction`
 - `confidence`
-- `manualAnnotation`
+- `manualAnnotation`（当前人工节点接口固定为 true）
+- `createdAt`
 - `visionEvidenceRefs`
 
 ## Evidence

@@ -74,7 +74,7 @@ export class RouteStore {
     return rows.flatMap((row) => {
       try {
         const route = JSON.parse(row.route_json) as StoredRoute;
-        if (!route.routeId || !route.ownerId || !Array.isArray(route.track) || !Array.isArray(route.poseTrack) || !Array.isArray(route.observationSummaries)) return [];
+        if (!route.routeId || !route.ownerId || !Array.isArray(route.track) || !Array.isArray(route.poseTrack) || !Array.isArray(route.observationSummaries) || !Array.isArray(route.nodeRecords)) return [];
         return [route];
       } catch {
         return [];

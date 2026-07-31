@@ -107,14 +107,20 @@ try {
     body: JSON.stringify({ sessionId }),
   });
   if (repeated.response.status !== 200 || repeated.body.observations !== 1) throw new Error("route observation attach was not idempotent");
+  const node = await requestJson(`/api/routes/${routeId}/nodes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ nodeType: "door", instruction: "进入大门后向前", xM: 1, yM: 0, zM: 0, lat: 31.23041, lng: 121.47, confidence: 0.95 }),
+  });
+  if (node.response.status !== 201 || node.body.nodes !== 1 || node.body.nodeRecords?.length !== 1 || node.body.nodeRecords[0]?.manualAnnotation !== true) throw new Error("manual route node was not persisted");
   const publish = await requestJson(`/api/routes/${routeId}/publish`, { method: "POST" });
   if (publish.response.status !== 409 || publish.body.error !== "route_alignment_required") throw new Error("route published without alignment");
 
   await stopApi(api);
   api = await startApi();
   const restored = await requestJson(`/api/routes/${routeId}`);
-  if (restored.response.status !== 200 || restored.body.observations !== 1 || restored.body.referenceSessionId !== sessionId) throw new Error("route did not survive restart");
-  console.log("Route persistence smoke passed", { routeId, sessionId, observations: restored.body.observations, referencePosePoints: restored.body.poseTrack.length, publishBlocked: publish.body.error });
+  if (restored.response.status !== 200 || restored.body.observations !== 1 || restored.body.referenceSessionId !== sessionId || restored.body.nodeRecords?.length !== 1) throw new Error("route did not survive restart");
+  console.log("Route persistence smoke passed", { routeId, sessionId, observations: restored.body.observations, referencePosePoints: restored.body.poseTrack.length, nodes: restored.body.nodeRecords.length, publishBlocked: publish.body.error });
 } finally {
   await stopApi(api);
   await rm(dbPath, { force: true });

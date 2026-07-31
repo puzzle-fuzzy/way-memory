@@ -100,6 +100,12 @@ try {
   if (deviceList.response.status !== 401) throw new Error("device credential can list dashboard sessions");
   const dashboardRead = await json(`/api/sessions/${session.sessionId}`, { headers: authHeaders(dashboardToken) });
   if (dashboardRead.response.status !== 200 || dashboardRead.body.ownerId !== ownerId) throw new Error("dashboard session read failed");
+  const routeCreated = await json("/api/routes", { method: "POST", headers: { ...authHeaders(dashboardToken), "content-type": "application/json" }, body: JSON.stringify({ name: "owner-scoped route" }) });
+  if (routeCreated.response.status !== 201 || !routeCreated.body.routeId) throw new Error("dashboard route creation failed");
+  const deviceRouteList = await json("/api/routes", { headers: authHeaders(deviceToken) });
+  if (deviceRouteList.response.status !== 401) throw new Error("device credential can list routes");
+  const deviceRouteRead = await json(`/api/routes/${routeCreated.body.routeId}`, { headers: authHeaders(deviceToken) });
+  if (deviceRouteRead.response.status !== 401) throw new Error("device credential can read routes");
   const dashboardWrite = await json(`/api/sessions/${session.sessionId}/samples`, { method: "POST", headers: { ...authHeaders(dashboardToken), "content-type": "application/json" }, body: JSON.stringify({ samples: [] }) });
   if (dashboardWrite.response.status !== 401) throw new Error("dashboard credential can write device samples");
 

@@ -38,6 +38,7 @@ Web 使用 Vue 3 + Vite + TypeScript + Tailwind CSS，开发服务器由 Vite �
 - `POST /routes`
 - `GET /routes/:id`
 - `POST /routes/:id/observations`
+- `POST /routes/:id/nodes`（人工节点，最多 128 个）
 - `POST /routes/:id/publish`
 - `DELETE /routes/:id`
 - `WS /realtime`

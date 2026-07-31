@@ -64,6 +64,7 @@ export interface RouteSummary {
   poseTrack: PoseEstimate[];
   referenceSessionId?: string;
   observationSummaries: RouteObservationSummary[];
+  nodeRecords: RouteNode[];
 }
 
 export interface RouteObservationSummary {
@@ -76,6 +77,22 @@ export interface RouteObservationSummary {
   motionMode: MotionMode;
   sourceFlags: string[];
   attachedAt: string;
+}
+
+export type RouteNodeType = "start" | "turn" | "door" | "stairs" | "elevator" | "crossing" | "landmark" | "hazard" | "end";
+
+export interface RouteNode {
+  nodeId: string;
+  nodeType: RouteNodeType;
+  instruction: string;
+  xM: number;
+  yM: number;
+  zM: number;
+  lat?: number;
+  lng?: number;
+  confidence: number;
+  manualAnnotation: boolean;
+  createdAt: string;
 }
 
 export type ObservationMode = "learning" | "navigation";

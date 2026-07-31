@@ -10,6 +10,7 @@ import type {
   ObservationSession,
   PoseEstimate,
   RelativeMotionPoint,
+  RouteNode,
   RouteObservationSummary,
   SessionDelta,
   SensorSample,
@@ -50,6 +51,7 @@ const altitudeReferences = new Map<string, { gnssM?: number; pressureHpa?: numbe
 const MAX_SESSIONS = 20;
 const MAX_ROUTES = 100;
 const MAX_ROUTE_OBSERVATIONS = 50;
+const MAX_ROUTE_NODES = 128;
 const MAX_ROUTE_TRACK_POINTS = 500;
 const MAX_ROUTE_POSE_POINTS = 1_200;
 const MAX_TRACK_POINTS = 500;
@@ -175,6 +177,7 @@ const createRoute = (ownerId: string, name: string): StoredRoute => {
     track: [],
     poseTrack: [],
     observationSummaries: [],
+    nodeRecords: [],
   };
 };
 
@@ -198,6 +201,44 @@ const attachObservation = (route: StoredRoute, session: ObservationSession) => {
   }
   route.updatedAt = attachedAt;
   return route;
+};
+
+const routeNodeTypes = new Set<RouteNode["nodeType"]>(["start", "turn", "door", "stairs", "elevator", "crossing", "landmark", "hazard", "end"]);
+
+const normalizeRouteNode = (input: unknown): RouteNode | null => {
+  if (!input || typeof input !== "object") return null;
+  const value = input as Record<string, unknown>;
+  const nodeType = value.nodeType;
+  const instruction = typeof value.instruction === "string" ? value.instruction.trim().slice(0, 256) : "";
+  const xM = typeof value.xM === "number" && Number.isFinite(value.xM) ? value.xM : null;
+  const yM = typeof value.yM === "number" && Number.isFinite(value.yM) ? value.yM : null;
+  const zM = typeof value.zM === "number" && Number.isFinite(value.zM) ? value.zM : null;
+  const confidence = typeof value.confidence === "number" && Number.isFinite(value.confidence) ? value.confidence : null;
+  const lat = value.lat === undefined ? undefined : typeof value.lat === "number" && Number.isFinite(value.lat) ? value.lat : null;
+  const lng = value.lng === undefined ? undefined : typeof value.lng === "number" && Number.isFinite(value.lng) ? value.lng : null;
+  if (
+    typeof nodeType !== "string" || !routeNodeTypes.has(nodeType as RouteNode["nodeType"])
+    || !instruction || xM === null || yM === null || zM === null
+    || Math.abs(xM) > 100_000 || Math.abs(yM) > 100_000 || Math.abs(zM) > 100_000
+    || confidence === null || confidence < 0 || confidence > 1
+    || lat === null || lng === null
+    || (lat === undefined) !== (lng === undefined)
+    || (lat !== undefined && (lat < -90 || lat > 90))
+    || (lng !== undefined && (lng < -180 || lng > 180))
+  ) return null;
+  return {
+    nodeId: crypto.randomUUID(),
+    nodeType: nodeType as RouteNode["nodeType"],
+    instruction,
+    xM,
+    yM,
+    zM,
+    ...(lat === undefined ? {} : { lat }),
+    ...(lng === undefined ? {} : { lng }),
+    confidence,
+    manualAnnotation: true,
+    createdAt: new Date().toISOString(),
+  };
 };
 
 const sortByDeviceTimestamp = <T extends { deviceTimestampNs?: number }>(points: T[]) => [...points].sort(
@@ -1167,7 +1208,7 @@ const server = Bun.serve<RealtimeClient>({
       routeStore.save(route);
       return json(publicRoute(route), { status: 201 });
     }
-    const routeMatch = url.pathname.match(/^\/api\/routes\/([^/]+)(?:\/(observations|publish))?$/);
+    const routeMatch = url.pathname.match(/^\/api\/routes\/([^/]+)(?:\/(observations|nodes|publish))?$/);
     if (routeMatch) {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
       const route = routes.get(routeMatch[1]);
@@ -1193,6 +1234,16 @@ const server = Bun.serve<RealtimeClient>({
         }
         routeStore.save(route);
         return json(publicRoute(route));
+      }
+      if (action === "nodes" && request.method === "POST") {
+        if (route.nodeRecords.length >= MAX_ROUTE_NODES) return json({ error: "route_node_limit" }, { status: 429 });
+        const node = normalizeRouteNode(await parseJson<unknown>(request));
+        if (!node) return json({ error: "invalid_route_node" }, { status: 400 });
+        route.nodeRecords.push(node);
+        route.nodes = route.nodeRecords.length;
+        route.updatedAt = new Date().toISOString();
+        routeStore.save(route);
+        return json(publicRoute(route), { status: 201 });
       }
       if (action === "publish" && request.method === "POST") {
         return json({ error: "route_alignment_required" }, { status: 409 });
