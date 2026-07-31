@@ -5,7 +5,7 @@ This is the gate between “the code builds” and “the product recorded a rea
 ## Prepare
 
 1. Connect one Android phone with USB debugging enabled and accept the RSA prompt.
-2. Turn on system location. Grant **precise location**. Camera permission is optional; it is needed only for the ARCore visual correction path.
+2. Turn on system location. Grant **precise location** and, on Android 10+, **physical activity** permission for step-aided pedestrian dead reckoning. Camera permission is optional; it is needed only for the ARCore visual correction path.
 3. Install and launch the exact APK from the committed worktree:
 
 ```powershell
