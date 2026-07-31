@@ -1,6 +1,7 @@
 param(
     [string]$ApkPath = "apps\android\app\build\outputs\apk\debug\app-debug.apk",
-    [string]$Serial = ""
+    [string]$Serial = "",
+    [switch]$RequirePhysical
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,9 +24,9 @@ if ($adbCommand) {
     $adb = $sdkCandidate
 }
 
-$deviceLines = @(& $adb devices | Select-Object -Skip 1 | Where-Object { $_ -match "^\S+\s+device$" })
+$deviceLines = @(& $adb devices -l | Select-Object -Skip 1 | Where-Object { $_ -match "^\S+\s+device\b" })
 if ($Serial) {
-    if (-not ($deviceLines | Where-Object { $_ -match "^$([regex]::Escape($Serial))\s+device$" })) {
+    if (-not ($deviceLines | Where-Object { $_ -match "^$([regex]::Escape($Serial))\s+device\b" })) {
         throw "Requested device is not connected or is not authorized: $Serial"
     }
 } elseif ($deviceLines.Count -eq 1) {
@@ -36,7 +37,16 @@ if ($Serial) {
     throw "Multiple Android devices found. Re-run with -Serial <device-serial>."
 }
 
+$selectedLine = $deviceLines | Where-Object { $_ -match "^$([regex]::Escape($Serial))\s+device\b" } | Select-Object -First 1
+$emulatorFlag = (& $adb -s $Serial shell getprop ro.kernel.qemu 2>$null).Trim()
+$isEmulator = $Serial.StartsWith("emulator-", [System.StringComparison]::OrdinalIgnoreCase) -or $emulatorFlag -eq "1"
+if ($RequirePhysical -and $isEmulator) {
+    throw "A physical Android phone is required for sensor acceptance; selected device is an emulator: $Serial"
+}
+
 Write-Host "Device: $Serial"
+Write-Host "Device kind: $(if ($isEmulator) { 'emulator (protocol/lifecycle only)' } else { 'physical Android device' })"
+if ($selectedLine) { Write-Host "ADB descriptor: $selectedLine" }
 Write-Host "APK: $resolvedApk"
 Write-Host "APK SHA256: $((Get-FileHash -LiteralPath $resolvedApk -Algorithm SHA256).Hash)"
 
