@@ -82,10 +82,14 @@ class SessionUploader(
     }
 
     fun stop() {
+        flushJob?.cancel()
+        repeat(10) {
+            if (queue.isEmpty()) return@repeat
+            flush()
+        }
         state.value.sessionId?.let { sessionId ->
             socket?.send(JSONObject().put("type", "session.stop").put("sessionId", sessionId).toString())
         }
-        flushJob?.cancel()
         flushJob = null
         socket?.close(1000, "session stopped")
         socket = null
