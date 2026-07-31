@@ -31,13 +31,17 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private var lastPublishedLocation: Location? = null
     private val rotationMatrix = FloatArray(9)
     private val gravity = FloatArray(3)
+    private val magneticField = FloatArray(3)
     private val motionVelocity = FloatArray(3)
     private val motionPosition = FloatArray(3)
     private var hasRotationMatrix = false
+    private var hasRotationVector = false
+    private var hasMagneticField = false
     private var hasLinearAccelerationSensor = false
     private var gravityInitialized = false
     private var lastMotionTimestampNs = 0L
     private var lastMotionEmitTimestampNs = 0L
+    private var lastLinearAccelerationTimestampNs = 0L
     private var firstPressureHpa: Float? = null
     private var barometerRelativeAltitudeM = 0f
 
@@ -64,10 +68,13 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         resetMotionState()
         hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
         registerSensor(Sensor.TYPE_ACCELEROMETER, "Accelerometer", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
+        registerSensor(Sensor.TYPE_GRAVITY, "Gravity", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
         registerSensor(Sensor.TYPE_LINEAR_ACCELERATION, "Linear acceleration", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
         registerSensor(Sensor.TYPE_GYROSCOPE, "Gyroscope", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
         registerSensor(Sensor.TYPE_MAGNETIC_FIELD, "Magnetometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
         registerSensor(Sensor.TYPE_PRESSURE, "Barometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
+        registerSensor(Sensor.TYPE_GAME_ROTATION_VECTOR, "Game rotation vector", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
+        registerSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR, "Geomagnetic rotation vector", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
         registerSensor(Sensor.TYPE_ROTATION_VECTOR, "Rotation vector", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
 
         state.value = state.value.copy(
@@ -135,10 +142,13 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     override fun onSensorChanged(event: SensorEvent) {
         val label = when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER -> "Accelerometer"
+            Sensor.TYPE_GRAVITY -> "Gravity"
             Sensor.TYPE_LINEAR_ACCELERATION -> "Linear acceleration"
             Sensor.TYPE_GYROSCOPE -> "Gyroscope"
             Sensor.TYPE_MAGNETIC_FIELD -> "Magnetometer"
             Sensor.TYPE_PRESSURE -> "Barometer"
+            Sensor.TYPE_GAME_ROTATION_VECTOR -> "Game rotation vector"
+            Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR -> "Geomagnetic rotation vector"
             Sensor.TYPE_ROTATION_VECTOR -> "Rotation vector"
             else -> return
         }
@@ -149,12 +159,23 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         }
         readings[label] = SensorReading(label, SensorState.READY, detail, values)
         when (event.sensor.type) {
+            Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_GRAVITY -> updateGravity(values)
+            Sensor.TYPE_MAGNETIC_FIELD -> updateMagneticField(values)
+            Sensor.TYPE_GAME_ROTATION_VECTOR,
+            Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR,
             Sensor.TYPE_ROTATION_VECTOR -> updateRotationMatrix(values)
             Sensor.TYPE_PRESSURE -> updateBarometer(values.firstOrNull())
         }
         val relativePosition = when {
-            event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION -> integrateMotion(event.timestamp, values)
-            event.sensor.type == Sensor.TYPE_ACCELEROMETER && !hasLinearAccelerationSensor -> {
+            event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION -> {
+                lastLinearAccelerationTimestampNs = event.timestamp
+                integrateMotion(event.timestamp, values)
+            }
+            event.sensor.type == Sensor.TYPE_ACCELEROMETER && (
+                !hasLinearAccelerationSensor
+                    || lastLinearAccelerationTimestampNs == 0L
+                    || event.timestamp - lastLinearAccelerationTimestampNs > 300_000_000L
+                ) -> {
                 integrateMotion(event.timestamp, removeGravity(values))
             }
             else -> null
@@ -237,10 +258,14 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         gravity.fill(0f)
         motionVelocity.fill(0f)
         motionPosition.fill(0f)
+        magneticField.fill(0f)
         hasRotationMatrix = false
+        hasRotationVector = false
+        hasMagneticField = false
         gravityInitialized = false
         lastMotionTimestampNs = 0L
         lastMotionEmitTimestampNs = 0L
+        lastLinearAccelerationTimestampNs = 0L
         firstPressureHpa = null
         barometerRelativeAltitudeM = 0f
     }
@@ -249,15 +274,38 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         if (values.size < 3) return
         SensorManager.getRotationMatrixFromVector(rotationMatrix, values.toFloatArray())
         hasRotationMatrix = true
+        hasRotationVector = true
+    }
+
+    private fun updateGravity(values: List<Float>) {
+        if (values.size < 3) return
+        if (!gravityInitialized) {
+            values.take(3).forEachIndexed { index, value -> gravity[index] = value }
+            gravityInitialized = true
+        } else {
+            values.take(3).forEachIndexed { index, value -> gravity[index] = gravity[index] * 0.9f + value * 0.1f }
+        }
+        updateFallbackRotationMatrix()
+    }
+
+    private fun updateMagneticField(values: List<Float>) {
+        if (values.size < 3) return
+        if (!hasMagneticField) {
+            values.take(3).forEachIndexed { index, value -> magneticField[index] = value }
+            hasMagneticField = true
+        } else {
+            values.take(3).forEachIndexed { index, value -> magneticField[index] = magneticField[index] * 0.8f + value * 0.2f }
+        }
+        updateFallbackRotationMatrix()
+    }
+
+    private fun updateFallbackRotationMatrix() {
+        if (hasRotationVector || !gravityInitialized || !hasMagneticField) return
+        hasRotationMatrix = SensorManager.getRotationMatrix(rotationMatrix, null, gravity, magneticField)
     }
 
     private fun removeGravity(values: List<Float>): List<Float> {
         if (values.size < 3) return values
-        if (!gravityInitialized) {
-            values.take(3).forEachIndexed { index, value -> gravity[index] = value }
-            gravityInitialized = true
-        }
-        values.take(3).forEachIndexed { index, value -> gravity[index] = gravity[index] * 0.9f + value * 0.1f }
         return values.take(3).mapIndexed { index, value -> value - gravity[index] }
     }
 

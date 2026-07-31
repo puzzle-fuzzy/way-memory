@@ -123,6 +123,8 @@ const normalizeSensorType = (sensorType: string) => {
   return {
     magnetic_field: "magnetometer",
     pressure: "barometer",
+    game_rotation_vector: "rotation-vector",
+    geomagnetic_rotation_vector: "rotation-vector",
     rotation_vector: "rotation-vector",
     linear_acceleration: "linear-acceleration",
   }[normalized] ?? normalized;
