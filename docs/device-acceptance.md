@@ -75,6 +75,9 @@ bun run acceptance:report --case=recovery --max-recovery-jump-m=1.5 --out=artifa
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/collect-device-evidence.ps1 `
   -SessionId <SESSION_ID> -Case 3d -MaxOutOfOrder 0
+
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/collect-device-evidence.ps1 `
+  -SessionId <SESSION_ID> -Case recovery -MaxRecoveryJumpM 1.5
 ```
 
 脚本不会覆盖已有证据目录；重复采集请更换 `-OutputRoot`。报告失败时仍保留 JSON 供诊断，不得把失败报告当作通过证据。

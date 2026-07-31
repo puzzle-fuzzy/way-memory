@@ -3,11 +3,13 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
     [string]$SessionId,
-    [ValidateSet("baseline", "3d", "rotation", "loop", "stairs", "elevator")]
+    [ValidateSet("baseline", "3d", "rotation", "loop", "stairs", "elevator", "recovery")]
     [string]$Case = "baseline",
     [string]$ApiBase = "http://101.35.246.159",
     [ValidateRange(0, 1024)]
     [int]$MaxOutOfOrder = 0,
+    [ValidateRange(0.1, 100)]
+    [double]$MaxRecoveryJumpM = 1.5,
     [string]$OutputRoot = "artifacts"
 )
 
@@ -26,7 +28,7 @@ $env:WAY_MEMORY_SESSION_ID = $SessionId
 
 try {
     $reportPath = Join-Path $sessionOutput "$Case.json"
-    & bun run acceptance:report "--session=$SessionId" "--case=$Case" "--max-out-of-order=$MaxOutOfOrder" "--out=$reportPath"
+    & bun run acceptance:report "--session=$SessionId" "--case=$Case" "--max-out-of-order=$MaxOutOfOrder" "--max-recovery-jump-m=$MaxRecoveryJumpM" "--out=$reportPath"
     if ($LASTEXITCODE -ne 0) {
         throw "Acceptance report failed for case '$Case' with exit code $LASTEXITCODE. The JSON report is kept for diagnosis: $reportPath"
     }
