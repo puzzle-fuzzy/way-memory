@@ -129,6 +129,10 @@ private fun SensorScreen(collector: SensorCollector) {
                             "实时同步：${if (sync.connected) "已连接" else "未连接"} · 已上传 ${sync.uploadedSamples} · 待上传 ${sync.pendingSamples} · 丢弃 ${sync.droppedSamples}",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        Text(
+                            "会话 ID：${sync.sessionId ?: "等待服务器分配"}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                         sync.lastError?.let { Text("同步错误：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                         Text("Pose: ${state.poseText}", style = MaterialTheme.typography.bodySmall)
                         Text("Motion mode: ${state.motionMode}", style = MaterialTheme.typography.bodySmall)
