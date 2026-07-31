@@ -35,11 +35,17 @@ class CaptureForegroundService : Service() {
             return START_NOT_STICKY
         }
         if (!collector.uiState.value.collecting) collector.start()
-        return START_NOT_STICKY
+        // If Android recreates the process/service after a resource pressure
+        // kill, redeliver ACTION_START so SensorCollector can resume the
+        // persisted session instead of silently losing the capture.
+        return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
-        if (collector.uiState.value.collecting) collector.stop()
+        // Do not call collector.stop() here. That is an explicit user action
+        // and deletes active-session.id after sending session.stop. During a
+        // system/process restart the marker and durable sample queue must stay
+        // intact so the next service instance can resume the same session.
         super.onDestroy()
     }
 

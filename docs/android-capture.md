@@ -8,4 +8,6 @@ The service is declared with the Android location foreground-service type. Preci
 
 The service is promoted with the explicit `FOREGROUND_SERVICE_TYPE_LOCATION` type on Android 10 and newer. Capture must be started from the visible Activity; after that, the foreground service and its persistent notification are the supported path for continuing location access while the screen is locked. This does not make ARCore camera tracking continue in the background: visual tracking is paused when the Activity pauses and the non-visual route remains active.
 
+The foreground service uses `START_REDELIVER_INTENT`. If Android recreates the service/process after a system kill, the start intent is redelivered and the uploader resumes the durable session marker and offline queue. `onDestroy()` deliberately does not behave like an explicit Stop: only the user's Stop action sends `session.stop` and removes `active-session.id`. This keeps process recovery distinguishable from an intentional end of capture.
+
 This is a collection policy, not a promise that Android will provide unrestricted background camera access. A future production release must also complete notification copy, battery-optimization guidance, Android OEM background tests, and explicit user controls for stopping capture.
