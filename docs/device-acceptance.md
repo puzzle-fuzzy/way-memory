@@ -59,7 +59,7 @@ The machine-readable audit can be run after each capture. It exits with code 0 o
 ```powershell
 $env:WAY_MEMORY_API_URL = "http://101.35.246.159"
 $env:WAY_MEMORY_SESSION_ID = "<SESSION_ID>"
-bun run acceptance:report --case=baseline --out=artifacts/<SESSION_ID>-baseline.json
+bun run acceptance:report --case=baseline --max-out-of-order=0 --out=artifacts/<SESSION_ID>-baseline.json
 bun run acceptance:report --case=3d --min-axis-m=0.2 --out=artifacts/<SESSION_ID>-3d.json
 bun run acceptance:report --case=rotation --max-translation-m=0.75 --out=artifacts/<SESSION_ID>-rotation.json
 bun run acceptance:report --case=loop --out=artifacts/<SESSION_ID>-loop.json
@@ -72,6 +72,7 @@ The report is an audit of the server's received evidence; it cannot manufacture 
 Record at minimum:
 
 - `sampleCount`, `rawSampleCount`, `droppedSampleCount`, and `outOfOrderSampleCount`;
+- `outOfOrderSampleCount` defaults to a strict zero-tolerance baseline; use `--max-out-of-order=<N>` only when a field test explicitly records and accepts bounded transport reordering.
 - `poseTrack` count and the min/max of `xM`, `yM`, `zM`;
 - Pose timestamp monotonicity, time span, per-source counts and source age;
 - raw sensor type counts, `sourceFlags`, `frame`, `motionMode`, and `motionEvents`;

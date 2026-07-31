@@ -1,6 +1,10 @@
 type JsonRecord = Record<string, any>;
 
-const args = Bun.argv.slice(2);
+const args = Bun.argv.slice(2).map((argument) => (
+  argument.length >= 2 && argument.startsWith('"') && argument.endsWith('"')
+    ? argument.slice(1, -1)
+    : argument
+));
 const valueFor = (name: string) => {
   const prefix = `${name}=`;
   const argument = args.find((item) => item.startsWith(prefix));
@@ -12,9 +16,10 @@ const sessionId = Bun.env.WAY_MEMORY_SESSION_ID ?? valueFor("--session");
 const acceptanceCase = valueFor("--case") ?? "baseline";
 const minimumAxisM = Number(valueFor("--min-axis-m") ?? "0.2");
 const maximumRotationTranslationM = Number(valueFor("--max-translation-m") ?? "0.75");
+const maximumOutOfOrderSampleCount = Number(valueFor("--max-out-of-order") ?? "0");
 
 if (!sessionId) {
-  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|loop|stairs|elevator] [--out=<file>]");
+  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|loop|stairs|elevator] [--max-out-of-order=0] [--out=<file>]");
   process.exit(2);
 }
 
@@ -49,7 +54,7 @@ try {
     .map((pose) => pose.deviceTimestampNs)
     .filter((timestamp): timestamp is number => typeof timestamp === "number" && Number.isSafeInteger(timestamp) && timestamp > 0);
   const poseTimestampMonotonic = poseTimestamps.length === poses.length
-    && poseTimestamps.every((timestamp, index) => index === 0 || timestamp >= poseTimestamps[index - 1]);
+    && poseTimestamps.every((timestamp, index) => index === 0 || timestamp > poseTimestamps[index - 1]);
   const latestPoseTimestampNs = poseTimestamps.length ? Math.max(...poseTimestamps) : null;
   const poseSourceCounts = poses.reduce((counts, pose) => {
     if (Array.isArray(pose.sourceFlags)) {
@@ -102,11 +107,12 @@ try {
     rotationSensorEvidence: hasGyroscopeSample || hasRotationSample,
     rotationTranslationBounded: maximumPoseTranslationSpan <= maximumRotationTranslationM,
     sampleIdsUniqueInReplay: duplicateSampleIds === 0,
+    routeOrderingClean: Number(session.outOfOrderSampleCount ?? 0) <= maximumOutOfOrderSampleCount,
     closureConsistent: closure.adjusted !== true || (closure.status === "closed" && corrected.length >= poses.length),
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
   };
   const caseChecks: Record<string, boolean> = {
-    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.serverBounds,
+    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.routeOrderingClean && checks.serverBounds,
     "3d": checks.poseStream && checks.threeAxisMovement,
     rotation: checks.rotationSensorEvidence && checks.rotationTranslationBounded,
     loop: checks.closureConsistent && closure.status === "closed" && closure.adjusted === true && corrected.length > 0,
@@ -130,6 +136,8 @@ try {
       motionEvents: motionEvents.length,
       duplicateSampleIds,
       dropped: session.droppedSampleCount ?? 0,
+      outOfOrder: session.outOfOrderSampleCount ?? 0,
+      maxOutOfOrder: maximumOutOfOrderSampleCount,
     },
     axes,
     pose: {
