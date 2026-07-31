@@ -24,11 +24,15 @@ The Android client combines:
 
 The output is an uncertainty-bearing estimate, not a promise of centimeter-level accuracy. IMU double integration is corrected when external observations are available, and stationary periods learn a small acceleration bias.
 
+GNSS fixes are also used to estimate a bounded velocity from successive monotonic fixes. A fix is treated as fresh for five seconds; after that, pose accuracy grows with the age of the last fix and the source flags change to `gnss-stale`. The same freshness boundary is applied to barometer and visual evidence, so a previously available sensor cannot silently keep a high-confidence label after its stream has stopped. If GNSS altitude appears after a fix that had no altitude, the engine bridges it through the current relative height instead of resetting the z-axis to an unrelated zero.
+
 ## ARCore boundary
 
 ARCore 1.54.0 is integrated as an optional feature. It starts only after camera permission, device support, and Google Play Services for AR are available. Unsupported devices continue with GNSS, IMU, and barometer.
 
 ARCore uses a session-local metric frame. The adapter converts `+X right, +Y up, -Z forward` into the display frame `X right, Y forward, Z up`. It waits for meaningful visual and inertial displacement before estimating horizontal alignment. Samples before alignment remain diagnostic and are not promoted into the unified route. Promoted poses carry `visual` and `visual-aligned` source flags.
+
+Visual correction also contributes velocity in meters per second using the frame timestamp interval. It is not computed from a raw position error, which would mix meters and meters per second. When visual frames pause, subsequent inertial poses expose `visual-stale` until a fresh tracked frame arrives.
 
 The server defaults legacy payloads without `frame` to `local-enu`. The web console shows the active coordinate reference so an ARCore local pose cannot silently be mistaken for a geographic coordinate.
 

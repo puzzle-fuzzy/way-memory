@@ -23,6 +23,42 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun gnssVelocityIsEstimatedFromSuccessiveFixes() {
+        val engine = PoseFusionEngine()
+        val first = engine.updateGnss(31.230000, 121.470000, 4f, null, 1_000_000_000L)
+        val second = engine.updateGnss(31.230010, 121.470000, 4f, null, 2_000_000_000L)
+
+        assertNotNull(first)
+        assertTrue((second?.pose?.velocityYMps ?: 0f) > 0.3f)
+        assertTrue(second?.pose?.sourceFlags?.contains("gnss") == true)
+    }
+
+    @Test
+    fun lateGnssAltitudeEstablishesAContinuousRelativeHeightReference() {
+        val engine = PoseFusionEngine()
+        engine.updateGnss(31.230000, 121.470000, 5f, null, 1_000_000_000L)
+        engine.updateGnss(31.230000, 121.470000, 5f, 100.0, 2_000_000_000L)
+        val afterAltitudeMoves = engine.updateGnss(31.230000, 121.470000, 5f, 101.0, 3_000_000_000L)
+
+        assertTrue((afterAltitudeMoves?.pose?.zM ?: 0f) > 0.1f)
+    }
+
+    @Test
+    fun staleGnssLowersConfidenceInsteadOfClaimingFreshPosition() {
+        val engine = PoseFusionEngine()
+        val fresh = engine.updateGnss(31.230000, 121.470000, 4f, null, 1_000_000_000L)
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateImu(1_200_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateImu(8_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        val stale = engine.updateImu(8_200_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+
+        assertTrue(fresh != null)
+        assertTrue(stale?.pose?.sourceFlags?.contains("gnss-stale") == true)
+        assertTrue(stale?.pose?.sourceFlags?.contains("gnss") != true)
+        assertTrue((stale?.pose?.accuracyM ?: 0f) > (fresh?.pose?.accuracyM ?: 0f))
+    }
+
+    @Test
     fun sustainedPressureChangeProducesElevatorCandidate() {
         val engine = PoseFusionEngine()
         var elevatorEvent = false

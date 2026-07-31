@@ -26,6 +26,10 @@ class PoseFusionEngine {
     private var originLng: Double? = null
     private var originAltitudeM: Double? = null
     private var lastGnssAccuracyM = 25f
+    private var lastGnssTimestampNs = 0L
+    private var lastGnssTargetEastM = 0f
+    private var lastGnssTargetNorthM = 0f
+    private var lastGnssTargetAltitudeM = 0f
     private var lastMotionTimestampNs = 0L
     private var lastEmitTimestampNs = 0L
     private var lastPressureTimestampNs = 0L
@@ -34,6 +38,7 @@ class PoseFusionEngine {
     private var barometerVerticalSpeedMps = 0f
     private var hasBarometer = false
     private var hasGnss = false
+    private var hasImu = false
     private var stationaryFrames = 0
     private var movingFrames = 0
     private var elevatorEvidenceFrames = 0
@@ -45,6 +50,8 @@ class PoseFusionEngine {
     private var lastVisualX = 0f
     private var lastVisualY = 0f
     private var lastVisualZ = 0f
+    private var lastVisualTimestampNs = 0L
+    private var lastVisualAccuracyM = 0.7f
     private var visualTravelledM = 0f
     private var visualYawRadians: Float? = null
     private var visualRouteOriginX = 0f
@@ -61,6 +68,10 @@ class PoseFusionEngine {
         originLng = null
         originAltitudeM = null
         lastGnssAccuracyM = 25f
+        lastGnssTimestampNs = 0L
+        lastGnssTargetEastM = 0f
+        lastGnssTargetNorthM = 0f
+        lastGnssTargetAltitudeM = 0f
         lastMotionTimestampNs = 0L
         lastEmitTimestampNs = 0L
         lastPressureTimestampNs = 0L
@@ -69,6 +80,7 @@ class PoseFusionEngine {
         barometerVerticalSpeedMps = 0f
         hasBarometer = false
         hasGnss = false
+        hasImu = false
         stationaryFrames = 0
         movingFrames = 0
         elevatorEvidenceFrames = 0
@@ -80,6 +92,8 @@ class PoseFusionEngine {
         lastVisualX = 0f
         lastVisualY = 0f
         lastVisualZ = 0f
+        lastVisualTimestampNs = 0L
+        lastVisualAccuracyM = 0.7f
         visualTravelledM = 0f
         visualYawRadians = null
         visualRouteOriginX = 0f
@@ -122,6 +136,14 @@ class PoseFusionEngine {
             position[2] = 0f
         }
 
+        // A first GNSS fix may not contain altitude. If a later fix does, use
+        // the current relative estimate as the bridge so the z-axis does not
+        // jump back to an unrelated zero when the altitude reference appears.
+        if (originAltitudeM == null && altitudeM != null) {
+            val currentRelativeAltitude = if (hasBarometer) barometerAltitudeM else position[2]
+            originAltitudeM = altitudeM - currentRelativeAltitude.toDouble()
+        }
+
         val latitudeRadians = (originLat ?: latitude) * Math.PI / 180.0
         val targetEast = ((longitude - (originLng ?: longitude)) * Math.PI / 180.0 * 6_371_000.0 * kotlin.math.cos(latitudeRadians)).toFloat()
         val targetNorth = ((latitude - (originLat ?: latitude)) * Math.PI / 180.0 * 6_371_000.0).toFloat()
@@ -136,19 +158,33 @@ class PoseFusionEngine {
             measuredAccuracy <= 15f -> 0.32f
             else -> 0.15f
         }
-        val previousPosition = position.copyOf()
         position[0] += (targetEast - position[0]) * gain
         position[1] += (targetNorth - position[1]) * gain
         position[2] += (targetAltitude - position[2]) * (gain * 0.7f)
-        val elapsedNs = timestampNs - lastMotionTimestampNs
-        if (lastMotionTimestampNs > 0L && elapsedNs in 100_000_000L..5_000_000_000L) {
-            val elapsedSeconds = elapsedNs / 1_000_000_000f
-            velocity[0] = ((position[0] - previousPosition[0]) / elapsedSeconds).coerceIn(-15f, 15f)
-            velocity[1] = ((position[1] - previousPosition[1]) / elapsedSeconds).coerceIn(-15f, 15f)
-            velocity[2] = ((position[2] - previousPosition[2]) / elapsedSeconds).coerceIn(-5f, 5f)
+
+        val elapsedGnssNs = timestampNs - lastGnssTimestampNs
+        if (lastGnssTimestampNs > 0L && elapsedGnssNs in 100_000_000L..5_000_000_000L) {
+            val elapsedSeconds = elapsedGnssNs / 1_000_000_000f
+            val gnssVelocity = floatArrayOf(
+                (targetEast - lastGnssTargetEastM) / elapsedSeconds,
+                (targetNorth - lastGnssTargetNorthM) / elapsedSeconds,
+                (targetAltitude - lastGnssTargetAltitudeM) / elapsedSeconds,
+            )
+            val recentImu = lastMotionTimestampNs > 0L
+                && timestampNs >= lastMotionTimestampNs
+                && timestampNs - lastMotionTimestampNs <= 500_000_000L
+            val gain = if (recentImu) 0.18f else 0.55f
+            for (index in 0..2) {
+                val limit = if (index == 2) 5f else 15f
+                velocity[index] = (velocity[index] * (1f - gain) + gnssVelocity[index] * gain).coerceIn(-limit, limit)
+            }
         }
         lastGnssAccuracyM = measuredAccuracy
         hasGnss = true
+        lastGnssTimestampNs = timestampNs
+        lastGnssTargetEastM = targetEast
+        lastGnssTargetNorthM = targetNorth
+        lastGnssTargetAltitudeM = targetAltitude
         return buildUpdate(timestampNs, force = true)
     }
 
@@ -161,6 +197,9 @@ class PoseFusionEngine {
      */
     fun updateVisual(sample: VisualPoseSample): PoseUpdate? {
         if (!sample.xM.isFinite() || !sample.yM.isFinite() || !sample.zM.isFinite()) return null
+        val previousVisualTimestampNs = lastVisualTimestampNs
+        lastVisualTimestampNs = sample.deviceTimestampNs
+        lastVisualAccuracyM = sample.accuracyM.takeIf { it.isFinite() }?.coerceIn(0.5f, 5f) ?: 1.5f
         if (!hasVisual) {
             hasVisual = true
             visualOriginX = sample.xM
@@ -206,17 +245,30 @@ class PoseFusionEngine {
         val target = rotateVisual(sample.xM, sample.yM)
         val targetX = visualRouteOriginX + target.first
         val targetY = visualRouteOriginY + target.second
+        val previousPosition = position.copyOf()
         position[0] += (targetX - position[0]) * 0.58f
         position[1] += (targetY - position[1]) * 0.58f
         position[2] += (sample.zM - position[2]) * 0.58f
-        velocity[0] = velocity[0] * 0.42f + (targetX - position[0]) * 0.58f
-        velocity[1] = velocity[1] * 0.42f + (targetY - position[1]) * 0.58f
+        val visualElapsedNs = sample.deviceTimestampNs - previousVisualTimestampNs
+        if (previousVisualTimestampNs > 0L && visualElapsedNs in 10_000_000L..1_000_000_000L) {
+            val elapsedSeconds = visualElapsedNs / 1_000_000_000f
+            val measuredVelocity = floatArrayOf(
+                (targetX - previousPosition[0]) / elapsedSeconds,
+                (targetY - previousPosition[1]) / elapsedSeconds,
+                (sample.zM - previousPosition[2]) / elapsedSeconds,
+            )
+            for (index in 0..2) {
+                val limit = if (index == 2) 5f else 15f
+                velocity[index] = (velocity[index] * 0.42f + measuredVelocity[index] * 0.58f).coerceIn(-limit, limit)
+            }
+        }
 
         return buildUpdate(sample.deviceTimestampNs, force = true, visualAligned = true)
     }
 
     fun updateImu(timestampNs: Long, worldAcceleration: FloatArray, angularRateMagnitude: Float): PoseUpdate? {
         if (worldAcceleration.size < 3) return null
+        hasImu = true
         if (lastMotionTimestampNs == 0L) {
             lastMotionTimestampNs = timestampNs
             return null
@@ -338,16 +390,30 @@ class PoseFusionEngine {
         lastMotionMode = motionMode
 
         val positionMagnitude = magnitude(position)
-        val baseAccuracy = if (visualAligned) 0.7f else if (hasGnss) lastGnssAccuracyM else 1.5f
-        val driftPenalty = if (visualAligned) 0.01f else if (hasGnss) 0.02f else 0.08f
-        val accuracy = (baseAccuracy + positionMagnitude * driftPenalty + if (hasBarometer) 0.3f else 1.2f).coerceAtMost(50f)
+        val gnssFresh = isFresh(timestampNs, lastGnssTimestampNs, GNSS_FRESHNESS_NS)
+        val pressureFresh = isFresh(timestampNs, lastPressureTimestampNs, PRESSURE_FRESHNESS_NS)
+        val visualFresh = isFresh(timestampNs, lastVisualTimestampNs, VISUAL_FRESHNESS_NS)
+        val gnssAgeSeconds = ageSeconds(timestampNs, lastGnssTimestampNs)
+        val baseAccuracy = when {
+            visualAligned -> lastVisualAccuracyM
+            gnssFresh -> lastGnssAccuracyM
+            hasGnss -> (lastGnssAccuracyM + gnssAgeSeconds * 0.8f).coerceAtMost(35f)
+            else -> 2.5f
+        }
+        val driftPenalty = when {
+            visualAligned -> 0.01f
+            gnssFresh -> 0.02f
+            else -> 0.12f
+        }
+        val accuracy = (baseAccuracy + positionMagnitude * driftPenalty + if (pressureFresh) 0.3f else 1.2f).coerceAtMost(50f)
         val sourceFlags = buildList {
-            add("imu")
-            if (hasGnss) add("gnss")
-            if (hasBarometer) add("barometer")
-            if (hasVisual) add("visual")
+            if (hasImu) add("imu")
+            if (gnssFresh) add("gnss") else if (hasGnss) add("gnss-stale")
+            if (pressureFresh) add("barometer") else if (hasBarometer) add("barometer-stale")
+            if (visualFresh) add("visual") else if (hasVisual) add("visual-stale")
             if (visualAligned) add("visual-aligned")
             if (visualLoopClosure) add("loop-closure")
+            if (isEmpty()) add("unknown")
         }
         val confidence = (1f - accuracy / 50f).coerceIn(0.05f, 0.98f)
         return PoseUpdate(
@@ -360,7 +426,7 @@ class PoseFusionEngine {
                 velocityYMps = velocity[1],
                 velocityZMps = velocity[2],
                 accuracyM = accuracy,
-                verticalAccuracyM = if (hasBarometer) 1.5f else null,
+                verticalAccuracyM = if (pressureFresh) 1.5f else null,
                 confidence = confidence,
                 source = "fused",
                 frame = "local-enu",
@@ -381,6 +447,21 @@ class PoseFusionEngine {
 
     private fun magnitude(values: FloatArray): Float =
         sqrt(values[0] * values[0] + values[1] * values[1] + values[2] * values[2])
+
+    private fun isFresh(nowTimestampNs: Long, previousTimestampNs: Long, maxAgeNs: Long): Boolean =
+        previousTimestampNs > 0L
+            && nowTimestampNs >= previousTimestampNs
+            && nowTimestampNs - previousTimestampNs <= maxAgeNs
+
+    private fun ageSeconds(nowTimestampNs: Long, previousTimestampNs: Long): Float =
+        if (previousTimestampNs <= 0L || nowTimestampNs < previousTimestampNs) 30f
+        else ((nowTimestampNs - previousTimestampNs) / 1_000_000_000f).coerceAtMost(30f)
+
+    companion object {
+        private const val GNSS_FRESHNESS_NS = 5_000_000_000L
+        private const val PRESSURE_FRESHNESS_NS = 3_000_000_000L
+        private const val VISUAL_FRESHNESS_NS = 750_000_000L
+    }
 }
 
 data class PoseUpdate(
