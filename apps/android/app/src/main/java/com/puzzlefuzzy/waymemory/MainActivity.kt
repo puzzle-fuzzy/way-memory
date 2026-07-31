@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private class SensorCollectorViewModel(application: Application) : AndroidViewModel(application) {
+class SensorCollectorViewModel(application: Application) : AndroidViewModel(application) {
     val collector = SensorCollector(application)
 
     override fun onCleared() {
