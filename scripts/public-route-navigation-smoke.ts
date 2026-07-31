@@ -79,6 +79,24 @@ try {
   const published = await requestJson(`/api/routes/${routeId}/publish`, { method: "POST" });
   if (published.response.status !== 200 || published.body.status !== "verified") throw new Error(`route did not publish: ${JSON.stringify(published.body)}`);
 
+  const handoff = await requestJson(`/api/routes/${routeId}/handoff`, { method: "POST" });
+  if (handoff.response.status !== 201 || typeof handoff.body.token !== "string") throw new Error(`navigation handoff was not issued: ${JSON.stringify(handoff.body)}`);
+  const handoffDevice = new WebSocket(`${wsBase}/realtime?role=device&deviceId=public-route-handoff`);
+  await waitForOpen(handoffDevice);
+  handoffDevice.send(JSON.stringify({ type: "session.start", deviceId: "public-route-handoff", mode: "navigation", handoffToken: handoff.body.token }));
+  const handoffStarted = await nextMessage(handoffDevice);
+  if (handoffStarted.type !== "session.started" || handoffStarted.session?.routeId !== routeId || handoffStarted.session?.mode !== "navigation") throw new Error(`navigation handoff did not bind route: ${JSON.stringify(handoffStarted)}`);
+  const handoffSessionId = handoffStarted.session.sessionId as string;
+  handoffDevice.close();
+  await requestJson(`/api/sessions/${handoffSessionId}/stop`, { method: "POST" });
+
+  const reusedHandoff = new WebSocket(`${wsBase}/realtime?role=device&deviceId=public-route-handoff-reuse`);
+  await waitForOpen(reusedHandoff);
+  reusedHandoff.send(JSON.stringify({ type: "session.start", deviceId: "public-route-handoff-reuse", mode: "navigation", handoffToken: handoff.body.token }));
+  const reusedMessage = await nextMessage(reusedHandoff);
+  if (reusedMessage.type !== "error" || reusedMessage.error !== "invalid_navigation_handoff") throw new Error(`public navigation handoff was reusable: ${JSON.stringify(reusedMessage)}`);
+  reusedHandoff.close();
+
   const navigator = new WebSocket(`${wsBase}/realtime?role=device&deviceId=public-route-navigator`);
   await waitForOpen(navigator);
   navigator.send(JSON.stringify({ type: "session.start", deviceId: "public-route-navigator", mode: "navigation", routeId, sensors: [] }));
