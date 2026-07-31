@@ -68,4 +68,15 @@ bun run preflight:public-tls
 
 The preflight requires HTTP to redirect to HTTPS, the web entry point and API health endpoint to be reachable over HTTPS, unauthenticated realtime access to return `401`, and—when the token is supplied—the authenticated WSS handshake to succeed. It never prints the bearer token or ticket. This is an edge check; the physical-phone sensor matrix remains a separate gate.
 
+With the two already-enrolled access tokens set in the operator environment, run the authenticated public smoke as a separate gate:
+
+```powershell
+$env:WAY_MEMORY_PUBLIC_BASE_URL = "https://way-memory.yxswy.com"
+$env:WAY_MEMORY_DEVICE_TOKEN = "<device token>"
+$env:WAY_MEMORY_DASHBOARD_TOKEN = "<dashboard token>"
+bun run smoke:public-auth
+```
+
+This creates and stops one disposable session, verifies dashboard broadcast, uploads one pose, reconnects with `session.resume`, reads the session and raw replay, and asserts device-read/dashboard-write role separation. It does not rotate or consume bootstrap credentials and never prints token values.
+
 Until these gates exist, public smoke tests may use the IP-based HTTP/WS deployment, but real user route data must not be sent there.

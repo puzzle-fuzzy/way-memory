@@ -58,3 +58,11 @@ bun run preflight:public-tls
 ```
 
 The command must pass from outside the Tencent Cloud host. It is intentionally expected to fail against the current IP-based HTTP test deployment.
+
+Then run the authenticated service loop with the enrolled credentials:
+
+```powershell
+$env:WAY_MEMORY_DEVICE_TOKEN = "<device token>"
+$env:WAY_MEMORY_DASHBOARD_TOKEN = "<dashboard token>"
+bun run smoke:public-auth
+```
