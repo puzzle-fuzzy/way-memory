@@ -13,6 +13,7 @@ import type {
   SensorSample,
   TrackPoint,
 } from "@way-memory/contracts";
+import { SessionStore } from "./sessionStore";
 
 const port = Number(Bun.env.PORT ?? 8787);
 
@@ -89,6 +90,38 @@ type SessionRuntime = {
 };
 
 const sessionRuntime = new Map<string, SessionRuntime>();
+const MAX_PERSISTED_SESSIONS = 100;
+const sessionStore = new SessionStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
+const dirtySessionIds = new Set<string>();
+
+const persistSession = (session: ObservationSession) => {
+  const runtime = sessionRuntime.get(session.sessionId);
+  sessionStore.save(session, runtime?.rawSamples ?? []);
+  dirtySessionIds.delete(session.sessionId);
+  sessionStore.prune(MAX_PERSISTED_SESSIONS);
+};
+
+const markSessionDirty = (session: ObservationSession) => {
+  dirtySessionIds.add(session.sessionId);
+};
+
+const flushDirtySessions = () => {
+  for (const sessionId of dirtySessionIds) {
+    const session = sessions.get(sessionId);
+    if (session) persistSession(session);
+    else dirtySessionIds.delete(sessionId);
+  }
+};
+
+for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
+  // A restart cannot prove that a previously active capture ended cleanly.
+  snapshot.session.status = "stopped";
+  sessions.set(snapshot.session.sessionId, snapshot.session);
+  sessionRuntime.set(snapshot.session.sessionId, { rawSamples: snapshot.rawSamples });
+}
+sessionStore.prune(MAX_PERSISTED_SESSIONS);
+const persistenceTimer = setInterval(flushDirtySessions, 2_000);
+persistenceTimer.unref?.();
 
 type RealtimeClient = {
   role: "device" | "dashboard";
@@ -489,6 +522,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
   sessions.set(session.sessionId, session);
   altitudeReferences.set(session.sessionId, {});
   sessionRuntime.set(session.sessionId, { rawSamples: [] });
+  persistSession(session);
   device.connected = true;
   device.lastSeen = session.startedAt;
   return session;
@@ -510,6 +544,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   const runtime = sessionRuntime.get(session.sessionId) ?? { rawSamples: [] };
   runtime.rawSamples = [...(runtime.rawSamples ?? []), ...samples].slice(-MAX_RAW_REPLAY_SAMPLES);
   sessionRuntime.set(session.sessionId, runtime);
+  markSessionDirty(session);
   if (samples.length) {
     session.lastReceivedAt = receivedAt;
     session.lastSampleAt = receivedAt;
@@ -660,6 +695,7 @@ const server = Bun.serve<RealtimeClient>({
         session.lastReceivedAt = new Date().toISOString();
         altitudeReferences.delete(session.sessionId);
         device.connected = false;
+        persistSession(session);
         return json(session);
       }
       if (url.pathname.endsWith("/samples") && request.method === "POST") {
@@ -729,6 +765,7 @@ const server = Bun.serve<RealtimeClient>({
           session.lastReceivedAt = new Date().toISOString();
           altitudeReferences.delete(session.sessionId);
           device.connected = false;
+          persistSession(session);
           publishSession(server, session);
         }
         return;
@@ -743,6 +780,7 @@ const server = Bun.serve<RealtimeClient>({
         session.lastReceivedAt = new Date().toISOString();
         altitudeReferences.delete(session.sessionId);
         device.connected = false;
+        persistSession(session);
         publishSession(server, session);
       }
     },

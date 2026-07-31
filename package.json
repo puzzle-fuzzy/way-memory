@@ -11,6 +11,7 @@
     "check": "bun run check:docs",
     "check:docs": "bun run scripts/check-docs.ts",
     "smoke": "bun run scripts/smoke.ts",
+    "smoke:persistence": "bun run scripts/persistence-smoke.ts",
     "dev:api": "bun run services/api/src/index.ts",
     "dev:web": "bun --cwd=apps/web run dev",
     "build:web": "bun --cwd=apps/web run build",

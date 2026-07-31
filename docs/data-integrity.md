@@ -40,4 +40,4 @@ The MVP is intentionally memory-bounded because sessions are currently in memory
 - 500 samples per batch.
 - 512 KiB maximum JSON request/WebSocket message budget.
 
-The API never stores an unbounded raw sample history. It keeps bounded live aggregates, a recent Pose window, and a 1,024-sample replay tail. Restarting the service clears live sessions until persistent route storage is introduced.
+The API never stores an unbounded raw sample history. It keeps bounded live aggregates, a recent Pose window, and a 1,024-sample replay tail. It also snapshots sessions into SQLite at `WAY_MEMORY_DB_PATH` (default `.data/way-memory.sqlite`) every two seconds while active and immediately when stopped. At most 100 snapshots are retained, and an interrupted active session is recovered as `stopped` after restart.
