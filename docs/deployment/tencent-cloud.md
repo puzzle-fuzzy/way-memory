@@ -30,7 +30,7 @@ This MVP entry point is HTTP/WS on the server IP and is not a production privacy
 
 ## Latest test deployment evidence
 
-The latest anonymous test deployment was built from Git commit `51aaa6e` and switched only after a remote API/Web SHA-256 comparison. The remote API bundle hash was `21a8e99b0fc87ef8abbdbea1b01ec154fa5b2ba823f1c87b6b1b9a9c0d50a14d`; the web index hash was `eb463a710e019d5944a68eaec668ec41edab4a7d13d64c24dc7f3b0bad1883a4`.
+The latest anonymous test deployment was built from Git commit `c128fd8` and switched only after a remote API/Web SHA-256 comparison. The remote API bundle hash was `feaaf89245a9d65d375a144ad57661f7818c7679aab3d4b2c9b7c1de5335751b`; the web index hash was `5d74ea2e5a8d2085a6820c797aa8d6fbb8dba9c3f57cfa1bf21ba863754a5b3b`.
 
 - Backup retained on the host: `/var/backups/way-memory/20260731T163254Z/`;
 - `way-memory-api.service`: active after restart;
@@ -39,6 +39,7 @@ The latest anonymous test deployment was built from Git commit `51aaa6e` and swi
 - public Pose WebSocket smoke: passed;
 - public live sample smoke: passed;
 - public Android queue batch smoke: 100 samples accepted, 0 dropped;
+- public route navigation smoke: 3 observations aligned, route published, on-route/off-route projection passed;
 - public long-closure smoke: passed with 1,200 retained Pose points;
 - compact `GET /api/sessions` history response: approximately 44 KB after the bounded session-list change;
 - `/opt/way-memory/data`: approximately 6.8 MB at verification time.
