@@ -152,8 +152,14 @@ try {
     "3d": checks.poseStream && checks.threeAxisMovement,
     rotation: checks.rotationSensorEvidence && checks.rotationTranslationBounded && checks.rotationMotionModeSafe,
     loop: checks.closureConsistent && closure.status === "closed" && closure.adjusted === true && corrected.length > 0,
-    stairs: (motionModes.includes("stairs") || eventTypes.includes("stairs-enter")) && axes.zM.span >= minimumAxisM,
-    elevator: eventTypes.includes("elevator-candidate") && eventTypes.includes("elevator-exit") && axes.zM.span >= minimumAxisM,
+    stairs: motionModes.includes("stairs")
+      && eventTypes.includes("stairs-enter")
+      && eventTypes.includes("stairs-exit")
+      && axes.zM.span >= minimumAxisM,
+    elevator: motionModes.includes("elevator")
+      && eventTypes.includes("elevator-candidate")
+      && eventTypes.includes("elevator-exit")
+      && axes.zM.span >= minimumAxisM,
     recovery: checks.sessionLoaded && checks.poseStream && recoveryAnchorContinuity,
     "visual-recovery": checks.sessionLoaded
       && checks.poseStream
