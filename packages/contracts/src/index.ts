@@ -117,6 +117,7 @@ export interface SensorSample {
   deviceTimestampNs: number;
   sensorType: string;
   values: number[];
+  sensorAccuracy?: number;
   accuracy?: number;
   location?: {
     lat: number;
@@ -137,6 +138,7 @@ export interface SensorSample {
 export interface LiveSensorSnapshot {
   sensorType: string;
   values: number[];
+  sensorAccuracy?: number;
   accuracy?: number;
   sampleCount: number;
   lastDeviceTimestampNs: number;

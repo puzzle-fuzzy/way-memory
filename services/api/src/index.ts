@@ -72,6 +72,7 @@ const MAX_SENSOR_VALUES = 16;
 const MAX_JSON_BYTES = 512 * 1024;
 const MAX_DEVICE_ID_LENGTH = 128;
 const MAX_ROUTE_ID_LENGTH = 128;
+const SESSION_RESUME_GRACE_MS = 2 * 60 * 1_000;
 const DUPLICATE_LOCATION_DISTANCE_M = 0.5;
 const DUPLICATE_LOCATION_WINDOW_NS = 2_000_000_000;
 const MAX_WALKING_SPEED_MPS = 15;
@@ -90,6 +91,7 @@ type SessionRuntime = {
 };
 
 const sessionRuntime = new Map<string, SessionRuntime>();
+const sessionResumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const MAX_PERSISTED_SESSIONS = 100;
 const sessionStore = new SessionStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
 const dirtySessionIds = new Set<string>();
@@ -160,6 +162,30 @@ const parseJson = async <T>(request: Request): Promise<T | null> => {
 };
 
 const getSession = (sessionId: string) => sessions.get(sessionId);
+
+const cancelSessionResume = (sessionId: string) => {
+  const timer = sessionResumeTimers.get(sessionId);
+  if (!timer) return;
+  clearTimeout(timer);
+  sessionResumeTimers.delete(sessionId);
+};
+
+const scheduleSessionStopAfterDisconnect = (session: ObservationSession) => {
+  cancelSessionResume(session.sessionId);
+  const timer = setTimeout(() => {
+    sessionResumeTimers.delete(session.sessionId);
+    const current = getSession(session.sessionId);
+    if (!current || current.status !== "active") return;
+    current.status = "stopped";
+    current.lastReceivedAt = new Date().toISOString();
+    altitudeReferences.delete(current.sessionId);
+    device.connected = false;
+    persistSession(current);
+    publishSession(server, current);
+  }, SESSION_RESUME_GRACE_MS);
+  timer.unref?.();
+  sessionResumeTimers.set(session.sessionId, timer);
+};
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -312,6 +338,8 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
   if (!Array.isArray(rawValues) || rawValues.length > MAX_SENSOR_VALUES) return null;
   const values = rawValues.map(finiteNumber);
   if (values.some((item) => item === null)) return null;
+  const sensorAccuracy = value.sensorAccuracy === undefined ? undefined : finiteNumber(value.sensorAccuracy);
+  if (value.sensorAccuracy !== undefined && (sensorAccuracy === null || !Number.isInteger(sensorAccuracy) || sensorAccuracy < 0 || sensorAccuracy > 3)) return null;
   const accuracy = value.accuracy === undefined ? undefined : finiteNumber(value.accuracy);
   if (value.accuracy !== undefined && (accuracy === null || accuracy < 0 || accuracy > 10_000)) return null;
   const location = value.location === undefined ? undefined : normalizeLocation(value.location);
@@ -326,6 +354,7 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
     deviceTimestampNs,
     sensorType,
     values: values as number[],
+    ...(sensorAccuracy === undefined || sensorAccuracy === null ? {} : { sensorAccuracy }),
     ...(accuracy === undefined || accuracy === null ? {} : { accuracy }),
     ...(location ? { location } : {}),
     ...(relativePosition ? { relativePosition } : {}),
@@ -405,6 +434,7 @@ const upsertSensor = (
   const snapshot: LiveSensorSnapshot = {
     sensorType,
     values: sample.values.slice(0, 16),
+    sensorAccuracy: sample.sensorAccuracy,
     accuracy: sample.accuracy ?? sample.location?.accuracyM,
     sampleCount: 1,
     lastDeviceTimestampNs: sample.deviceTimestampNs,
@@ -733,9 +763,10 @@ const server = Bun.serve<RealtimeClient>({
       const sessionId = sessionMatch[1];
       const session = getSession(sessionId);
       if (!session) return json({ error: "session_not_found" }, { status: 404 });
-    if (url.pathname.endsWith("/stop") && request.method === "POST") {
+      if (url.pathname.endsWith("/stop") && request.method === "POST") {
         session.status = "stopped";
         session.lastReceivedAt = new Date().toISOString();
+        cancelSessionResume(session.sessionId);
         altitudeReferences.delete(session.sessionId);
         device.connected = false;
         persistSession(session);
@@ -788,6 +819,21 @@ const server = Bun.serve<RealtimeClient>({
         return;
       }
 
+      if (ws.data.role === "device" && message.type === "session.resume") {
+        const session = getSession(message.sessionId ?? "");
+        const deviceId = message.deviceId ?? ws.data.deviceId ?? "android-device";
+        if (!session || session.status !== "active" || session.deviceId !== deviceId) {
+          ws.send(JSON.stringify({ type: "error", error: "session_resume_failed" }));
+          return;
+        }
+        cancelSessionResume(session.sessionId);
+        ws.data.sessionId = session.sessionId;
+        device.connected = true;
+        ws.send(JSON.stringify({ type: "session.resumed", session }));
+        publishSession(server, session);
+        return;
+      }
+
       if (ws.data.role === "device" && message.type === "samples") {
         const session = getSession(message.sessionId ?? ws.data.sessionId ?? "");
         const samples = message.samples;
@@ -806,6 +852,7 @@ const server = Bun.serve<RealtimeClient>({
         if (session) {
           session.status = "stopped";
           session.lastReceivedAt = new Date().toISOString();
+          cancelSessionResume(session.sessionId);
           altitudeReferences.delete(session.sessionId);
           device.connected = false;
           persistSession(session);
@@ -819,12 +866,8 @@ const server = Bun.serve<RealtimeClient>({
     close(ws) {
       const session = getSession(ws.data.sessionId ?? "");
       if (session && session.status === "active") {
-        session.status = "stopped";
-        session.lastReceivedAt = new Date().toISOString();
-        altitudeReferences.delete(session.sessionId);
         device.connected = false;
-        persistSession(session);
-        publishSession(server, session);
+        scheduleSessionStopAfterDisconnect(session);
       }
     },
   },

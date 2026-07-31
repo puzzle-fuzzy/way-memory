@@ -27,6 +27,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val locationManager = appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private val state = MutableStateFlow(SensorUiState())
     private val readings = linkedMapOf<String, SensorReading>()
+    private val registeredSensorKeys = mutableSetOf<String>()
     private val uploader = SessionUploader()
     private val poseFusion = PoseFusionEngine()
     private val visualCollector = ArCorePoseCollector(
@@ -65,18 +66,13 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         if (state.value.collecting) return
 
         readings.clear()
+        registeredSensorKeys.clear()
         lastPublishedLocation = null
         resetMotionState()
         hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
-        registerSensor(Sensor.TYPE_ACCELEROMETER, "Accelerometer", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
-        registerSensor(Sensor.TYPE_GRAVITY, "Gravity", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
-        registerSensor(Sensor.TYPE_LINEAR_ACCELERATION, "Linear acceleration", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
-        registerSensor(Sensor.TYPE_GYROSCOPE, "Gyroscope", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
-        registerSensor(Sensor.TYPE_MAGNETIC_FIELD, "Magnetometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
-        registerSensor(Sensor.TYPE_PRESSURE, "Barometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
-        registerSensor(Sensor.TYPE_GAME_ROTATION_VECTOR, "Game rotation vector", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
-        registerSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR, "Geomagnetic rotation vector", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
-        registerSensor(Sensor.TYPE_ROTATION_VECTOR, "Rotation vector", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
+        sensorManager.getSensorList(Sensor.TYPE_ALL).forEach { sensor ->
+            registerSensor(sensor)
+        }
 
         state.value = state.value.copy(
             collecting = true,
@@ -103,13 +99,21 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         state.value = state.value.copy(collecting = false)
     }
 
-    private fun registerSensor(type: Int, label: String, delay: Int, unavailableDetail: String) {
-        val sensor = sensorManager.getDefaultSensor(type)
-        if (sensor == null) {
-            readings[label] = SensorReading(label, SensorState.UNAVAILABLE, unavailableDetail)
-            return
+    private fun registerSensor(sensor: Sensor) {
+        if (!registeredSensorKeys.add(sensorKey(sensor))) return
+        val key = sensorKey(sensor)
+        val label = sensorLabel(sensor)
+        val delay = when (sensor.type) {
+            Sensor.TYPE_ACCELEROMETER,
+            Sensor.TYPE_GRAVITY,
+            Sensor.TYPE_LINEAR_ACCELERATION,
+            Sensor.TYPE_GYROSCOPE,
+            Sensor.TYPE_GAME_ROTATION_VECTOR,
+            Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR,
+            Sensor.TYPE_ROTATION_VECTOR -> SensorManager.SENSOR_DELAY_GAME
+            else -> SensorManager.SENSOR_DELAY_NORMAL
         }
-        readings[label] = SensorReading(label, SensorState.LIMITED, "Waiting for data")
+        readings[key] = SensorReading(label, SensorState.LIMITED, "Waiting for data")
         sensorManager.registerListener(this, sensor, delay)
     }
 
@@ -143,24 +147,14 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        val label = when (event.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER -> "Accelerometer"
-            Sensor.TYPE_GRAVITY -> "Gravity"
-            Sensor.TYPE_LINEAR_ACCELERATION -> "Linear acceleration"
-            Sensor.TYPE_GYROSCOPE -> "Gyroscope"
-            Sensor.TYPE_MAGNETIC_FIELD -> "Magnetometer"
-            Sensor.TYPE_PRESSURE -> "Barometer"
-            Sensor.TYPE_GAME_ROTATION_VECTOR -> "Game rotation vector"
-            Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR -> "Geomagnetic rotation vector"
-            Sensor.TYPE_ROTATION_VECTOR -> "Rotation vector"
-            else -> return
-        }
+        val label = sensorLabel(event.sensor)
+        val key = sensorKey(event.sensor)
         val values = event.values.toList()
         val detail = when (event.sensor.type) {
             Sensor.TYPE_PRESSURE -> "%.1f hPa".format(values.firstOrNull() ?: 0f)
             else -> values.take(3).joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
         }
-        readings[label] = SensorReading(label, SensorState.READY, detail, values)
+        readings[key] = SensorReading(label, SensorState.READY, detail, values)
         when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_GRAVITY -> updateGravity(values)
             Sensor.TYPE_MAGNETIC_FIELD -> updateMagneticField(values)
@@ -187,8 +181,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         uploader.enqueue(
             CollectedSample(
                 deviceTimestampNs = event.timestamp,
-                sensorType = event.sensor.stringType,
+                sensorType = sensorWireType(event.sensor),
                 values = values,
+                sensorAccuracy = event.accuracy.takeIf { it >= 0 },
                 relativePosition = poseUpdate?.pose?.toRelativePosition(),
                 pose = poseUpdate?.pose,
                 motionEvent = poseUpdate?.motionEvent,
@@ -383,6 +378,14 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         if (pressureHpa == null || !pressureHpa.isFinite() || pressureHpa !in 300f..1_100f) return
         poseFusion.updatePressure(pressureHpa, SystemClock.elapsedRealtimeNanos())
     }
+
+    private fun sensorKey(sensor: Sensor): String = "${sensor.stringType.ifBlank { "type-${sensor.type}" }}:${sensor.id}"
+
+    private fun sensorLabel(sensor: Sensor): String = "${sensor.name} · ${sensor.stringType.ifBlank { "type-${sensor.type}" }} #${sensor.id}"
+
+    private fun sensorWireType(sensor: Sensor): String = sensor.stringType
+        .ifBlank { "android.sensor.type-${sensor.type}" }
+        .take(64)
 
     private fun integrateMotion(timestampNs: Long, deviceAcceleration: List<Float>): PoseUpdate? {
         if (!hasRotationMatrix || deviceAcceleration.size < 3) return null

@@ -80,13 +80,12 @@ private fun SensorScreen(collector: SensorCollector) {
     val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }
     fun startCapture() {
+        if (!collector.hasPreciseLocationPermission()) return
         collector.start(hostActivity)
-        if (collector.hasLocationPermission()) {
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_START),
-            )
-        }
+        ContextCompat.startForegroundService(
+            context,
+            Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_START),
+        )
     }
     fun stopCapture() {
         collector.stop()
@@ -127,7 +126,7 @@ private fun SensorScreen(collector: SensorCollector) {
                         )
                         Text("位置：${state.locationText}", style = MaterialTheme.typography.bodySmall)
                         Text(
-                            "实时同步：${if (sync.connected) "已连接" else "未连接"} · 已上传 ${sync.uploadedSamples} · 待上传 ${sync.pendingSamples}",
+                            "实时同步：${if (sync.connected) "已连接" else "未连接"} · 已上传 ${sync.uploadedSamples} · 待上传 ${sync.pendingSamples} · 丢弃 ${sync.droppedSamples}",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         sync.lastError?.let { Text("同步错误：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -146,7 +145,7 @@ private fun SensorScreen(collector: SensorCollector) {
                             Button(onClick = {
                                 if (state.collecting) {
                                     stopCapture()
-                                } else if (collector.hasPreciseLocationPermission() && collector.hasCameraPermission()) {
+                                } else if (collector.hasPreciseLocationPermission()) {
                                     startCapture()
                                 } else {
                                     permissionLauncher.launch(

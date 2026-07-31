@@ -2,15 +2,6 @@ package com.puzzlefuzzy.waymemory.sensing
 
 import android.util.Log
 import com.puzzlefuzzy.waymemory.BuildConfig
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import org.json.JSONArray
-import org.json.JSONObject
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,11 +12,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.ConcurrentLinkedDeque
+import java.util.concurrent.TimeUnit
 
 data class CollectedSample(
     val deviceTimestampNs: Long,
     val sensorType: String,
     val values: List<Float> = emptyList(),
+    val sensorAccuracy: Int? = null,
     val accuracy: Float? = null,
     val location: LocationSample? = null,
     val relativePosition: RelativePositionSample? = null,
@@ -78,6 +79,7 @@ data class SessionSyncState(
     val sessionId: String? = null,
     val uploadedSamples: Long = 0,
     val pendingSamples: Int = 0,
+    val droppedSamples: Long = 0,
     val lastError: String? = null,
 )
 
@@ -86,27 +88,29 @@ class SessionUploader(
 ) : WebSocketListener() {
     private val client = OkHttpClient.Builder().pingInterval(15, TimeUnit.SECONDS).build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val queue = ConcurrentLinkedQueue<CollectedSample>()
+    private val queue = ConcurrentLinkedDeque<CollectedSample>()
     private val state = MutableStateFlow(SessionSyncState())
     private var socket: WebSocket? = null
-    private var flushJob: Job? = null
+    private var connectionJob: Job? = null
     private var deviceId: String = "android-device"
+    private var activeSessionId: String? = null
+    private var running = false
+    private var nextConnectAtMs = 0L
+    private var reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
 
     val syncState: StateFlow<SessionSyncState> = state.asStateFlow()
 
     fun start(deviceId: String) {
-        if (socket != null) return
+        if (running) return
         this.deviceId = deviceId
-        val websocketUrl = baseUrl
-            .replaceFirst("http://", "ws://")
-            .replaceFirst("https://", "wss://") + "/realtime?role=device&deviceId=$deviceId"
+        activeSessionId = null
+        running = true
+        nextConnectAtMs = 0L
+        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
         state.value = SessionSyncState(lastError = null)
-        socket = client.newWebSocket(
-            Request.Builder().url(websocketUrl).build(),
-            this,
-        )
-        flushJob = scope.launch {
-            while (isActive) {
+        connectionJob = scope.launch {
+            while (isActive && running) {
+                if (socket == null && System.currentTimeMillis() >= nextConnectAtMs) connect()
                 flush()
                 delay(FLUSH_INTERVAL_MS)
             }
@@ -114,43 +118,101 @@ class SessionUploader(
     }
 
     fun enqueue(sample: CollectedSample) {
-        queue.add(sample)
-        state.value = state.value.copy(pendingSamples = queue.size)
+        if (!running) return
+        queue.addLast(sample)
+        var dropped = 0L
+        while (queue.size > MAX_PENDING_SAMPLES) {
+            if (queue.pollFirst() == null) break
+            dropped += 1
+        }
+        state.value = state.value.copy(
+            pendingSamples = queue.size,
+            droppedSamples = state.value.droppedSamples + dropped,
+            lastError = if (dropped > 0) "网络不可用，已丢弃最旧的 $dropped 条原始样本" else state.value.lastError,
+        )
     }
 
     fun stop() {
-        flushJob?.cancel()
+        running = false
+        connectionJob?.cancel()
         repeat(10) {
             if (queue.isEmpty()) return@repeat
             flush()
         }
-        state.value.sessionId?.let { sessionId ->
+        activeSessionId?.let { sessionId ->
             socket?.send(JSONObject().put("type", "session.stop").put("sessionId", sessionId).toString())
         }
-        flushJob = null
+        val unsent = queue.size
+        queue.clear()
+        connectionJob = null
         socket?.close(1000, "session stopped")
         socket = null
-        state.value = state.value.copy(connected = false)
+        activeSessionId = null
+        state.value = state.value.copy(
+            connected = false,
+            sessionId = null,
+            pendingSamples = 0,
+            droppedSamples = state.value.droppedSamples + unsent,
+            lastError = if (unsent > 0) "停止采集时仍有 $unsent 条样本未上传" else state.value.lastError,
+        )
+    }
+
+    private fun connect() {
+        if (!running || socket != null) return
+        val websocketUrl = baseUrl
+            .replaceFirst("http://", "ws://")
+            .replaceFirst("https://", "wss://") + "/realtime?role=device&deviceId=$deviceId"
+        socket = client.newWebSocket(Request.Builder().url(websocketUrl).build(), this)
+        nextConnectAtMs = System.currentTimeMillis() + reconnectDelayMs
     }
 
     override fun onOpen(webSocket: WebSocket, response: Response) {
+        if (!running) {
+            webSocket.close(1000, "session stopped")
+            return
+        }
+        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
+        nextConnectAtMs = 0L
         state.value = state.value.copy(connected = true, lastError = null)
-        webSocket.send(
+        val message = if (activeSessionId == null) {
             JSONObject()
                 .put("type", "session.start")
                 .put("deviceId", deviceId)
                 .put("mode", "learning")
-                .toString(),
-        )
+        } else {
+            JSONObject()
+                .put("type", "session.resume")
+                .put("sessionId", activeSessionId)
+                .put("deviceId", deviceId)
+        }
+        webSocket.send(message.toString())
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
         runCatching {
             val message = JSONObject(text)
             when (message.optString("type")) {
-                "session.started" -> state.value = state.value.copy(sessionId = message.getJSONObject("session").getString("sessionId"))
+                "session.started", "session.resumed" -> {
+                    activeSessionId = message.getJSONObject("session").getString("sessionId")
+                    state.value = state.value.copy(sessionId = activeSessionId, lastError = null)
+                }
                 "samples.accepted" -> state.value = state.value.copy(uploadedSamples = message.optLong("sampleCount", state.value.uploadedSamples))
-                "error" -> state.value = state.value.copy(lastError = message.optString("error"))
+                "error" -> {
+                    val error = message.optString("error")
+                    if (error == "session_resume_failed" && activeSessionId != null && running) {
+                        activeSessionId = null
+                        state.value = state.value.copy(sessionId = null, lastError = "会话已过期，正在建立新会话")
+                        webSocket.send(
+                            JSONObject()
+                                .put("type", "session.start")
+                                .put("deviceId", deviceId)
+                                .put("mode", "learning")
+                                .toString(),
+                        )
+                    } else {
+                        state.value = state.value.copy(lastError = error)
+                    }
+                }
             }
         }.onFailure { error ->
             Log.w(TAG, "Invalid realtime message", error)
@@ -158,17 +220,29 @@ class SessionUploader(
     }
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-        socket = null
-        state.value = state.value.copy(connected = false, lastError = t.message ?: "WebSocket 连接失败")
+        if (socket === webSocket) socket = null
+        scheduleReconnect(t.message ?: "WebSocket 连接失败")
+    }
+
+    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+        if (socket === webSocket) socket = null
+        scheduleReconnect(if (reason.isBlank()) "WebSocket 已断开" else reason)
+    }
+
+    private fun scheduleReconnect(error: String) {
+        if (!running) return
+        nextConnectAtMs = System.currentTimeMillis() + reconnectDelayMs
+        reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
+        state.value = state.value.copy(connected = false, lastError = error)
     }
 
     private fun flush() {
-        val sessionId = state.value.sessionId ?: return
+        val sessionId = activeSessionId ?: return
         val currentSocket = socket ?: return
         if (queue.isEmpty()) return
 
         val batch = ArrayList<CollectedSample>(MAX_BATCH)
-        repeat(MAX_BATCH) { queue.poll()?.let(batch::add) }
+        repeat(MAX_BATCH) { queue.pollFirst()?.let(batch::add) }
         if (batch.isEmpty()) return
 
         val payload = JSONObject()
@@ -176,7 +250,7 @@ class SessionUploader(
             .put("sessionId", sessionId)
             .put("samples", JSONArray().apply { batch.forEach { put(it.toJson()) } })
         if (!currentSocket.send(payload.toString())) {
-            batch.forEach(queue::add)
+            batch.asReversed().forEach(queue::addFirst)
         } else {
             state.value = state.value.copy(
                 uploadedSamples = state.value.uploadedSamples + batch.size,
@@ -189,6 +263,7 @@ class SessionUploader(
         put("deviceTimestampNs", deviceTimestampNs)
         put("sensorType", sensorType)
         put("values", JSONArray(values))
+        sensorAccuracy?.let { put("sensorAccuracy", it) }
         accuracy?.let { put("accuracy", it) }
         location?.let {
             put("location", JSONObject().apply {
@@ -243,6 +318,9 @@ class SessionUploader(
     companion object {
         private const val TAG = "WayMemorySync"
         private const val MAX_BATCH = 100
+        private const val MAX_PENDING_SAMPLES = 4_096
         private const val FLUSH_INTERVAL_MS = 80L
+        private const val INITIAL_RECONNECT_DELAY_MS = 250L
+        private const val MAX_RECONNECT_DELAY_MS = 10_000L
     }
 }
