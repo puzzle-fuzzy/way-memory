@@ -1,4 +1,4 @@
-const [sourceSessionId] = process.argv.slice(2);
+const sourceSessionId = process.argv.slice(2).find(Boolean)?.replace(/^['"]|['"]$/g, "");
 const baseUrl = Bun.env.WAY_MEMORY_API_URL ?? "http://127.0.0.1:8787";
 if (!sourceSessionId) throw new Error("Usage: bun run scripts/replay-session.ts <session-id>");
 

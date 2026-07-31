@@ -240,9 +240,12 @@ class PoseFusionEngine {
 
         val horizontalSpeed = hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat()
         val elevatorEvidence = abs(barometerVerticalSpeedMps) > 0.25f && horizontalSpeed < 0.9f && movingFrames > 3
-        if (elevatorEvidence) elevatorEvidenceFrames = min(40, elevatorEvidenceFrames + 1) else elevatorEvidenceFrames = maxOf(0, elevatorEvidenceFrames - 1)
+        // Exit evidence must decay faster than it accumulates. Otherwise a
+        // short low-horizontal-speed phase at the bottom of a staircase can
+        // keep the route classified as an elevator for several seconds.
+        if (elevatorEvidence) elevatorEvidenceFrames = min(40, elevatorEvidenceFrames + 1) else elevatorEvidenceFrames = maxOf(0, elevatorEvidenceFrames - 3)
         val stairsEvidence = abs(barometerVerticalSpeedMps) > 0.12f && horizontalSpeed >= 0.3f && movingFrames > 3 && !elevatorEvidence
-        if (stairsEvidence) stairsEvidenceFrames = min(40, stairsEvidenceFrames + 1) else stairsEvidenceFrames = maxOf(0, stairsEvidenceFrames - 1)
+        if (stairsEvidence) stairsEvidenceFrames = min(40, stairsEvidenceFrames + 1) else stairsEvidenceFrames = maxOf(0, stairsEvidenceFrames - 2)
         return buildUpdate(timestampNs, force = false)
     }
 

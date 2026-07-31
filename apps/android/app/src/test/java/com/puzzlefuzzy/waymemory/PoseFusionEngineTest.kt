@@ -13,7 +13,9 @@ class PoseFusionEngineTest {
         val engine = PoseFusionEngine()
         engine.updatePressure(1013.25f, 1_000_000_000L)
         engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
-        val update = engine.updateImu(1_200_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateImu(1_200_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateImu(1_400_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        val update = engine.updateImu(1_600_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
         assertNotNull(update)
         assertEquals("stationary", update?.pose?.motionMode)
         assertEquals(0f, update?.pose?.velocityXMps)
@@ -40,6 +42,7 @@ class PoseFusionEngineTest {
     fun sustainedVerticalMotionWithHorizontalTravelProducesStairsEvent() {
         val engine = PoseFusionEngine()
         var stairsEvent = false
+        val observedModes = mutableSetOf<String>()
         var timestampNs = 1_000_000_000L
         engine.updatePressure(1013.25f, timestampNs)
         engine.updateImu(timestampNs, floatArrayOf(0.4f, 0f, 0f), 0.05f)
@@ -47,9 +50,11 @@ class PoseFusionEngineTest {
             timestampNs += 200_000_000L
             engine.updatePressure(1013.25f - (it + 1) * 0.015f, timestampNs)
             val update = engine.updateImu(timestampNs, floatArrayOf(0.4f, 0f, 0f), 0.05f)
+            update?.let { observedModes += it.pose.motionMode }
             if (update?.motionEvent?.type == "stairs-enter") stairsEvent = true
         }
         assertTrue(stairsEvent)
+        assertTrue(observedModes.contains("stairs"))
     }
 
     @Test
