@@ -66,6 +66,13 @@ try {
   if (reusedBootstrap.response.status !== 409) throw new Error("bootstrap token was reusable");
 
   const authHeaders = (token: string) => ({ authorization: `Bearer ${token}` });
+  const openAuthenticatedDevice = async (deviceId: string) => {
+    const ticket = await json("/api/auth/ws-ticket", { method: "POST", headers: authHeaders(deviceToken) });
+    if (ticket.response.status !== 200 || typeof ticket.body.ticket !== "string") throw new Error("authenticated device ticket failed");
+    const socket = new WebSocket(`${baseUrl.replace("http", "ws")}/realtime?role=device&deviceId=${encodeURIComponent(deviceId)}&ticket=${encodeURIComponent(ticket.body.ticket)}`);
+    await waitForOpen(socket);
+    return socket;
+  };
   const me = await json("/api/auth/me", { headers: authHeaders(dashboardToken) });
   if (me.response.status !== 200 || me.body.role !== "dashboard" || me.body.ownerId !== ownerId) throw new Error("dashboard identity failed");
   const enrolled = await json("/api/auth/devices", { method: "POST", headers: { ...authHeaders(dashboardToken), "content-type": "application/json" }, body: "{}" });
@@ -156,6 +163,106 @@ try {
   if (deviceRouteList.response.status !== 401) throw new Error("device credential can list routes");
   const deviceRouteRead = await json(`/api/routes/${routeCreated.body.routeId}`, { headers: authHeaders(deviceToken) });
   if (deviceRouteRead.response.status !== 401) throw new Error("device credential can read routes");
+  const routeId = routeCreated.body.routeId as string;
+  const routeSessionIds: string[] = [];
+  const captureRouteObservation = async (deviceId: string, samplePrefix: string, points: Array<{ lat: number; lng: number; xM: number }>) => {
+    const routeDevice = await openAuthenticatedDevice(deviceId);
+    let routeSessionId = "";
+    try {
+      routeDevice.send(JSON.stringify({
+        type: "session.start",
+        deviceId,
+        mode: "learning",
+        routeId,
+        client: { applicationId: "com.puzzlefuzzy.waymemory", versionName: "auth-route-smoke", buildType: "debug", apiBaseUrl: baseUrl },
+        sensors: [{ sensorType: "android.sensor.accelerometer", name: "Auth Route Smoke", registered: true, transportMaxHz: 50 }],
+      }));
+      const startedRoute = await nextMessage(routeDevice);
+      routeSessionId = typeof startedRoute.session?.sessionId === "string" ? startedRoute.session.sessionId : "";
+      if (startedRoute.type !== "session.started" || !routeSessionId) throw new Error(`route observation did not start: ${JSON.stringify(startedRoute)}`);
+      routeSessionIds.push(routeSessionId);
+      routeDevice.send(JSON.stringify({
+        type: "samples",
+        sessionId: routeSessionId,
+        samples: points.map((point, index) => ({
+          sampleId: `${samplePrefix}-${index + 1}`,
+          deviceTimestampNs: (index + 1) * 1_000_000_000,
+          sensorType: "location",
+          values: [],
+          location: { lat: point.lat, lng: point.lng, accuracyM: 4 },
+          pose: {
+            deviceTimestampNs: (index + 1) * 1_000_000_000,
+            xM: point.xM,
+            yM: 0,
+            zM: 0,
+            velocityXMps: 1,
+            velocityYMps: 0,
+            velocityZMps: 0,
+            accuracyM: 1,
+            confidence: 0.9,
+            source: "fused",
+            frame: "local-enu",
+            sourceFlags: ["imu", "gnss"],
+            motionMode: "walking",
+            stationary: false,
+          },
+        })),
+      }));
+      const acceptedRoute = await nextMessage(routeDevice);
+      if (acceptedRoute.type !== "samples.accepted" || acceptedRoute.accepted !== points.length) throw new Error(`route observation samples failed: ${JSON.stringify(acceptedRoute)}`);
+    } finally {
+      routeDevice.close();
+    }
+    const stoppedRoute = await json(`/api/sessions/${encodeURIComponent(routeSessionId)}/stop`, { method: "POST", headers: authHeaders(deviceToken) });
+    if (stoppedRoute.response.status !== 200 || stoppedRoute.body.status !== "stopped") throw new Error("route observation did not stop");
+    const attachedRoute = await json(`/api/routes/${encodeURIComponent(routeId)}/observations`, {
+      method: "POST",
+      headers: { ...authHeaders(dashboardToken), "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: routeSessionId }),
+    });
+    if (attachedRoute.response.status !== 200) throw new Error(`route observation attach failed: ${JSON.stringify(attachedRoute.body)}`);
+    return attachedRoute.body;
+  };
+  const firstRouteObservation = await captureRouteObservation("auth-route-device-1", "auth-route-1", [
+    { lat: 31.2304, lng: 121.47, xM: 0 },
+    { lat: 31.23041, lng: 121.47, xM: 1 },
+  ]);
+  if (firstRouteObservation.observations !== 1 || firstRouteObservation.referenceSessionId !== routeSessionIds[0]) throw new Error("reference route observation was not stored");
+  const secondRouteObservation = await captureRouteObservation("auth-route-device-2", "auth-route-2", [
+    { lat: 31.230401, lng: 121.470001, xM: 0.1 },
+    { lat: 31.230411, lng: 121.470001, xM: 1.1 },
+  ]);
+  if (secondRouteObservation.observations !== 2 || secondRouteObservation.observationSummaries?.[1]?.alignment?.status !== "matched") throw new Error("first authenticated route repeat did not align");
+  const thirdRouteObservation = await captureRouteObservation("auth-route-device-3", "auth-route-3", [
+    { lat: 31.230399, lng: 121.469999, xM: -0.1 },
+    { lat: 31.230409, lng: 121.469999, xM: 0.9 },
+  ]);
+  if (thirdRouteObservation.observations !== 3 || thirdRouteObservation.observationSummaries?.[2]?.alignment?.status !== "matched") throw new Error("second authenticated route repeat did not align");
+  const publishedRoute = await json(`/api/routes/${encodeURIComponent(routeId)}/publish`, { method: "POST", headers: authHeaders(dashboardToken) });
+  if (publishedRoute.response.status !== 200 || publishedRoute.body.status !== "verified") throw new Error(`authenticated route did not publish: ${JSON.stringify(publishedRoute.body)}`);
+  const handoff = await json(`/api/routes/${encodeURIComponent(routeId)}/handoff`, { method: "POST", headers: authHeaders(dashboardToken) });
+  if (handoff.response.status !== 201 || typeof handoff.body.token !== "string") throw new Error("authenticated navigation handoff failed");
+  const navigator = await openAuthenticatedDevice("auth-route-navigator");
+  let navigationSessionId = "";
+  try {
+    navigator.send(JSON.stringify({ type: "session.start", deviceId: "auth-route-navigator", mode: "navigation", handoffToken: handoff.body.token, client: { applicationId: "com.puzzlefuzzy.waymemory", versionName: "auth-route-smoke", buildType: "debug", apiBaseUrl: baseUrl }, sensors: [] }));
+    const navigationStarted = await nextMessage(navigator);
+    navigationSessionId = typeof navigationStarted.session?.sessionId === "string" ? navigationStarted.session.sessionId : "";
+    if (navigationStarted.type !== "session.started" || navigationStarted.session?.mode !== "navigation" || navigationStarted.session?.routeId !== routeId) throw new Error(`authenticated navigation did not bind route: ${JSON.stringify(navigationStarted)}`);
+    routeSessionIds.push(navigationSessionId);
+  } finally {
+    navigator.close();
+  }
+  const stoppedNavigation = await json(`/api/sessions/${encodeURIComponent(navigationSessionId)}/stop`, { method: "POST", headers: authHeaders(deviceToken) });
+  if (stoppedNavigation.response.status !== 200 || stoppedNavigation.body.status !== "stopped") throw new Error("authenticated navigation session did not stop");
+  const reusedHandoffNavigator = await openAuthenticatedDevice("auth-route-handoff-reuse");
+  try {
+    reusedHandoffNavigator.send(JSON.stringify({ type: "session.start", deviceId: "auth-route-handoff-reuse", mode: "navigation", handoffToken: handoff.body.token }));
+    const reusedHandoff = await nextMessage(reusedHandoffNavigator);
+    if (reusedHandoff.type !== "error" || reusedHandoff.error !== "invalid_navigation_handoff") throw new Error(`authenticated handoff was reusable: ${JSON.stringify(reusedHandoff)}`);
+  } finally {
+    reusedHandoffNavigator.close();
+  }
   const dashboardWrite = await json(`/api/sessions/${session.sessionId}/samples`, { method: "POST", headers: { ...authHeaders(dashboardToken), "content-type": "application/json" }, body: JSON.stringify({ samples: [] }) });
   if (dashboardWrite.response.status !== 401) throw new Error("dashboard credential can write device samples");
 
@@ -175,7 +282,12 @@ try {
 
   dashboard.close();
   device.close();
-  console.log("Authenticated API smoke passed", { ownerId, sessionId: session.sessionId, dashboardRotation: true, websocketTickets: true });
+  console.log("Authenticated API smoke passed", { ownerId, sessionId: session.sessionId, dashboardRotation: true, websocketTickets: true, verifiedRoute: true, navigationHandoff: true });
 } finally {
   child.kill();
+  await child.exited;
+  await Bun.sleep(100);
+  await rm(dbPath, { force: true });
+  await rm(`${dbPath}-wal`, { force: true });
+  await rm(`${dbPath}-shm`, { force: true });
 }

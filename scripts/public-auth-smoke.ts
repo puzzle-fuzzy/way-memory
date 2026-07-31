@@ -97,6 +97,8 @@ const run = async () => {
   const dashboard = await openSocket("dashboard", dashboardToken);
   let device = await openSocket("device", deviceToken, deviceId);
   let sessionId = "";
+  let routeId = "";
+  const routeSessionIds: string[] = [];
 
   try {
     const startedMessage = nextMessage(device);
@@ -182,17 +184,144 @@ const run = async () => {
     device.send(JSON.stringify({ type: "session.stop", sessionId }));
     const stopped = await stoppedMessage;
     if (stopped.type !== "session.updated" || stopped.session?.status !== "stopped") fail("session stop was not broadcast");
+
+    const routeCreated = await requestJson("/api/routes", {
+      method: "POST",
+      headers: { ...authHeaders(dashboardToken), "content-type": "application/json" },
+      body: JSON.stringify({ name: `public-auth-route-${Date.now()}` }),
+    });
+    if (routeCreated.response.status !== 201 || typeof routeCreated.body.routeId !== "string") fail(`authenticated route creation failed: HTTP ${routeCreated.response.status}`);
+    routeId = routeCreated.body.routeId;
+
+    type RoutePoint = { lat: number; lng: number; altitudeM?: number; xM: number };
+    const captureObservation = async (observationDeviceId: string, samplePrefix: string, points: RoutePoint[]) => {
+      const observationDevice = await openSocket("device", deviceToken, observationDeviceId);
+      let observationSessionId = "";
+      try {
+        observationDevice.send(JSON.stringify({
+          type: "session.start",
+          deviceId: observationDeviceId,
+          mode: "learning",
+          routeId,
+          client: { applicationId: "com.puzzlefuzzy.waymemory", versionName: "public-auth-route-smoke", buildType: "debug", apiBaseUrl: baseUrl },
+          sensors: [{ sensorType: "android.sensor.accelerometer", name: "public-auth-route-smoke", registered: true, transportMaxHz: 50 }],
+        }));
+        const started = await nextMessage(observationDevice);
+        observationSessionId = typeof started.session?.sessionId === "string" ? started.session.sessionId : "";
+        if (started.type !== "session.started" || !observationSessionId) fail(`route observation did not start: ${JSON.stringify(started)}`);
+        routeSessionIds.push(observationSessionId);
+        observationDevice.send(JSON.stringify({
+          type: "samples",
+          sessionId: observationSessionId,
+          samples: points.map((point, index) => ({
+            sampleId: `${samplePrefix}-${index + 1}`,
+            deviceTimestampNs: (index + 1) * 1_000_000_000,
+            sensorType: "location",
+            values: [],
+            location: { lat: point.lat, lng: point.lng, accuracyM: 4, ...(point.altitudeM === undefined ? {} : { altitudeM: point.altitudeM }) },
+            pose: {
+              deviceTimestampNs: (index + 1) * 1_000_000_000,
+              xM: point.xM,
+              yM: 0,
+              zM: point.altitudeM === undefined ? 0 : point.altitudeM - (points[0].altitudeM ?? point.altitudeM),
+              velocityXMps: 1,
+              velocityYMps: 0,
+              velocityZMps: 0,
+              accuracyM: 1,
+              confidence: 0.9,
+              source: "fused",
+              frame: "local-enu",
+              sourceFlags: ["imu", "gnss"],
+              motionMode: "walking",
+              stationary: false,
+            },
+          })),
+        }));
+        const accepted = await nextMessage(observationDevice);
+        if (accepted.type !== "samples.accepted" || accepted.accepted !== points.length) fail(`route observation samples failed: ${JSON.stringify(accepted)}`);
+      } finally {
+        observationDevice.close();
+      }
+      const stoppedObservation = await requestJson(`/api/sessions/${encodeURIComponent(observationSessionId)}/stop`, { method: "POST", headers: authHeaders(deviceToken) });
+      if (stoppedObservation.response.status !== 200 || stoppedObservation.body.status !== "stopped") fail("route observation did not stop");
+      const attached = await requestJson(`/api/routes/${encodeURIComponent(routeId)}/observations`, {
+        method: "POST",
+        headers: { ...authHeaders(dashboardToken), "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: observationSessionId }),
+      });
+      if (attached.response.status !== 200) fail(`route observation attach failed: HTTP ${attached.response.status}`);
+      return attached.body;
+    };
+
+    const firstObservation = await captureObservation("public-auth-route-1", "public-auth-route-1", [
+      { lat: 31.2304, lng: 121.47, altitudeM: 100, xM: 0 },
+      { lat: 31.23041, lng: 121.47, altitudeM: 101, xM: 1 },
+    ]);
+    if (firstObservation.observations !== 1 || firstObservation.referenceSessionId !== routeSessionIds[0]) fail("reference route observation was not stored");
+    const secondObservation = await captureObservation("public-auth-route-2", "public-auth-route-2", [
+      { lat: 31.230401, lng: 121.470001, xM: 0.1 },
+      { lat: 31.230411, lng: 121.470001, xM: 1.1 },
+    ]);
+    if (secondObservation.observations !== 2 || secondObservation.observationSummaries?.[1]?.alignment?.status !== "matched") fail("first repeated route observation did not align");
+    const thirdObservation = await captureObservation("public-auth-route-3", "public-auth-route-3", [
+      { lat: 31.230399, lng: 121.469999, xM: -0.1 },
+      { lat: 31.230409, lng: 121.469999, xM: 0.9 },
+    ]);
+    if (thirdObservation.observations !== 3 || thirdObservation.observationSummaries?.[2]?.alignment?.status !== "matched") fail("second repeated route observation did not align");
+    const published = await requestJson(`/api/routes/${encodeURIComponent(routeId)}/publish`, { method: "POST", headers: authHeaders(dashboardToken) });
+    if (published.response.status !== 200 || published.body.status !== "verified") fail(`route did not publish as verified: HTTP ${published.response.status}`);
+
+    const handoff = await requestJson(`/api/routes/${encodeURIComponent(routeId)}/handoff`, { method: "POST", headers: authHeaders(dashboardToken) });
+    if (handoff.response.status !== 201 || typeof handoff.body.token !== "string") fail(`navigation handoff failed: HTTP ${handoff.response.status}`);
+    const navigator = await openSocket("device", deviceToken, "public-auth-navigator");
+    let navigationSessionId = "";
+    try {
+      navigator.send(JSON.stringify({
+        type: "session.start",
+        deviceId: "public-auth-navigator",
+        mode: "navigation",
+        handoffToken: handoff.body.token,
+        client: { applicationId: "com.puzzlefuzzy.waymemory", versionName: "public-auth-route-smoke", buildType: "debug", apiBaseUrl: baseUrl },
+        sensors: [],
+      }));
+      const navigationStarted = await nextMessage(navigator);
+      navigationSessionId = typeof navigationStarted.session?.sessionId === "string" ? navigationStarted.session.sessionId : "";
+      if (navigationStarted.type !== "session.started" || navigationStarted.session?.mode !== "navigation" || navigationStarted.session?.routeId !== routeId) fail(`navigation handoff did not bind route: ${JSON.stringify(navigationStarted)}`);
+      routeSessionIds.push(navigationSessionId);
+    } finally {
+      navigator.close();
+    }
+    const stoppedNavigation = await requestJson(`/api/sessions/${encodeURIComponent(navigationSessionId)}/stop`, { method: "POST", headers: authHeaders(deviceToken) });
+    if (stoppedNavigation.response.status !== 200 || stoppedNavigation.body.status !== "stopped") fail("navigation session did not stop");
+
+    const reusedHandoff = await openSocket("device", deviceToken, "public-auth-handoff-reuse");
+    try {
+      reusedHandoff.send(JSON.stringify({ type: "session.start", deviceId: "public-auth-handoff-reuse", mode: "navigation", handoffToken: handoff.body.token }));
+      const reused = await nextMessage(reusedHandoff);
+      if (reused.type !== "error" || reused.error !== "invalid_navigation_handoff") fail(`navigation handoff was reusable: ${JSON.stringify(reused)}`);
+    } finally {
+      reusedHandoff.close();
+    }
+
     console.log("Public authenticated smoke passed", {
       baseUrl,
       sessionId,
       samples: 1,
       resumed: true,
       rawReplay: true,
+      verifiedRoute: true,
+      navigationHandoff: true,
       roleIsolation: true,
     });
   } finally {
     device.close();
     dashboard.close();
+    if (routeId) {
+      await requestJson(`/api/routes/${encodeURIComponent(routeId)}`, { method: "DELETE", headers: authHeaders(dashboardToken) }).catch(() => undefined);
+    }
+    for (const cleanupSessionId of [sessionId, ...routeSessionIds]) {
+      await requestJson(`/api/sessions/${encodeURIComponent(cleanupSessionId)}`, { method: "DELETE", headers: authHeaders(dashboardToken) }).catch(() => undefined);
+    }
   }
 };
 
