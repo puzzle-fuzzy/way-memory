@@ -148,6 +148,30 @@ const moveCameraDrag = (event: PointerEvent) => {
 const endCameraDrag = () => { dragState.value = null; };
 const resetCamera = () => { cameraYaw.value = -0.72; cameraPitch.value = 0.62; };
 
+const buildSmoothPath = (points: Array<{ x: number; y: number }>) => {
+  if (!points.length) return "";
+  if (points.length === 1) return `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  if (points.length === 2) return `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)} L ${points[1].x.toFixed(1)} ${points[1].y.toFixed(1)}`;
+  const tension = 0.16;
+  const commands = [`M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const before = points[index - 1] ?? points[index];
+    const start = points[index];
+    const end = points[index + 1];
+    const after = points[index + 2] ?? end;
+    const controlStart = {
+      x: start.x + (end.x - before.x) * tension,
+      y: start.y + (end.y - before.y) * tension,
+    };
+    const controlEnd = {
+      x: end.x - (after.x - start.x) * tension,
+      y: end.y - (after.y - start.y) * tension,
+    };
+    commands.push(`C ${controlStart.x.toFixed(1)} ${controlStart.y.toFixed(1)} ${controlEnd.x.toFixed(1)} ${controlEnd.y.toFixed(1)} ${end.x.toFixed(1)} ${end.y.toFixed(1)}`);
+  }
+  return commands.join(" ");
+};
+
 const projectedTrack = computed(() => {
   if (!track.value.length) return [];
   const origin = track.value[0];
@@ -159,34 +183,50 @@ const projectedTrack = computed(() => {
     altitudeM: point.altitudeM ?? 0,
     hasAltitude: typeof point.altitudeM === "number",
   }));
-  const horizontalExtent = Math.max(...worldPoints.map((point) => Math.hypot(point.eastM, point.northM)), 1);
-  const verticalExtent = Math.max(...worldPoints.map((point) => Math.abs(point.altitudeM * 2.2)), 1);
-  const scale = 220 / Math.max(horizontalExtent, verticalExtent);
+  const eastCenter = (Math.min(...worldPoints.map((point) => point.eastM)) + Math.max(...worldPoints.map((point) => point.eastM))) / 2;
+  const northCenter = (Math.min(...worldPoints.map((point) => point.northM)) + Math.max(...worldPoints.map((point) => point.northM))) / 2;
+  const altitudeValues = worldPoints.filter((point) => point.hasAltitude).map((point) => point.altitudeM);
+  const altitudeCenter = altitudeValues.length ? (Math.min(...altitudeValues) + Math.max(...altitudeValues)) / 2 : 0;
+  const centeredWorldPoints = worldPoints.map((point) => ({
+    ...point,
+    eastM: point.eastM - eastCenter,
+    northM: point.northM - northCenter,
+    altitudeM: point.hasAltitude ? point.altitudeM - altitudeCenter : 0,
+  }));
   const yawCos = Math.cos(cameraYaw.value);
   const yawSin = Math.sin(cameraYaw.value);
   const pitchSin = Math.sin(cameraPitch.value);
   const pitchCos = Math.cos(cameraPitch.value);
-  return worldPoints.map((point) => {
-    const rotatedX = point.eastM * yawCos - point.northM * yawSin;
-    const rotatedY = point.eastM * yawSin + point.northM * yawCos;
+  const rotatedWorldPoints = centeredWorldPoints.map((point) => ({
+    ...point,
+    rotatedX: point.eastM * yawCos - point.northM * yawSin,
+    rotatedY: point.eastM * yawSin + point.northM * yawCos,
+  }));
+  const hasZ = hasAltitude.value;
+  const horizontalXExtent = Math.max(...rotatedWorldPoints.map((point) => Math.abs(point.rotatedX)), 1);
+  const verticalScreenExtent = Math.max(...rotatedWorldPoints.map((point) => Math.abs(
+    point.rotatedY * (hasZ ? pitchSin : 1) + point.altitudeM * 2.2 * (hasZ ? pitchCos : 0),
+  )), 1);
+  const scale = Math.min(260 / horizontalXExtent, 112 / verticalScreenExtent);
+  return rotatedWorldPoints.map((point) => {
     const displayAltitude = point.altitudeM * 2.2;
-    const groundY = 210 - rotatedY * pitchSin * scale;
+    const groundY = 165 - point.rotatedY * (hasZ ? pitchSin : 1) * scale;
     return {
       ...point,
-      x: 310 + rotatedX * scale,
-      y: groundY - displayAltitude * pitchCos * scale,
+      x: 310 + point.rotatedX * scale,
+      y: hasZ ? groundY - displayAltitude * pitchCos * scale : groundY,
       groundY,
-      depth: rotatedY * pitchCos - displayAltitude * pitchSin,
+      depth: point.rotatedY * pitchCos - displayAltitude * pitchSin,
     };
   });
 });
 
-const projectedPath = computed(() => projectedTrack.value.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" "));
-const projectedGroundPath = computed(() => projectedTrack.value.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.groundY.toFixed(1)}`).join(" "));
+const projectedPath = computed(() => buildSmoothPath(projectedTrack.value));
 const currentMapPoint = computed(() => projectedTrack.value.at(-1));
 const mapPoints = projectedTrack;
 const mapPath = projectedPath;
 const hasTrack = computed(() => track.value.length > 1);
+const routeRenderModeLabel = computed(() => track.value.length >= 3 ? "平滑曲线展示 · 原始定位点保留" : "定位点不足 3 个 · 显示真实线段");
 
 const activities = computed(() => {
   if (!session.value) return [];
@@ -250,10 +290,10 @@ const activities = computed(() => {
               <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="可旋转的三维实时路线轨迹">
                 <defs><linearGradient id="route3dGradient" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#e05c3b" /><stop offset="55%" stop-color="#c47b4b" /><stop offset="100%" stop-color="#3f8b68" /></linearGradient><filter id="route3dShadow"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".2" /></filter></defs>
                 <rect width="620" height="300" fill="#e9f0eb" />
-                <g v-if="hasAltitude" opacity=".7"><line x1="310" y1="250" x2="310" y2="74" stroke="#c47b4b" stroke-width="1" stroke-dasharray="3 5" /><text x="320" y="75" fill="#c47b4b" font-size="10">Z altitude reference</text></g>
                 <g v-for="point in projectedTrack" :key="`height-${point.index}`"><line v-if="hasAltitude && point.hasAltitude" :x1="point.x" :y1="point.groundY" :x2="point.x" :y2="point.y" stroke="#c47b4b" stroke-width="1.5" stroke-dasharray="3 4" opacity=".8" /></g>
                 <path v-if="hasTrack" :d="projectedPath" fill="none" stroke="#f8fbf7" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" filter="url(#route3dShadow)" />
                 <path v-if="hasTrack" :d="projectedPath" fill="none" stroke="url(#route3dGradient)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+                <g v-if="hasTrack" class="measurement-points"><circle v-for="point in projectedTrack" :key="`point-${point.index}`" :cx="point.x" :cy="point.y" r="2.5" fill="#fff" stroke="#e05c3b" stroke-width="1.5" /></g>
                 <template v-if="projectedTrack.length">
                   <g class="map-node"><circle :cx="projectedTrack[0].x" :cy="projectedTrack[0].y" r="8" /><text :x="projectedTrack[0].x" :y="projectedTrack[0].y - 16">起点</text></g>
                   <g v-if="currentMapPoint" class="current-pos"><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="15" /><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="6" /></g>
@@ -267,6 +307,7 @@ const activities = computed(() => {
             <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-ember" />三维融合轨迹</span><span><i class="legend-dot bg-[#c47b4b]" />高度投影</span><span><i class="legend-dot bg-sage" />当前手机位置</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
           </div>
           <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ track.length }} points · {{ trackSegmentCount }} segments · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
+          <div class="mt-2 px-1 text-[10px] text-muted">{{ routeRenderModeLabel }}<span v-if="hasAltitude"> · {{ altitudeSourceLabel }}</span><span v-else> · 当前按经纬度平面路线显示</span></div>
           <div class="map-frame mt-6" style="display: none">
             <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="实时路线轨迹">
               <defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="#dce4df" stroke-width="1" /></pattern><filter id="shadow"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".16" /></filter></defs>
