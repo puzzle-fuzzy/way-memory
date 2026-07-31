@@ -67,6 +67,15 @@ bun run acceptance:report --case=stairs --out=artifacts/<SESSION_ID>-stairs.json
 bun run acceptance:report --case=elevator --out=artifacts/<SESSION_ID>-elevator.json
 ```
 
+也可以用一次性证据采集脚本保存选定 case 的报告和 raw replay：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/collect-device-evidence.ps1 `
+  -SessionId <SESSION_ID> -Case 3d -MaxOutOfOrder 0
+```
+
+脚本不会覆盖已有证据目录；重复采集请更换 `-OutputRoot`。报告失败时仍保留 JSON 供诊断，不得把失败报告当作通过证据。
+
 The report is an audit of the server's received evidence; it cannot manufacture sensor data or prove a case that was not actually captured.
 
 Record at minimum:
