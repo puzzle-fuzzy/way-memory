@@ -26,7 +26,6 @@ button, a { font: inherit; }
 .metric { display: block; font-size: 24px; letter-spacing: -.06em; }
 .metric-label { display: block; margin-top: 2px; color: #75857d; font-size: 10px; white-space: nowrap; }
 .map-frame { overflow: hidden; border-radius: 12px; }
-.map-frame svg > text { display: none; }
 .map-node circle { fill: #fff; stroke: #e05c3b; stroke-width: 4; }
 .map-node text { fill: #19352d; font: 500 10px Manrope, sans-serif; text-anchor: middle; }
 .map-node.end circle { stroke: #3f8b68; }

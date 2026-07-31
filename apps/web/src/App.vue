@@ -39,7 +39,6 @@ const routeStatusLabel = computed(() => {
 });
 
 const track = computed(() => session.value?.track ?? []);
-const trackSegmentCount = computed(() => Math.max(0, track.value.length - 1));
 const coordinateBoundsLabel = computed(() => {
   if (!track.value.length) return "等待真实定位点";
   const latitudes = track.value.map((point) => point.lat);
@@ -148,30 +147,6 @@ const moveCameraDrag = (event: PointerEvent) => {
 const endCameraDrag = () => { dragState.value = null; };
 const resetCamera = () => { cameraYaw.value = -0.72; cameraPitch.value = 0.62; };
 
-const buildSmoothPath = (points: Array<{ x: number; y: number }>) => {
-  if (!points.length) return "";
-  if (points.length === 1) return `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
-  if (points.length === 2) return `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)} L ${points[1].x.toFixed(1)} ${points[1].y.toFixed(1)}`;
-  const tension = 0.16;
-  const commands = [`M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`];
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const before = points[index - 1] ?? points[index];
-    const start = points[index];
-    const end = points[index + 1];
-    const after = points[index + 2] ?? end;
-    const controlStart = {
-      x: start.x + (end.x - before.x) * tension,
-      y: start.y + (end.y - before.y) * tension,
-    };
-    const controlEnd = {
-      x: end.x - (after.x - start.x) * tension,
-      y: end.y - (after.y - start.y) * tension,
-    };
-    commands.push(`C ${controlStart.x.toFixed(1)} ${controlStart.y.toFixed(1)} ${controlEnd.x.toFixed(1)} ${controlEnd.y.toFixed(1)} ${end.x.toFixed(1)} ${end.y.toFixed(1)}`);
-  }
-  return commands.join(" ");
-};
-
 const projectedTrack = computed(() => {
   if (!track.value.length) return [];
   const origin = track.value[0];
@@ -182,6 +157,7 @@ const projectedTrack = computed(() => {
     northM: (point.lat - origin.lat) * Math.PI / 180 * 6371000,
     altitudeM: point.altitudeM ?? 0,
     hasAltitude: typeof point.altitudeM === "number",
+    accuracyM: point.accuracyM,
   }));
   const eastCenter = (Math.min(...worldPoints.map((point) => point.eastM)) + Math.max(...worldPoints.map((point) => point.eastM))) / 2;
   const northCenter = (Math.min(...worldPoints.map((point) => point.northM)) + Math.max(...worldPoints.map((point) => point.northM))) / 2;
@@ -221,12 +197,8 @@ const projectedTrack = computed(() => {
   });
 });
 
-const projectedPath = computed(() => buildSmoothPath(projectedTrack.value));
 const currentMapPoint = computed(() => projectedTrack.value.at(-1));
-const mapPoints = projectedTrack;
-const mapPath = projectedPath;
-const hasTrack = computed(() => track.value.length > 1);
-const routeRenderModeLabel = computed(() => track.value.length >= 3 ? "平滑曲线展示 · 原始定位点保留" : "定位点不足 3 个 · 显示真实线段");
+const routeRenderModeLabel = computed(() => "实时定位点展示 · 每个圆点对应一个真实样本");
 
 const activities = computed(() => {
   if (!session.value) return [];
@@ -285,46 +257,23 @@ const activities = computed(() => {
           <div class="flex items-start justify-between gap-3"><div><p class="section-label">当前路线</p><h2 class="mt-1 text-xl font-extrabold tracking-[-0.05em]">{{ routeLabel }}</h2></div><span class="status-pill">{{ routeStatusLabel }}</span></div>
           <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前会话轨迹</span></div><div><strong class="metric">{{ session?.sampleCount ?? 0 }}</strong><span class="metric-label">个实时样本</span></div><div><strong class="metric">{{ confidencePercent === null ? '—' : `${confidencePercent}%` }}</strong><span class="metric-label">位置置信度</span></div></div>
           <div class="map-frame mt-6 overflow-hidden">
-            <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">三维轨迹 · X / Y / Z</p><p class="mt-1 text-[11px] text-muted">经纬度平面 + 相对高度</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
+            <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">实时定位点 · X / Y / Z</p><p class="mt-1 text-[11px] text-muted">每个圆点都是服务端收到的真实位置样本</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
             <div class="relative touch-none select-none bg-[#e9f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
               <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="可旋转的三维实时路线轨迹">
-                <defs><linearGradient id="route3dGradient" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#e05c3b" /><stop offset="55%" stop-color="#c47b4b" /><stop offset="100%" stop-color="#3f8b68" /></linearGradient><filter id="route3dShadow"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".2" /></filter></defs>
                 <rect width="620" height="300" fill="#e9f0eb" />
-                <g v-for="point in projectedTrack" :key="`height-${point.index}`"><line v-if="hasAltitude && point.hasAltitude" :x1="point.x" :y1="point.groundY" :x2="point.x" :y2="point.y" stroke="#c47b4b" stroke-width="1.5" stroke-dasharray="3 4" opacity=".8" /></g>
-                <path v-if="hasTrack" :d="projectedPath" fill="none" stroke="#f8fbf7" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" filter="url(#route3dShadow)" />
-                <path v-if="hasTrack" :d="projectedPath" fill="none" stroke="url(#route3dGradient)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-                <g v-if="hasTrack" class="measurement-points"><circle v-for="point in projectedTrack" :key="`point-${point.index}`" :cx="point.x" :cy="point.y" r="2.5" fill="#fff" stroke="#e05c3b" stroke-width="1.5" /></g>
+                <g class="measurement-points"><circle v-for="point in projectedTrack" :key="`point-${point.index}`" :cx="point.x" :cy="point.y" :r="point.index === projectedTrack.length - 1 ? 6 : Math.max(2.5, Math.min(4.5, 5.5 - point.accuracyM * 0.04))" :fill="point.index === projectedTrack.length - 1 ? '#e05c3b' : '#3f8b68'" :opacity="0.35 + ((point.index + 1) / Math.max(projectedTrack.length, 1)) * 0.65" stroke="#fff" stroke-width="1.5" /></g>
                 <template v-if="projectedTrack.length">
                   <g class="map-node"><circle :cx="projectedTrack[0].x" :cy="projectedTrack[0].y" r="8" /><text :x="projectedTrack[0].x" :y="projectedTrack[0].y - 16">起点</text></g>
                   <g v-if="currentMapPoint" class="current-pos"><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="15" /><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="6" /></g>
                 </template>
                 <text v-else x="310" y="145" text-anchor="middle" fill="#75857d" font-size="13">等待 Android 上报位置样本</text>
-                <text x="558" y="259" fill="#75857d" font-size="10">X 东西</text><text x="304" y="174" fill="#75857d" font-size="10">Y 南北</text><text x="320" y="60" fill="#c47b4b" font-size="10">Z 高度</text>
-                <text v-if="projectedTrack.length && !hasAltitude" x="310" y="278" text-anchor="middle" fill="#75857d" font-size="10">尚未收到 GNSS 海拔或气压高度，当前为平面投影</text>
               </svg>
               <div class="pointer-events-none absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1.5 text-[9px] text-muted shadow-sm backdrop-blur">按住拖动旋转 · 高度视觉放大 2.2×</div>
             </div>
-            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-ember" />三维融合轨迹</span><span><i class="legend-dot bg-[#c47b4b]" />高度投影</span><span><i class="legend-dot bg-sage" />当前手机位置</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
+            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-sage" />真实定位点</span><span><i class="legend-dot bg-ember" />最新点</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
           </div>
-          <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ track.length }} points · {{ trackSegmentCount }} segments · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
+          <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ track.length }} real-time points · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
           <div class="mt-2 px-1 text-[10px] text-muted">{{ routeRenderModeLabel }}<span v-if="hasAltitude"> · {{ altitudeSourceLabel }}</span><span v-else> · 当前按经纬度平面路线显示</span></div>
-          <div class="map-frame mt-6" style="display: none">
-            <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="实时路线轨迹">
-              <defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="#dce4df" stroke-width="1" /></pattern><filter id="shadow"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".16" /></filter></defs>
-              <rect width="620" height="300" fill="#edf2ed" /><rect width="620" height="300" fill="url(#grid)" />
-              <template v-if="hasTrack">
-                <path :d="mapPath" fill="none" stroke="#a7b7ae" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" />
-                <path :d="mapPath" fill="none" stroke="#f8fbf7" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
-                <path :d="mapPath" fill="none" stroke="#e05c3b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)" />
-              </template>
-              <template v-if="mapPoints.length">
-                <g class="map-node"><circle :cx="mapPoints[0].x" :cy="mapPoints[0].y" r="9" /><text :x="mapPoints[0].x" :y="mapPoints[0].y + 28">起点</text></g>
-                <g v-if="currentMapPoint" class="current-pos"><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="15" /><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="6" /></g>
-              </template>
-              <text v-else x="310" y="145" text-anchor="middle" fill="#75857d" font-size="13">等待 Android 上报位置样本</text>
-            </svg>
-            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-ember" />实时轨迹</span><span><i class="legend-dot border-2 border-ember bg-white" />起点</span><span><i class="legend-dot bg-sage" />当前手机位置</span></div>
-          </div>
         </article>
 
         <div class="flex flex-col gap-5">

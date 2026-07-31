@@ -16,7 +16,7 @@ The live route is built from the `track` array returned by the API. The web cons
 - A location point within `0.5m` of the previous point during a `2s` window is treated as a duplicate.
 - A location jump larger than the configured walking-speed/uncertainty envelope is dropped when the time gap is short. The count is exposed as `droppedSampleCount`.
 - GNSS altitude is normalized relative to the first accepted GNSS altitude. Barometer altitude is normalized relative to the first accepted pressure reading. This is relative route height, not centimeter-level phone lifting; that requires a later inertial vertical-motion model.
-- The web visualization renders one strong path for the real route. With three or more points, the page uses a display-only Catmull-Rom-to-cubic-Bezier smoothing pass; the raw points remain visible as measurement dots and remain the source of truth for navigation. Height is shown through per-point vertical reference lines; the previous decorative floor grid and full ground-projection path are not part of the route.
+- The web visualization is point-only: every visible dot represents one accepted location sample, and the newest dot is highlighted. No interpolation or route line is drawn, so the display cannot invent movement between measurements. Height is projected into each point's screen position; the previous decorative floor grid and full ground-projection path are not part of the route.
 
 ## Server-side bounds
 
