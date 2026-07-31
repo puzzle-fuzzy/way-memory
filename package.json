@@ -16,6 +16,7 @@
     "smoke:replay": "bun run scripts/replay-smoke.ts",
     "smoke:reconnect": "bun run scripts/reconnect-smoke.ts",
     "smoke:idempotency": "bun run scripts/idempotency-smoke.ts",
+    "smoke:public-closure": "bun run scripts/public-closure-smoke.ts",
     "acceptance:report": "bun run scripts/acceptance-report.ts",
     "android:acceptance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1",
     "replay:session": "bun run scripts/replay-session.ts",
