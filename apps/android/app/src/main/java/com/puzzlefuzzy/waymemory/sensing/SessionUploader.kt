@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -266,11 +267,13 @@ class SessionUploader(
         val nowMs = System.currentTimeMillis()
         if (dropped > 0 || nowMs - lastQueueUiPublishMs >= QUEUE_UI_INTERVAL_MS) {
             lastQueueUiPublishMs = nowMs
-            state.value = state.value.copy(
-                pendingSamples = queue.size(),
-                droppedSamples = state.value.droppedSamples + dropped,
-                lastError = if (dropped > 0) "待上传队列已满，已淘汰最旧的 $dropped 条样本" else state.value.lastError,
-            )
+            state.update { current ->
+                current.copy(
+                    pendingSamples = queue.size(),
+                    droppedSamples = current.droppedSamples + dropped,
+                    lastError = if (dropped > 0) "待上传队列已满，已淘汰最旧的 $dropped 条样本" else current.lastError,
+                )
+            }
         }
     }
 
@@ -303,16 +306,18 @@ class SessionUploader(
         inFlightSocket = null
         sessionIdFile.delete()
         activeSessionId = null
-        state.value = state.value.copy(
-            connected = false,
-            sessionId = null,
-            pendingSamples = queue.size(),
-            lastError = if (queue.size() > 0) {
-                "停止采集，仍有 ${queue.size()} 条样本保存在本机，下一次采集将继续上传"
-            } else {
-                state.value.lastError
-            },
-        )
+        state.update { current ->
+            current.copy(
+                connected = false,
+                sessionId = null,
+                pendingSamples = queue.size(),
+                lastError = if (queue.size() > 0) {
+                    "停止采集，仍有 ${queue.size()} 条样本保存在本机，下一次采集将继续上传"
+                } else {
+                    current.lastError
+                },
+            )
+        }
     }
 
     private fun connect() {
@@ -336,13 +341,13 @@ class SessionUploader(
             client.newCall(request).execute().use { response ->
                 if (response.code == 404) return@use null
                 if (!response.isSuccessful) {
-                    state.value = state.value.copy(lastError = "设备授权失败：HTTP ${response.code}")
+                    state.update { current -> current.copy(lastError = "设备授权失败：HTTP ${response.code}") }
                     return@use null
                 }
                 response.body?.string()?.let { JSONObject(it).optString("ticket").takeIf(String::isNotBlank) }
             }
         }.getOrElse {
-            state.value = state.value.copy(lastError = "无法获取实时授权 ticket")
+            state.update { current -> current.copy(lastError = "无法获取实时授权 ticket") }
             null
         }
     }
@@ -354,7 +359,7 @@ class SessionUploader(
         }
         reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
         nextConnectAtMs = 0L
-        state.value = state.value.copy(connected = true, lastError = null)
+        state.update { current -> current.copy(connected = true, lastError = null) }
         val message = if (activeSessionId == null) {
             sessionStartMessage()
         } else {
@@ -374,7 +379,7 @@ class SessionUploader(
                     activeSessionId = message.getJSONObject("session").getString("sessionId")
                     sessionIdFile.parentFile?.mkdirs()
                     activeSessionId?.let(sessionIdFile::writeText)
-                    state.value = state.value.copy(sessionId = activeSessionId, lastError = null)
+                    state.update { current -> current.copy(sessionId = activeSessionId, lastError = null) }
                     parseSessionLifecycleEvent(message)?.let { onSessionLifecycle?.invoke(it) }
                 }
                 "samples.accepted" -> {
@@ -383,10 +388,12 @@ class SessionUploader(
                         inFlightBatchSize = 0
                         inFlightSocket = null
                         queue.acknowledge(acknowledged)
-                        state.value = state.value.copy(
-                            uploadedSamples = message.optLong("sampleCount", state.value.uploadedSamples + acknowledged),
-                            pendingSamples = queue.size(),
-                        )
+                        state.update { current ->
+                            current.copy(
+                                uploadedSamples = message.optLong("sampleCount", current.uploadedSamples + acknowledged),
+                                pendingSamples = queue.size(),
+                            )
+                        }
                     }
                 }
                 "error" -> {
@@ -394,10 +401,10 @@ class SessionUploader(
                     if (error == "session_resume_failed" && activeSessionId != null && running) {
                         activeSessionId = null
                         sessionIdFile.delete()
-                        state.value = state.value.copy(sessionId = null, lastError = "会话已过期，正在建立新会话")
+                        state.update { current -> current.copy(sessionId = null, lastError = "会话已过期，正在建立新会话") }
                         webSocket.send(sessionStartMessage().toString())
                     } else {
-                        state.value = state.value.copy(lastError = error)
+                        state.update { current -> current.copy(lastError = error) }
                     }
                 }
             }
@@ -428,7 +435,7 @@ class SessionUploader(
         if (!running) return
         nextConnectAtMs = System.currentTimeMillis() + reconnectDelayMs
         reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
-        state.value = state.value.copy(connected = false, lastError = error)
+        state.update { current -> current.copy(connected = false, lastError = error) }
     }
 
     private fun flush() {
