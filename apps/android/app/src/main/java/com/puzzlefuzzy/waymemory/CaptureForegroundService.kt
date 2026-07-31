@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import com.puzzlefuzzy.waymemory.sensing.SensorCollector
 
@@ -18,7 +20,11 @@ class CaptureForegroundService : Service() {
         notificationManager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "way-memory 轨迹采集", NotificationManager.IMPORTANCE_LOW),
         )
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
