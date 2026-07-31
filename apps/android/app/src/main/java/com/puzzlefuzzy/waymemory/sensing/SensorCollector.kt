@@ -13,6 +13,9 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.core.content.ContextCompat
@@ -32,6 +35,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val sensorInventory = mutableListOf<SensorInventorySample>()
     private val registeredSensorKeys = mutableSetOf<String>()
     private val poseFusion = PoseFusionEngine()
+    private var sensorThread: HandlerThread? = null
+    private var sensorHandler: Handler? = null
     private val uploader = SessionUploader(
         storageDirectory = File(appContext.filesDir, "capture-queue"),
         credentialStore = credentialStore,
@@ -113,9 +118,10 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         // local fused sample is created. Raw samples remain queued during this
         // short handshake, so no sensor data is lost.
         fusionReady = !recoveringSession
+        val callbackHandler = ensureSensorHandler()
         hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
         sensorManager.getSensorList(Sensor.TYPE_ALL).forEach { sensor ->
-            registerSensor(sensor)
+            registerSensor(sensor, callbackHandler)
         }
 
         state.value = state.value.copy(
@@ -141,6 +147,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     fun stop() {
         sensorManager.unregisterListener(this)
         locationManager.removeUpdates(this)
+        sensorThread?.quitSafely()
+        sensorThread = null
+        sensorHandler = null
         lastPublishedLocation = null
         resetMotionState()
         fusionReady = true
@@ -149,7 +158,16 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         state.value = state.value.copy(collecting = false)
     }
 
-    private fun registerSensor(sensor: Sensor) {
+    private fun ensureSensorHandler(): Handler {
+        sensorHandler?.let { return it }
+        val thread = HandlerThread("way-memory-sensors").also { it.start() }
+        val handler = Handler(thread.looper)
+        sensorThread = thread
+        sensorHandler = handler
+        return handler
+    }
+
+    private fun registerSensor(sensor: Sensor, callbackHandler: Handler) {
         if (!registeredSensorKeys.add(sensorKey(sensor))) return
         val key = sensorKey(sensor)
         val label = sensorLabel(sensor)
@@ -164,7 +182,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             else -> SensorManager.SENSOR_DELAY_NORMAL
         }
         val registered = runCatching {
-            sensorManager.registerListener(this, sensor, delay)
+            sensorManager.registerListener(this, sensor, delay, callbackHandler)
         }.getOrDefault(false)
         if (sensor.type == Sensor.TYPE_STEP_DETECTOR && registered) stepDetectorRegistered = true
         sensorInventory += SensorInventorySample(
@@ -199,7 +217,15 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         }
         var subscribed = 0
         providers.forEach { provider ->
-            runCatching { locationManager.requestLocationUpdates(provider, 1_000L, 0f, this) }
+            runCatching {
+                locationManager.requestLocationUpdates(
+                    provider,
+                    1_000L,
+                    0f,
+                    this,
+                    sensorHandler?.looper ?: Looper.getMainLooper(),
+                )
+            }
                 .onSuccess { subscribed += 1 }
         }
         if (subscribed == 0) {

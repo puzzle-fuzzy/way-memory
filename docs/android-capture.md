@@ -2,6 +2,8 @@
 
 `SensorCollector` is owned by `WayMemoryApplication`, not by an Activity. The start button launches `CaptureForegroundService`, which holds a foreground notification while IMU, GNSS, barometer, and the WebSocket uploader continue running.
 
+Sensor and location callbacks are registered on a dedicated `HandlerThread`, not the Activity main thread. Local fusion still consumes every callback while the bounded diagnostic queue and UI state updates are kept off the rendering path; the transport limiter only limits persisted/uploaded diagnostics.
+
 ARCore is different: its camera session is attached to the visible Activity and is paused on `onPause`. The route continues with non-visual fusion while the phone is locked or another app is in front. When the Activity returns, the same collector and session resume; orientation changes do not request a new capture start.
 
 The service is declared with the Android location foreground-service type. Precise location is still required for a trustworthy GNSS route. Camera permission is optional for the product because unsupported devices must retain a usable IMU/GNSS/barometer fallback.
