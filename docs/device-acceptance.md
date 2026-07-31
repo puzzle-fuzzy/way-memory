@@ -46,6 +46,7 @@ Run each case as a separate session and record the session ID shown by the API/W
 | 3D translation | Move the phone forward/back, left/right, and up/down for at least 30 seconds | `poseTrack` contains changing `xM/yM/zM`; the web canvas shows individual 3D points, not an invented connecting line |
 | Rotation only | Rotate in place without translating | Orientation/visual samples change, but translation is not falsely reported as large movement |
 | Closed loop | Walk a loop and return near the start | Raw start/end remain visible; `closure` is only `closed` when aligned visual loop evidence exists; corrected track is separate from raw track |
+| Visual relocalization | With ARCore active, cover the camera or move into a textureless area until tracking pauses, then uncover it and continue walking | The first recovered visual frame is not promoted as a large movement; the next fused pose exposes `visual-reset`; no false long segment or duplicate `loop-closed` event is created |
 | Stairs | Walk at least one flight with horizontal travel | `stairs-enter`/`stairs-exit` or a `stairs` pose mode and a changing relative `zM` |
 | Elevator | Ride an elevator with minimal horizontal movement | `elevator-candidate`, `elevator-exit`, and pressure-derived relative height; it is not presented as confirmed floor identity |
 | Orientation/background | Start capture, rotate the screen, lock it briefly, unlock, then stop | The same capture remains active; IMU/GNSS/barometer continue while visual tracking is paused; no second start is required |

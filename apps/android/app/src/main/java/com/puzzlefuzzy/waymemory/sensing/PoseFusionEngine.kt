@@ -52,6 +52,7 @@ class PoseFusionEngine {
     private var hasVisual = false
     private var visualOriginX = 0f
     private var visualOriginY = 0f
+    private var visualOriginZ = 0f
     private var lastVisualX = 0f
     private var lastVisualY = 0f
     private var lastVisualZ = 0f
@@ -64,6 +65,7 @@ class PoseFusionEngine {
     private var visualAlignmentPositionX = 0f
     private var visualAlignmentPositionY = 0f
     private var visualLoopClosureEmitted = false
+    private var visualResetPending = false
     private var hasPositionAnchor = false
     private var hasRecoveredAnchor = false
 
@@ -102,6 +104,7 @@ class PoseFusionEngine {
         hasVisual = false
         visualOriginX = 0f
         visualOriginY = 0f
+        visualOriginZ = 0f
         lastVisualX = 0f
         lastVisualY = 0f
         lastVisualZ = 0f
@@ -114,6 +117,7 @@ class PoseFusionEngine {
         visualAlignmentPositionX = 0f
         visualAlignmentPositionY = 0f
         visualLoopClosureEmitted = false
+        visualResetPending = false
         hasPositionAnchor = false
         hasRecoveredAnchor = false
     }
@@ -247,21 +251,30 @@ class PoseFusionEngine {
         val previousVisualTimestampNs = lastVisualTimestampNs
         lastVisualTimestampNs = sample.deviceTimestampNs
         lastVisualAccuracyM = sample.accuracyM.takeIf { it.isFinite() }?.coerceIn(0.5f, 5f) ?: 1.5f
+        if (sample.trackingReset) {
+            resetVisualReference(sample)
+            return null
+        }
         if (!hasVisual) {
-            hasVisual = true
-            visualOriginX = sample.xM
-            visualOriginY = sample.yM
-            lastVisualX = sample.xM
-            lastVisualY = sample.yM
-            lastVisualZ = sample.zM
-            visualAlignmentPositionX = position[0]
-            visualAlignmentPositionY = position[1]
+            resetVisualReference(sample)
             return null
         }
 
         val deltaVisualX = sample.xM - lastVisualX
         val deltaVisualY = sample.yM - lastVisualY
-        val deltaVisualDistance = hypot(deltaVisualX.toDouble(), deltaVisualY.toDouble()).toFloat()
+        val deltaVisualZ = sample.zM - lastVisualZ
+        val deltaVisualDistance = hypot(
+            hypot(deltaVisualX.toDouble(), deltaVisualY.toDouble()),
+            deltaVisualZ.toDouble(),
+        ).toFloat()
+        val visualElapsedNs = sample.deviceTimestampNs - previousVisualTimestampNs
+        if (previousVisualTimestampNs > 0L && visualElapsedNs in 10_000_000L..1_000_000_000L) {
+            val visualSpeedMps = deltaVisualDistance / (visualElapsedNs / 1_000_000_000f)
+            if (!visualSpeedMps.isFinite() || visualSpeedMps > MAX_VISUAL_SPEED_MPS) {
+                resetVisualReference(sample)
+                return null
+            }
+        }
         visualTravelledM += deltaVisualDistance
         lastVisualX = sample.xM
         lastVisualY = sample.yM
@@ -300,7 +313,6 @@ class PoseFusionEngine {
             stepTrackX += position[0] - previousPosition[0]
             stepTrackY += position[1] - previousPosition[1]
         }
-        val visualElapsedNs = sample.deviceTimestampNs - previousVisualTimestampNs
         if (previousVisualTimestampNs > 0L && visualElapsedNs in 10_000_000L..1_000_000_000L) {
             val elapsedSeconds = visualElapsedNs / 1_000_000_000f
             val measuredVelocity = floatArrayOf(
@@ -447,8 +459,11 @@ class PoseFusionEngine {
             && !visualLoopClosureEmitted
             && visualTravelledM >= 8f
             && hypot(
-                (lastVisualX - visualOriginX).toDouble(),
-                (lastVisualY - visualOriginY).toDouble(),
+                hypot(
+                    (lastVisualX - visualOriginX).toDouble(),
+                    (lastVisualY - visualOriginY).toDouble(),
+                ),
+                (lastVisualZ - visualOriginZ).toDouble(),
             ) <= 1.5
         if (visualLoopClosure) visualLoopClosureEmitted = true
         val event = when {
@@ -530,8 +545,10 @@ class PoseFusionEngine {
             if (visualAligned) add("visual-aligned")
             if (visualLoopClosure) add("loop-closure")
             if (hasRecoveredAnchor) add("recovered-anchor")
+            if (visualResetPending) add("visual-reset")
             if (isEmpty()) add("unknown")
         }
+        visualResetPending = false
         val confidence = (1f - accuracy / 50f).coerceIn(0.05f, 0.98f)
         return PoseUpdate(
             pose = PoseEstimateSample(
@@ -560,6 +577,21 @@ class PoseFusionEngine {
         val east = x * cos(yaw) - y * sin(yaw)
         val north = x * sin(yaw) + y * cos(yaw)
         return east to north
+    }
+
+    private fun resetVisualReference(sample: VisualPoseSample) {
+        hasVisual = true
+        visualOriginX = sample.xM
+        visualOriginY = sample.yM
+        visualOriginZ = sample.zM
+        lastVisualX = sample.xM
+        lastVisualY = sample.yM
+        lastVisualZ = sample.zM
+        visualAlignmentPositionX = position[0]
+        visualAlignmentPositionY = position[1]
+        visualYawRadians = null
+        visualTravelledM = 0f
+        visualResetPending = true
     }
 
     private fun magnitude(values: FloatArray): Float =
@@ -611,6 +643,7 @@ class PoseFusionEngine {
         private const val STEP_FRESHNESS_NS = 3_000_000_000L
         private const val STEP_LENGTH_M = 0.65f
         private const val MAX_STEPS_PER_EVENT = 8
+        private const val MAX_VISUAL_SPEED_MPS = 12f
     }
 }
 

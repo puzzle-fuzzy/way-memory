@@ -246,9 +246,9 @@ class PoseFusionEngineTest {
             timestampNs += 100_000_000L
             engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
         }
-        engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 4f, 0f, 0f, 0.15f, 0.9f, "tracking"))
-        engine.updateVisual(VisualPoseSample(timestampNs + 200_000_000L, 8f, 0f, 0f, 0.15f, 0.9f, "tracking"))
-        val returned = engine.updateVisual(VisualPoseSample(timestampNs + 300_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        engine.updateVisual(VisualPoseSample(timestampNs + 1_000_000_000L, 4f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        engine.updateVisual(VisualPoseSample(timestampNs + 1_800_000_000L, 8f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        val returned = engine.updateVisual(VisualPoseSample(timestampNs + 2_600_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
         assertEquals("loop-closed", returned?.motionEvent?.type)
         assertTrue(returned?.pose?.sourceFlags?.contains("loop-closure") == true)
     }
@@ -263,9 +263,46 @@ class PoseFusionEngineTest {
             timestampNs += 100_000_000L
             engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
         }
-        engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 12f, 20f, 3f, 0.15f, 0.9f, "tracking"))
-        engine.updateVisual(VisualPoseSample(timestampNs + 200_000_000L, 18f, 20f, 3f, 0.15f, 0.9f, "tracking"))
-        val returned = engine.updateVisual(VisualPoseSample(timestampNs + 300_000_000L, 10f, 20f, 3f, 0.15f, 0.9f, "tracking"))
+        engine.updateVisual(VisualPoseSample(timestampNs + 1_000_000_000L, 12f, 20f, 3f, 0.15f, 0.9f, "tracking"))
+        engine.updateVisual(VisualPoseSample(timestampNs + 2_000_000_000L, 18f, 20f, 3f, 0.15f, 0.9f, "tracking"))
+        val returned = engine.updateVisual(VisualPoseSample(timestampNs + 3_000_000_000L, 10f, 20f, 3f, 0.15f, 0.9f, "tracking"))
         assertEquals("loop-closed", returned?.motionEvent?.type)
+    }
+
+    @Test
+    fun visualTrackingResetReanchorsWithoutPromotingTheResetFrame() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+
+        val resetFrame = engine.updateVisual(
+            VisualPoseSample(
+                deviceTimestampNs = 1_100_000_000L,
+                xM = 40f,
+                yM = -12f,
+                zM = 3f,
+                accuracyM = 0.15f,
+                confidence = 0.9f,
+                trackingState = "tracking",
+                trackingReset = true,
+            ),
+        )
+        assertEquals(null, resetFrame)
+
+        val nextPose = engine.updateImu(1_200_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        assertTrue(nextPose?.pose?.sourceFlags?.contains("visual-reset") == true)
+        assertTrue(kotlin.math.abs(nextPose?.pose?.xM ?: 1f) < 0.01f)
+        assertTrue(kotlin.math.abs(nextPose?.pose?.yM ?: 1f) < 0.01f)
+    }
+
+    @Test
+    fun implausibleVisualJumpIsRejectedAndReanchored() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateVisual(VisualPoseSample(1_000_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+        val rejected = engine.updateVisual(VisualPoseSample(1_100_000_000L, 20f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+
+        assertEquals(null, rejected)
+        val afterReset = engine.updateImu(1_200_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        assertTrue(afterReset?.pose?.sourceFlags?.contains("visual-reset") == true)
     }
 }

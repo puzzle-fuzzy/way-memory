@@ -40,6 +40,7 @@ data class VisualPoseSample(
     val confidence: Float,
     val trackingState: String,
     val failureReason: String? = null,
+    val trackingReset: Boolean = false,
 )
 
 /**
@@ -64,6 +65,7 @@ class ArCorePoseCollector(
     private var initialTranslation: FloatArray? = null
     private var lastEmittedTimestampNs = 0L
     private var lastStatusKey: String? = null
+    private var wasTracking = false
 
     fun createView(context: Context): GLSurfaceView {
         return GLSurfaceView(context).also { view ->
@@ -107,6 +109,7 @@ class ArCorePoseCollector(
                 textureConfigured = false
                 initialTranslation = null
                 lastEmittedTimestampNs = 0L
+                wasTracking = false
             }
             resumeSession()
         } catch (error: UnavailableUserDeclinedInstallationException) {
@@ -139,6 +142,7 @@ class ArCorePoseCollector(
         runCatching { session?.pause() }
         surface?.onPause()
         resumed = false
+        wasTracking = false
         emitStatus(VisualTrackingStatus(available = session != null, detail = "视觉采集已暂停"))
     }
 
@@ -146,6 +150,7 @@ class ArCorePoseCollector(
         onHostPause()
         runCatching { session?.close() }
         session = null
+        wasTracking = false
         hostActivity = null
         textureConfigured = false
         initialTranslation = null
@@ -210,14 +215,21 @@ class ArCorePoseCollector(
                         detail = if (trackingState == TrackingState.TRACKING) "视觉位姿正常" else "等待视觉特征",
                     ),
                 )
-                if (trackingState != TrackingState.TRACKING || frame.timestamp <= 0L) return
+                if (trackingState != TrackingState.TRACKING || frame.timestamp <= 0L) {
+                    wasTracking = false
+                    lastEmittedTimestampNs = 0L
+                    return
+                }
 
                 val translation = camera.pose.translation
+                val trackingReset = !wasTracking
+                wasTracking = true
+                if (trackingReset) initialTranslation = translation.copyOf()
                 val origin = initialTranslation ?: translation.copyOf().also { initialTranslation = it }
                 val deltaX = translation[0] - origin[0]
                 val deltaY = translation[1] - origin[1]
                 val deltaZ = translation[2] - origin[2]
-                if (frame.timestamp - lastEmittedTimestampNs < 100_000_000L) return
+                if (!trackingReset && frame.timestamp - lastEmittedTimestampNs < 100_000_000L) return
                 lastEmittedTimestampNs = frame.timestamp
 
                 // ARCore: +X right, +Y up, -Z forward. Convert to a stable
@@ -230,6 +242,7 @@ class ArCorePoseCollector(
                     accuracyM = 0.15f,
                     confidence = 0.9f,
                     trackingState = trackingState.name.lowercase(),
+                    trackingReset = trackingReset,
                 )
                 mainHandler.post { onPose(sample) }
             } catch (_: com.google.ar.core.exceptions.NotYetAvailableException) {
