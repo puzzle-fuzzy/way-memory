@@ -98,6 +98,37 @@ data class SensorInventorySample(
     val registered: Boolean,
 )
 
+internal data class SessionStartRequest(
+    val deviceId: String,
+    val sensorInventory: List<SensorInventorySample>,
+)
+
+internal fun buildSessionStartRequest(
+    deviceId: String,
+    sensorInventory: List<SensorInventorySample>,
+): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory)
+
+private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
+    .put("type", "session.start")
+    .put("deviceId", deviceId)
+    .put("mode", "learning")
+    .put("sensors", JSONArray().apply {
+        sensorInventory.forEach { sensor ->
+            put(JSONObject().apply {
+                put("sensorType", sensor.sensorType)
+                put("name", sensor.name)
+                sensor.vendor?.let { put("vendor", it) }
+                sensor.version?.let { put("version", it) }
+                sensor.powerMa?.let { put("powerMa", it) }
+                sensor.minDelayUs?.let { put("minDelayUs", it) }
+                sensor.maxDelayUs?.let { put("maxDelayUs", it) }
+                sensor.reportingMode?.let { put("reportingMode", it) }
+                sensor.transportMaxHz?.let { put("transportMaxHz", it) }
+                put("registered", sensor.registered)
+            })
+        }
+    })
+
 class SessionUploader(
     private val baseUrl: String = BuildConfig.API_BASE_URL,
     storageDirectory: File,
@@ -219,26 +250,7 @@ class SessionUploader(
         nextConnectAtMs = 0L
         state.value = state.value.copy(connected = true, lastError = null)
         val message = if (activeSessionId == null) {
-            JSONObject()
-                .put("type", "session.start")
-                .put("deviceId", deviceId)
-                .put("mode", "learning")
-                .put("sensors", JSONArray().apply {
-                    sensorInventory.forEach { sensor ->
-                        put(JSONObject().apply {
-                            put("sensorType", sensor.sensorType)
-                            put("name", sensor.name)
-                            sensor.vendor?.let { put("vendor", it) }
-                            sensor.version?.let { put("version", it) }
-                            sensor.powerMa?.let { put("powerMa", it) }
-                            sensor.minDelayUs?.let { put("minDelayUs", it) }
-                            sensor.maxDelayUs?.let { put("maxDelayUs", it) }
-                            sensor.reportingMode?.let { put("reportingMode", it) }
-                            sensor.transportMaxHz?.let { put("transportMaxHz", it) }
-                            put("registered", sensor.registered)
-                        })
-                    }
-                })
+            sessionStartMessage()
         } else {
             JSONObject()
                 .put("type", "session.resume")
@@ -276,13 +288,7 @@ class SessionUploader(
                         activeSessionId = null
                         sessionIdFile.delete()
                         state.value = state.value.copy(sessionId = null, lastError = "会话已过期，正在建立新会话")
-                        webSocket.send(
-                            JSONObject()
-                                .put("type", "session.start")
-                                .put("deviceId", deviceId)
-                                .put("mode", "learning")
-                                .toString(),
-                        )
+                        webSocket.send(sessionStartMessage().toString())
                     } else {
                         state.value = state.value.copy(lastError = error)
                     }
@@ -329,14 +335,20 @@ class SessionUploader(
             .put("type", "samples")
             .put("sessionId", sessionId)
             .put("samples", JSONArray().apply { batch.forEach { put(CollectedSampleCodec.encode(it)) } })
-        if (currentSocket.send(payload.toString())) {
-            // Keep the batch in the durable queue until the server confirms it.
-            // If the process or socket dies first, the same sampleIds are replayed
-            // and the server's bounded dedupe window prevents double counting.
-            inFlightBatchSize = batch.size
-            inFlightSocket = currentSocket
+        // Record the batch before send(). OkHttp may deliver a very fast server
+        // ACK on another callback thread before send() returns to this method.
+        inFlightBatchSize = batch.size
+        inFlightSocket = currentSocket
+        if (!currentSocket.send(payload.toString())) {
+            inFlightBatchSize = 0
+            inFlightSocket = null
         }
+        // Keep the batch in the durable queue until the server confirms it.
+        // If the process or socket dies first, the same sampleIds are replayed
+        // and the server's bounded dedupe window prevents double counting.
     }
+
+    private fun sessionStartMessage(): JSONObject = buildSessionStartRequest(deviceId, sensorInventory).toJson()
 
     companion object {
         private const val TAG = "WayMemorySync"
