@@ -21,8 +21,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.UUID
 
 data class CollectedSample(
+    val sampleId: String = UUID.randomUUID().toString(),
     val deviceTimestampNs: Long,
     val sensorType: String,
     val values: List<Float> = emptyList(),

@@ -124,7 +124,14 @@ class ArCorePoseCollector(
 
     fun onHostResume(activity: Activity) {
         hostActivity = activity
-        if (session != null && !resumed) resumeSession()
+        if (session != null && !resumed) {
+            resumeSession()
+        } else if (session == null) {
+            // requestInstall() may have opened the AR Services installer during
+            // start(). Once the Activity resumes, retry initialization with the
+            // previously recorded user decision instead of leaving vision off.
+            start(activity)
+        }
     }
 
     fun onHostPause() {

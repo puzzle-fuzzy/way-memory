@@ -21,6 +21,7 @@ internal object CollectedSampleCodec : SampleCodec {
     }.getOrNull()
 
     private fun CollectedSample.toJsonObject(): JSONObject = JSONObject().apply {
+        put("sampleId", sampleId)
         put("deviceTimestampNs", deviceTimestampNs)
         put("sensorType", sensorType)
         put("values", JSONArray(values))
@@ -77,6 +78,7 @@ internal object CollectedSampleCodec : SampleCodec {
     }
 
     private fun JSONObject.toCollectedSample(): CollectedSample = CollectedSample(
+        sampleId = optString("sampleId").takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
         deviceTimestampNs = getLong("deviceTimestampNs"),
         sensorType = getString("sensorType"),
         values = optJSONArray("values").toFloatList(),

@@ -122,8 +122,14 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             Sensor.TYPE_ROTATION_VECTOR -> SensorManager.SENSOR_DELAY_GAME
             else -> SensorManager.SENSOR_DELAY_NORMAL
         }
-        readings[key] = SensorReading(label, SensorState.LIMITED, "Waiting for data")
-        sensorManager.registerListener(this, sensor, delay)
+        val registered = runCatching {
+            sensorManager.registerListener(this, sensor, delay)
+        }.getOrDefault(false)
+        readings[key] = if (registered) {
+            SensorReading(label, SensorState.LIMITED, "Waiting for data")
+        } else {
+            SensorReading(label, SensorState.UNAVAILABLE, "Registration denied by device or permission")
+        }
     }
 
     @SuppressLint("MissingPermission")

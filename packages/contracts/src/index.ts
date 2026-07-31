@@ -114,6 +114,8 @@ export interface ClosureState {
 }
 
 export interface SensorSample {
+  /** Stable per-sample id used to make crash recovery duplicate-tolerant. */
+  sampleId?: string;
   deviceTimestampNs: number;
   sensorType: string;
   values: number[];

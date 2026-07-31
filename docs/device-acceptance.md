@@ -41,6 +41,7 @@ Run each case as a separate session and record the session ID shown by the API/W
 | Orientation/background | Start capture, rotate the screen, lock it briefly, unlock, then stop | The same capture remains active; IMU/GNSS/barometer continue while visual tracking is paused; no second start is required |
 | Network interruption | Disable network for less than two minutes, move briefly, restore network | `session.resumed` reconnects to the same session; pending queue stays bounded; the UI exposes any dropped count |
 | Process recovery | Start capture, force-stop the app, relaunch it before the two-minute server grace window expires | The app resumes the persisted session when possible; retained samples are drained, and any replayed batch is bounded and duplicate-tolerant, never silently lost |
+| Crash replay integrity | Force-stop during a visible upload burst, relaunch, then inspect the session | Replayed samples retain their `sampleId`; server `sampleCount`, pose count, and sensor statistics do not double-count them |
 
 ## Server evidence
 

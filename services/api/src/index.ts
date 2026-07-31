@@ -73,6 +73,8 @@ const MAX_SENSOR_VALUES = 16;
 const MAX_JSON_BYTES = 512 * 1024;
 const MAX_DEVICE_ID_LENGTH = 128;
 const MAX_ROUTE_ID_LENGTH = 128;
+const MAX_SAMPLE_ID_LENGTH = 128;
+const MAX_SEEN_SAMPLE_IDS = 8_192;
 const SESSION_RESUME_GRACE_MS = 2 * 60 * 1_000;
 const DUPLICATE_LOCATION_DISTANCE_M = 0.5;
 const DUPLICATE_LOCATION_WINDOW_NS = 2_000_000_000;
@@ -89,6 +91,8 @@ type SessionRuntime = {
   lastPose?: PoseEstimate;
   travelledM?: number;
   rawSamples?: SensorSample[];
+  seenSampleIds?: Set<string>;
+  seenSampleIdOrder?: string[];
 };
 
 const sessionRuntime = new Map<string, SessionRuntime>();
@@ -333,6 +337,8 @@ const normalizeMotionEvent = (value: unknown): MotionEvent | null => {
 
 const normalizeSensorSample = (value: unknown): SensorSample | null => {
   if (!isRecord(value) || typeof value.sensorType !== "string") return null;
+  const sampleId = value.sampleId === undefined ? undefined : typeof value.sampleId === "string" ? value.sampleId.trim() : null;
+  if (sampleId === null || (sampleId !== undefined && (!sampleId || sampleId.length > MAX_SAMPLE_ID_LENGTH))) return null;
   const sensorType = normalizeSensorType(value.sensorType.trim());
   const deviceTimestampNs = finiteNumber(value.deviceTimestampNs);
   const rawValues = value.values;
@@ -353,6 +359,7 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
   const motionEvent = value.motionEvent === undefined ? undefined : normalizeMotionEvent(value.motionEvent);
   if (value.motionEvent !== undefined && motionEvent === null) return null;
   return {
+    ...(sampleId ? { sampleId } : {}),
     deviceTimestampNs,
     sensorType,
     values: values as number[],
@@ -620,14 +627,31 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   const correctedPosePoints: PoseEstimate[] = [];
   const motionEvents: MotionEvent[] = [];
   const wasClosureAdjusted = session.closure.adjusted;
-  const samples = rawSamples
+  const runtime = sessionRuntime.get(session.sessionId) ?? { rawSamples: [] };
+  runtime.seenSampleIds ??= new Set<string>();
+  runtime.seenSampleIdOrder ??= [];
+  const normalizedSamples = rawSamples
     .map(normalizeSensorSample)
     .filter((sample): sample is SensorSample => sample !== null)
     .sort((left, right) => left.deviceTimestampNs - right.deviceTimestampNs);
-  session.droppedSampleCount += rawSamples.length - samples.length;
+  let duplicateCount = 0;
+  const samples = normalizedSamples.filter((sample) => {
+    if (!sample.sampleId) return true;
+    if (runtime.seenSampleIds!.has(sample.sampleId)) {
+      duplicateCount += 1;
+      return false;
+    }
+    runtime.seenSampleIds!.add(sample.sampleId);
+    runtime.seenSampleIdOrder!.push(sample.sampleId);
+    while (runtime.seenSampleIdOrder!.length > MAX_SEEN_SAMPLE_IDS) {
+      const evicted = runtime.seenSampleIdOrder!.shift();
+      if (evicted) runtime.seenSampleIds!.delete(evicted);
+    }
+    return true;
+  });
+  session.droppedSampleCount += rawSamples.length - normalizedSamples.length + duplicateCount;
   session.sampleCount += samples.length;
   session.rawSampleCount += samples.length;
-  const runtime = sessionRuntime.get(session.sessionId) ?? { rawSamples: [] };
   runtime.rawSamples = [...(runtime.rawSamples ?? []), ...samples].slice(-MAX_RAW_REPLAY_SAMPLES);
   sessionRuntime.set(session.sessionId, runtime);
   markSessionDirty(session);

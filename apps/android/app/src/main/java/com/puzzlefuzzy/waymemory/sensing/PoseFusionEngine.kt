@@ -40,6 +40,8 @@ class PoseFusionEngine {
     private var stairsEvidenceFrames = 0
     private var lastMotionMode = "unknown"
     private var hasVisual = false
+    private var visualOriginX = 0f
+    private var visualOriginY = 0f
     private var lastVisualX = 0f
     private var lastVisualY = 0f
     private var lastVisualZ = 0f
@@ -73,6 +75,8 @@ class PoseFusionEngine {
         stairsEvidenceFrames = 0
         lastMotionMode = "unknown"
         hasVisual = false
+        visualOriginX = 0f
+        visualOriginY = 0f
         lastVisualX = 0f
         lastVisualY = 0f
         lastVisualZ = 0f
@@ -159,6 +163,8 @@ class PoseFusionEngine {
         if (!sample.xM.isFinite() || !sample.yM.isFinite() || !sample.zM.isFinite()) return null
         if (!hasVisual) {
             hasVisual = true
+            visualOriginX = sample.xM
+            visualOriginY = sample.yM
             lastVisualX = sample.xM
             lastVisualY = sample.yM
             lastVisualZ = sample.zM
@@ -179,9 +185,18 @@ class PoseFusionEngine {
             val inertialDeltaX = position[0] - visualAlignmentPositionX
             val inertialDeltaY = position[1] - visualAlignmentPositionY
             val inertialDistance = hypot(inertialDeltaX.toDouble(), inertialDeltaY.toDouble()).toFloat()
-            if (deltaVisualDistance > 1.2f && inertialDistance > 0.3f) {
-                visualYawRadians = atan2(inertialDeltaY, inertialDeltaX) - atan2(deltaVisualY, deltaVisualX)
-                val rotated = rotateVisual(sample.xM, sample.yM)
+            val visualDeltaFromOriginX = sample.xM - visualOriginX
+            val visualDeltaFromOriginY = sample.yM - visualOriginY
+            val visualDistanceFromOrigin = hypot(
+                visualDeltaFromOriginX.toDouble(),
+                visualDeltaFromOriginY.toDouble(),
+            ).toFloat()
+            // Use the cumulative displacement from the first visual frame.
+            // A normal ARCore frame moves only a few centimetres, so a
+            // single-frame threshold would never align during slow walking.
+            if (visualDistanceFromOrigin > 1.2f && inertialDistance > 0.3f) {
+                visualYawRadians = atan2(inertialDeltaY, inertialDeltaX) - atan2(visualDeltaFromOriginY, visualDeltaFromOriginX)
+                val rotated = rotateVisual(visualOriginX, visualOriginY)
                 visualRouteOriginX = position[0] - rotated.first
                 visualRouteOriginY = position[1] - rotated.second
             }
