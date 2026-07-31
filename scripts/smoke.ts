@@ -45,7 +45,13 @@ try {
       }));
       const accepted = await waitForMessage(device);
       const updated = await waitForMessage(dashboard);
-      if (accepted.type !== "samples.accepted" || (updated.session as { sampleCount: number }).sampleCount !== 2) {
+      const updatedSession = updated.session as { sampleCount: number; track: unknown[]; latestSensors: unknown[] };
+      if (
+        accepted.type !== "samples.accepted"
+        || updatedSession.sampleCount !== 2
+        || updatedSession.track.length !== 1
+        || updatedSession.latestSensors.length !== 2
+      ) {
         throw new Error("Unexpected realtime session update");
       }
       dashboard.close();

@@ -1,9 +1,11 @@
 import type {
   CreateSessionInput,
   DeviceSnapshot,
+  LiveSensorSnapshot,
   ObservationSession,
   RouteSummary,
   SensorSample,
+  TrackPoint,
 } from "@way-memory/contracts";
 
 const port = Number(Bun.env.PORT ?? 8787);
@@ -11,7 +13,7 @@ const port = Number(Bun.env.PORT ?? 8787);
 const device: DeviceSnapshot = {
   deviceId: "demo-pixel-01",
   label: "演示手机 · Android",
-  connected: true,
+  connected: false,
   batteryPercent: 82,
   temperatureC: 31.4,
   lastSeen: new Date().toISOString(),
@@ -67,6 +69,54 @@ const parseJson = async <T>(request: Request): Promise<T | null> => {
 
 const getSession = (sessionId: string) => sessions.get(sessionId);
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const normalizeSensorType = (sensorType: string) => {
+  const normalized = sensorType.split(".").at(-1)?.replaceAll("-", "_") ?? sensorType;
+  return {
+    magnetic_field: "magnetometer",
+    pressure: "barometer",
+    rotation_vector: "rotation-vector",
+  }[normalized] ?? normalized;
+};
+
+const upsertSensor = (
+  session: ObservationSession,
+  sample: SensorSample,
+  receivedAt: string,
+  sensorType = normalizeSensorType(sample.sensorType),
+) => {
+  const snapshot: LiveSensorSnapshot = {
+    sensorType,
+    values: sample.values.slice(0, 16),
+    accuracy: sample.accuracy ?? sample.location?.accuracyM,
+    sampleCount: 1,
+    lastDeviceTimestampNs: sample.deviceTimestampNs,
+    lastReceivedAt: receivedAt,
+  };
+  const existingIndex = session.latestSensors.findIndex((item) => item.sensorType === sensorType);
+  if (existingIndex === -1) {
+    session.latestSensors.push(snapshot);
+    return;
+  }
+  const existing = session.latestSensors[existingIndex];
+  session.latestSensors[existingIndex] = {
+    ...snapshot,
+    sampleCount: existing.sampleCount + 1,
+  };
+};
+
+const toTrackPoint = (location: NonNullable<SensorSample["location"]>): TrackPoint => {
+  const accuracyM = Math.max(0.1, location.accuracyM ?? 50);
+  return {
+    lat: location.lat,
+    lng: location.lng,
+    accuracyM,
+    confidence: clamp(1 - accuracyM / 50, 0, 1),
+    source: "fused",
+  };
+};
+
 const createSession = (input: CreateSessionInput): ObservationSession => {
   const session: ObservationSession = {
     sessionId: crypto.randomUUID(),
@@ -75,6 +125,8 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     routeId: input.routeId,
     startedAt: new Date().toISOString(),
     sampleCount: 0,
+    track: [],
+    latestSensors: [],
     status: "active",
   };
   sessions.set(session.sessionId, session);
@@ -84,11 +136,23 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
 };
 
 const acceptSamples = (session: ObservationSession, samples: SensorSample[]) => {
-  const lastLocation = [...samples].reverse().find((sample) => sample.location)?.location;
+  const receivedAt = new Date().toISOString();
   session.sampleCount += samples.length;
-  session.lastReceivedAt = new Date().toISOString();
-  if (lastLocation) session.latestLocation = lastLocation;
+  session.lastReceivedAt = receivedAt;
+  session.lastSampleAt = receivedAt;
+  for (const sample of samples) {
+    if (sample.location) {
+      const point = toTrackPoint(sample.location);
+      session.latestLocation = sample.location;
+      session.track.push(point);
+      upsertSensor(session, sample, receivedAt, "gnss");
+    } else {
+      upsertSensor(session, sample, receivedAt);
+    }
+  }
+  if (session.track.length > 500) session.track = session.track.slice(-500);
   device.lastSeen = session.lastReceivedAt;
+  device.connected = true;
   return { accepted: samples.length, session };
 };
 
@@ -122,7 +186,9 @@ const server = Bun.serve<RealtimeClient>({
     if (url.pathname === "/api/devices") return json([device]);
     if (url.pathname === "/api/routes") return json([route]);
     if (url.pathname === "/api/routes/route-home-metro") return json(route);
-    if (url.pathname === "/api/sessions" && request.method === "GET") return json([...sessions.values()]);
+    if (url.pathname === "/api/sessions" && request.method === "GET") {
+      return json([...sessions.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt)));
+    }
     if (url.pathname === "/api/sessions" && request.method === "POST") {
       const input = await parseJson<CreateSessionInput>(request);
       if (!input?.deviceId || !input.mode) return json({ error: "invalid_session" }, { status: 400 });
@@ -138,6 +204,7 @@ const server = Bun.serve<RealtimeClient>({
       if (url.pathname.endsWith("/stop") && request.method === "POST") {
         session.status = "stopped";
         session.lastReceivedAt = new Date().toISOString();
+        device.connected = false;
         return json(session);
       }
       if (url.pathname.endsWith("/samples") && request.method === "POST") {
@@ -194,6 +261,7 @@ const server = Bun.serve<RealtimeClient>({
         if (session) {
           session.status = "stopped";
           session.lastReceivedAt = new Date().toISOString();
+          device.connected = false;
           publishSession(server, session);
         }
         return;
@@ -206,6 +274,7 @@ const server = Bun.serve<RealtimeClient>({
       if (session && session.status === "active") {
         session.status = "stopped";
         session.lastReceivedAt = new Date().toISOString();
+        device.connected = false;
         publishSession(server, session);
       }
     },

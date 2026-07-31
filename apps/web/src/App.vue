@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import type { LiveSensorSnapshot, TrackPoint } from "@way-memory/contracts";
 import { useRealtimeSession } from "./composables/useRealtimeSession";
 
 const { connection, latestSession } = useRealtimeSession();
@@ -10,15 +11,146 @@ const connectionLabel = computed(() => ({
   offline: "服务端离线",
 }[connection.value]));
 
+const session = computed(() => latestSession.value);
+const hasSession = computed(() => Boolean(session.value));
+const isCollecting = computed(() => session.value?.status === "active");
 const sessionLabel = computed(() => {
-  if (!latestSession.value) return "等待 Android 连接";
-  return latestSession.value.status === "active" ? "Android 正在采集" : "最近一次采集已结束";
+  if (!session.value) return "等待 Android 连接";
+  return isCollecting.value ? "Android 正在采集" : "最近一次采集已结束";
 });
 
 const locationLabel = computed(() => {
-  const location = latestSession.value?.latestLocation;
+  const location = session.value?.latestLocation;
   if (!location) return "等待位置样本";
   return `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`;
+});
+
+const routeLabel = computed(() => {
+  if (!session.value) return "等待 Android 会话";
+  if (session.value.routeId === "route-home-metro") return "家 · 地铁站入口";
+  return session.value.routeId ? `路线 ${session.value.routeId}` : "未绑定路线";
+});
+
+const routeStatusLabel = computed(() => {
+  if (!session.value) return "未开始";
+  return isCollecting.value ? "实时采集中" : "已停止";
+});
+
+const track = computed(() => session.value?.track ?? []);
+
+const haversineDistanceM = (left: TrackPoint, right: TrackPoint) => {
+  const earthRadiusM = 6371000;
+  const toRadians = (value: number) => value * Math.PI / 180;
+  const lat1 = toRadians(left.lat);
+  const lat2 = toRadians(right.lat);
+  const dLat = lat2 - lat1;
+  const dLng = toRadians(right.lng - left.lng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadiusM * Math.asin(Math.sqrt(a));
+};
+
+const routeDistanceM = computed(() => {
+  let distance = 0;
+  for (let index = 1; index < track.value.length; index += 1) {
+    distance += haversineDistanceM(track.value[index - 1], track.value[index]);
+  }
+  return Math.round(distance);
+});
+
+const confidencePercent = computed(() => {
+  const accuracyM = session.value?.latestLocation?.accuracyM;
+  if (typeof accuracyM !== "number") return null;
+  return Math.round(Math.min(1, Math.max(0, 1 - accuracyM / 50)) * 100);
+});
+
+const formatTime = (value?: string) => {
+  if (!value) return "等待数据";
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
+};
+
+const formatSensorValues = (sensor: LiveSensorSnapshot) => {
+  if (sensor.sensorType === "gnss") {
+    return typeof sensor.accuracy === "number" ? `精度 ${sensor.accuracy.toFixed(1)}m` : "已收到定位";
+  }
+  const values = sensor.values.slice(0, 3).map((value) => value.toFixed(2)).join(", ");
+  return `${values || "无数值"} · ${sensor.sampleCount} 个样本`;
+};
+
+const sensorNames: Record<string, string> = {
+  accelerometer: "加速度计",
+  gyroscope: "陀螺仪",
+  magnetometer: "磁力计",
+  barometer: "气压计",
+  gnss: "GNSS 定位",
+  "rotation-vector": "旋转向量",
+};
+
+const sensorIcons: Record<string, string> = {
+  accelerometer: "↗",
+  gyroscope: "⟳",
+  magnetometer: "⌁",
+  barometer: "◒",
+  gnss: "⌖",
+  "rotation-vector": "◌",
+};
+
+const sensors = computed(() => (session.value?.latestSensors ?? []).map((sensor) => ({
+  ...sensor,
+  label: sensorNames[sensor.sensorType] ?? sensor.sensorType,
+  icon: sensorIcons[sensor.sensorType] ?? "·",
+  detail: formatSensorValues(sensor),
+})));
+
+const mapPoints = computed(() => {
+  if (!track.value.length) return [];
+  const lats = track.value.map((point) => point.lat);
+  const lngs = track.value.map((point) => point.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const latRange = Math.max(maxLat - minLat, 0.00001);
+  const lngRange = Math.max(maxLng - minLng, 0.00001);
+  const padding = 48;
+  const width = 620 - padding * 2;
+  const height = 300 - padding * 2;
+  return track.value.map((point) => ({
+    x: padding + ((point.lng - minLng) / lngRange) * width,
+    y: padding + (1 - (point.lat - minLat) / latRange) * height,
+  }));
+});
+
+const mapPath = computed(() => mapPoints.value.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" "));
+const currentMapPoint = computed(() => mapPoints.value.at(-1));
+const hasTrack = computed(() => track.value.length > 1);
+
+const activities = computed(() => {
+  if (!session.value) return [];
+  const current = session.value;
+  return [
+    {
+      icon: isCollecting.value ? "●" : "✓",
+      tone: isCollecting.value ? "bg-[#eaf4eb] text-sage" : "bg-[#fff0e8] text-ember",
+      title: isCollecting.value ? "Android 采集进行中" : "最近一次采集已结束",
+      detail: `${formatTime(current.lastReceivedAt ?? current.startedAt)} · 样本 ${current.sampleCount}`,
+    },
+    {
+      icon: "⌁",
+      tone: "bg-[#eaf4eb] text-sage",
+      title: `已收到 ${current.latestSensors.length} 类传感器数据`,
+      detail: `${formatTime(current.lastSampleAt ?? current.lastReceivedAt)} · WebSocket 实时更新`,
+    },
+    {
+      icon: "⌖",
+      tone: "bg-[#edf3f8] text-[#6788a8]",
+      title: current.latestLocation ? "位置样本已更新" : "等待位置样本",
+      detail: current.latestLocation ? locationLabel.value : "Android 尚未上报 GNSS",
+    },
+  ];
 });
 </script>
 
@@ -38,44 +170,50 @@ const locationLabel = computed(() => {
       </nav>
       <div class="mt-auto flex gap-3 border-t border-line px-2 pt-5 text-[11px]">
         <span class="mt-1 size-2 rounded-full bg-sage shadow-[0_0_0_4px_#dcecdf]" />
-        <div><strong class="block">本地演示模式</strong><small class="mt-1 block text-muted">数据仅用于当前工作台</small></div>
+        <div><strong class="block">局域网实时模式</strong><small class="mt-1 block text-muted">数据来自 API 与 WebSocket</small></div>
       </div>
     </aside>
 
     <main class="mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:ml-64 lg:px-12 lg:py-10">
       <header class="mb-8 flex items-start justify-between gap-5">
-        <div><p class="section-label">路线学习 · 2026.07.31</p><h1 class="mt-2 max-w-xl text-3xl font-extrabold leading-tight tracking-[-0.06em] sm:text-4xl">你好，今天继续理解这条路。</h1></div>
+        <div><p class="section-label">路线学习 · 2026.07.31</p><h1 class="mt-2 max-w-xl text-3xl font-extrabold leading-tight tracking-[-0.06em]">你好，今天继续理解这条路。</h1></div>
         <div class="connection-pill"><span :class="['connection-dot', connection === 'connected' ? 'bg-sage' : connection === 'connecting' ? 'bg-amber' : 'bg-ember']" />{{ connectionLabel }}</div>
       </header>
 
       <section class="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,.75fr)]">
         <article class="panel p-5 sm:p-7">
-          <div class="flex items-start justify-between gap-3"><div><p class="section-label">当前路线</p><h2 class="mt-1 text-xl font-extrabold tracking-[-0.05em]">家 · 地铁站入口</h2></div><span class="status-pill">已验证</span></div>
-          <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">486</strong><span class="metric-label">米 · 约 8 分钟</span></div><div><strong class="metric">4</strong><span class="metric-label">次行走记录</span></div><div><strong class="metric">91%</strong><span class="metric-label">路线置信度</span></div></div>
+          <div class="flex items-start justify-between gap-3"><div><p class="section-label">当前路线</p><h2 class="mt-1 text-xl font-extrabold tracking-[-0.05em]">{{ routeLabel }}</h2></div><span class="status-pill">{{ routeStatusLabel }}</span></div>
+          <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前会话轨迹</span></div><div><strong class="metric">{{ session?.sampleCount ?? 0 }}</strong><span class="metric-label">个实时样本</span></div><div><strong class="metric">{{ confidencePercent === null ? '—' : `${confidencePercent}%` }}</strong><span class="metric-label">位置置信度</span></div></div>
           <div class="map-frame mt-6">
-            <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="路线轨迹预览">
+            <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="实时路线轨迹">
               <defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="#dce4df" stroke-width="1" /></pattern><filter id="shadow"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".16" /></filter></defs>
               <rect width="620" height="300" fill="#edf2ed" /><rect width="620" height="300" fill="url(#grid)" />
-              <path d="M80 230 C138 220 140 180 192 170 S275 196 316 147 S365 83 424 110 S485 164 555 83" fill="none" stroke="#a7b7ae" stroke-width="26" stroke-linecap="round" />
-              <path d="M80 230 C138 220 140 180 192 170 S275 196 316 147 S365 83 424 110 S485 164 555 83" fill="none" stroke="#f8fbf7" stroke-width="18" stroke-linecap="round" />
-              <path d="M80 230 C138 220 140 180 192 170 S275 196 316 147 S365 83 424 110 S485 164 555 83" fill="none" stroke="#e05c3b" stroke-width="5" stroke-linecap="round" filter="url(#shadow)" />
-              <g class="map-node"><circle cx="80" cy="230" r="9" /><text x="80" y="258">起点</text></g><g class="map-node"><circle cx="316" cy="147" r="9" /><text x="316" y="175">左转 · 视觉地标</text></g><g class="map-node end"><circle cx="555" cy="83" r="9" /><text x="555" y="60">终点</text></g><g class="current-pos"><circle cx="416" cy="106" r="15" /><circle cx="416" cy="106" r="6" /></g>
+              <template v-if="hasTrack">
+                <path :d="mapPath" fill="none" stroke="#a7b7ae" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" />
+                <path :d="mapPath" fill="none" stroke="#f8fbf7" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
+                <path :d="mapPath" fill="none" stroke="#e05c3b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)" />
+              </template>
+              <template v-if="mapPoints.length">
+                <g class="map-node"><circle :cx="mapPoints[0].x" :cy="mapPoints[0].y" r="9" /><text :x="mapPoints[0].x" :y="mapPoints[0].y + 28">起点</text></g>
+                <g v-if="currentMapPoint" class="current-pos"><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="15" /><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="6" /></g>
+              </template>
+              <text v-else x="310" y="145" text-anchor="middle" fill="#75857d" font-size="13">等待 Android 上报位置样本</text>
             </svg>
-            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-ember" />融合轨迹</span><span><i class="legend-dot border-2 border-ember bg-white" />人工确认节点</span><span><i class="legend-dot bg-sage" />当前手机位置</span></div>
+            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-ember" />实时轨迹</span><span><i class="legend-dot border-2 border-ember bg-white" />起点</span><span><i class="legend-dot bg-sage" />当前手机位置</span></div>
           </div>
         </article>
 
         <div class="flex flex-col gap-5">
-          <article class="panel flex-1 p-6"><div class="flex items-start justify-between"><div><p class="section-label">当前判断</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">位置可靠</h3></div><span class="confidence-ring">91</span></div><p class="mt-5 text-xs leading-6 text-muted">手机正在接近已记录的左转节点。视觉与运动轨迹一致。</p><div class="mt-6 h-1 rounded-full bg-[#edf1ec]"><span class="block h-full w-[91%] rounded-full bg-sage" /></div><div class="mt-3 flex justify-between text-[10px] text-muted"><span>融合定位</span><strong class="text-sage">高置信度</strong></div></article>
-          <article class="panel flex gap-4 border-[#f1e3d0] bg-[#fff8ee] p-6"><span class="grid size-9 shrink-0 place-items-center rounded-xl bg-[#f7dfbd] text-ember">✦</span><div><p class="section-label">实时观察会话</p><h3 class="mt-1 text-base font-extrabold tracking-[-0.03em]">{{ sessionLabel }}</h3><p class="mt-1 text-xs leading-6 text-muted">样本 {{ latestSession?.sampleCount ?? 0 }} · {{ locationLabel }}</p></div></article>
+          <article class="panel flex-1 p-6"><div class="flex items-start justify-between"><div><p class="section-label">当前判断</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">{{ confidencePercent === null ? "等待定位" : confidencePercent >= 75 ? "位置可靠" : "位置仍在收敛" }}</h3></div><span class="confidence-ring">{{ confidencePercent === null ? '—' : confidencePercent }}</span></div><p class="mt-5 text-xs leading-6 text-muted">{{ session?.latestLocation ? `最新位置 ${locationLabel}，服务端已收到 ${track.length} 个轨迹点。` : "页面不会伪造路线；请先在 Android 端授予定位权限并开始采集。" }}</p><div class="mt-6 h-1 rounded-full bg-[#edf1ec]"><span class="block h-full rounded-full bg-sage" :style="{ width: `${confidencePercent ?? 0}%` }" /></div><div class="mt-3 flex justify-between text-[10px] text-muted"><span>融合定位</span><strong class="text-sage">{{ confidencePercent === null ? '等待数据' : '由真实精度计算' }}</strong></div></article>
+          <article class="panel flex gap-4 border-[#f1e3d0] bg-[#fff8ee] p-6"><span class="grid size-9 shrink-0 place-items-center rounded-xl bg-[#f7dfbd] text-ember">✦</span><div><p class="section-label">实时观察会话</p><h3 class="mt-1 text-base font-extrabold tracking-[-0.03em]">{{ sessionLabel }}</h3><p class="mt-1 text-xs leading-6 text-muted">样本 {{ session?.sampleCount ?? 0 }} · {{ locationLabel }}</p></div></article>
         </div>
       </section>
 
       <section class="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
-        <article class="panel p-5 sm:p-7"><div class="flex items-start justify-between"><div><p class="section-label">实时遥测</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">设备传感器</h3></div><span class="live-label"><i />LIVE</span></div><div class="mt-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-3"><div v-for="sensor in [['⌁','GNSS','精度 3.2m'],['↗','加速度计','50 Hz · 正常'],['⟳','陀螺仪','50 Hz · 正常'],['⌁','视觉采集','5 Hz · 正常'],['◒','气压计','101.2 kPa'],['◌','深度感知','设备不支持']]" :key="sensor[1]" :class="['sensor-card', sensor[1] === '深度感知' && 'opacity-50']"><span class="text-lg text-sage">{{ sensor[0] }}</span><div><strong class="block text-[11px]">{{ sensor[1] }}</strong><small class="mt-1 block text-[10px] text-muted">{{ sensor[2] }}</small></div><b class="ml-auto text-[10px] text-sage">{{ sensor[1] === '深度感知' ? '—' : '●' }}</b></div></div></article>
-        <article class="panel p-5 sm:p-7"><div class="flex items-start justify-between"><div><p class="section-label">最近活动</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">路线观察</h3></div><a class="text-[10px] text-ember" href="#all">查看全部 ↗</a></div><div class="activity-row"><span class="activity-mark bg-[#fff0e8] text-ember">↗</span><div><strong>第 4 次观察已完成</strong><small>今天 09:42 · 路线置信度提升至 91%</small></div></div><div class="activity-row"><span class="activity-mark bg-[#eaf4eb] text-sage">◇</span><div><strong>新增人工标注</strong><small>昨天 18:16 · “左侧围墙”</small></div></div><div class="activity-row"><span class="activity-mark bg-[#edf3f8] text-[#6788a8]">⌁</span><div><strong>设备已连接</strong><small>昨天 18:02 · Android 手机</small></div></div></article>
+        <article class="panel p-5 sm:p-7"><div class="flex items-start justify-between"><div><p class="section-label">实时遥测</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">设备传感器</h3></div><span class="live-label"><i />{{ connection === 'connected' ? 'LIVE' : 'WAITING' }}</span></div><div v-if="sensors.length" class="mt-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-3"><div v-for="sensor in sensors" :key="sensor.sensorType" class="sensor-card"><span class="text-lg text-sage">{{ sensor.icon }}</span><div><strong class="block text-[11px]">{{ sensor.label }}</strong><small class="mt-1 block text-[10px] text-muted">{{ sensor.detail }}</small></div><b class="ml-auto text-[10px] text-sage">●</b></div></div><div v-else class="mt-6 rounded-xl border border-dashed border-line px-4 py-8 text-center text-xs leading-6 text-muted">尚未收到 Android 传感器样本<br />开始采集后，这里会显示真实数值与样本计数。</div></article>
+        <article class="panel p-5 sm:p-7"><div class="flex items-start justify-between"><div><p class="section-label">最近活动</p><h3 class="mt-1 text-lg font-extrabold tracking-[-0.04em]">实时会话</h3></div><span class="text-[10px] text-muted">{{ session ? formatTime(session.lastReceivedAt) : '暂无' }}</span></div><div v-if="activities.length"><div v-for="activity in activities" :key="activity.title" class="activity-row"><span :class="['activity-mark', activity.tone]">{{ activity.icon }}</span><div><strong>{{ activity.title }}</strong><small>{{ activity.detail }}</small></div></div></div><div v-else class="mt-6 rounded-xl border border-dashed border-line px-4 py-8 text-center text-xs leading-6 text-muted">暂无会话活动<br />等待 Android 通过局域网连接服务端。</div></article>
       </section>
-      <footer class="mt-8 flex flex-col justify-between gap-2 px-1 font-mono text-[9px] text-[#9aa79f] sm:flex-row"><span>way-memory / P1 可观测闭环</span><span>所有判断都带有来源与置信度</span></footer>
+      <footer class="mt-8 flex flex-col justify-between gap-2 px-1 font-mono text-[9px] text-[#9aa79f] sm:flex-row"><span>way-memory / LAN realtime console</span><span>页面数据来自 API 与 WebSocket，不使用演示轨迹</span></footer>
     </main>
   </div>
 </template>

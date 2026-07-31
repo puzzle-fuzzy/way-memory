@@ -53,7 +53,7 @@ export type ObservationMode = "learning" | "navigation";
 
 export interface SensorSample {
   deviceTimestampNs: number;
-  sensorType: SensorType | "location";
+  sensorType: string;
   values: number[];
   accuracy?: number;
   location?: {
@@ -62,6 +62,15 @@ export interface SensorSample {
     accuracyM?: number;
     altitudeM?: number;
   };
+}
+
+export interface LiveSensorSnapshot {
+  sensorType: string;
+  values: number[];
+  accuracy?: number;
+  sampleCount: number;
+  lastDeviceTimestampNs: number;
+  lastReceivedAt: string;
 }
 
 export interface CreateSessionInput {
@@ -77,7 +86,10 @@ export interface ObservationSession {
   routeId?: string;
   startedAt: string;
   lastReceivedAt?: string;
+  lastSampleAt?: string;
   sampleCount: number;
   latestLocation?: SensorSample["location"];
+  track: TrackPoint[];
+  latestSensors: LiveSensorSnapshot[];
   status: "active" | "stopped";
 }

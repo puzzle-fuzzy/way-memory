@@ -31,7 +31,7 @@ export function useRealtimeSession() {
       const response = await fetch(endpoint("/api/sessions"), { cache: "no-store" });
       if (!response.ok) throw new Error(`API ${response.status}`);
       const sessions = await response.json() as ObservationSession[];
-      latestSession.value = sessions.at(-1) ?? null;
+      latestSession.value = sessions.find((item) => item.status === "active") ?? sessions[0] ?? null;
     } catch {
       if (connection.value !== "connected") connection.value = "offline";
     }
