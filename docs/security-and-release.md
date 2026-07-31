@@ -40,7 +40,7 @@ Verified-route navigation now has a separate one-time handoff boundary. The dash
    - Enforce separate device-ingest and dashboard-read roles; a dashboard must not be able to upload samples.
 
 4. **Data lifecycle**
-   - Keep the bounded in-memory/replay limits as resource protection, but add an explicit user retention period.
+   - Keep the bounded in-memory/replay limits as resource protection, and set an explicit `WAY_MEMORY_RETENTION_DAYS` policy for automatic expiry.
    - Support session deletion and export, including SQLite snapshots and raw replay data.
    - Redact route coordinates, raw values, tokens, and device identifiers from logs and error responses.
    - Encrypt persistent storage and backups at rest on the production host.
@@ -54,6 +54,7 @@ The following are required before calling the service production-ready:
 - per-user isolation test proving one account cannot list or fetch another user's route;
 - token rotation/revocation test;
 - deletion/export test covering the database snapshot and replay tail (`bun run smoke:lifecycle`);
+- retention test proving an expired SQLite snapshot is not restored (`bun run smoke:retention`);
 - backup restore test with secrets excluded from source control and logs.
 
 The repository includes a production systemd/Nginx template, but no public TLS deployment is claimed until `way-memory.yxswy.com` serves the built web app, `/api/health` over HTTPS, and a WSS ticket flow from a phone network.

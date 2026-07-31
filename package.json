@@ -18,6 +18,7 @@
     "smoke:idempotency": "bun run scripts/idempotency-smoke.ts",
     "smoke:auth": "bun run scripts/auth-smoke.ts",
     "smoke:lifecycle": "bun run scripts/lifecycle-smoke.ts",
+    "smoke:retention": "bun run scripts/retention-smoke.ts",
     "smoke:route": "bun run scripts/route-smoke.ts",
     "smoke:public-live": "bun run scripts/public-live-sample-smoke.ts",
     "smoke:public-route": "bun run scripts/public-route-navigation-smoke.ts",

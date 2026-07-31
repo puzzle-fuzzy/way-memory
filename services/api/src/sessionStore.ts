@@ -54,13 +54,22 @@ export class SessionStore {
     );
   }
 
-  load(limit: number): SessionSnapshot[] {
-    const rows = this.database.query(`
-      SELECT session_json, raw_json
-      FROM session_snapshots
-      ORDER BY updated_at DESC
-      LIMIT ?
-    `).all(limit) as Array<{ session_json: string; raw_json: string }>;
+  load(limit: number, retainedAfterIso?: string): SessionSnapshot[] {
+    const query = retainedAfterIso
+      ? this.database.query(`
+        SELECT session_json, raw_json
+        FROM session_snapshots
+        WHERE updated_at >= ?
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `).all(retainedAfterIso, limit)
+      : this.database.query(`
+        SELECT session_json, raw_json
+        FROM session_snapshots
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `).all(limit);
+    const rows = query as Array<{ session_json: string; raw_json: string }>;
     return rows.flatMap((row) => {
       try {
         const session = JSON.parse(row.session_json) as ObservationSession;
@@ -79,7 +88,10 @@ export class SessionStore {
     return result.changes > 0;
   }
 
-  prune(maxSessions: number) {
+  prune(maxSessions: number, retainedAfterIso?: string) {
+    if (retainedAfterIso) {
+      this.database.query("DELETE FROM session_snapshots WHERE updated_at < ?").run(retainedAfterIso);
+    }
     this.database.query(`
       DELETE FROM session_snapshots
       WHERE session_id NOT IN (

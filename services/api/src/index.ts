@@ -29,6 +29,10 @@ const port = Number(Bun.env.PORT ?? 8787);
 const runtimeEnvironment = Bun.env.WAY_MEMORY_ENV ?? "test";
 if (runtimeEnvironment !== "test" && runtimeEnvironment !== "production") throw new Error("invalid_runtime_environment");
 const allowedOrigin = Bun.env.WAY_MEMORY_ALLOWED_ORIGIN ?? "*";
+const configuredRetentionDays = Bun.env.WAY_MEMORY_RETENTION_DAYS?.trim();
+if (runtimeEnvironment === "production" && !configuredRetentionDays) throw new Error("production_requires_explicit_retention_days");
+const retentionDays = configuredRetentionDays ? Number(configuredRetentionDays) : 30;
+if (!Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 3_650) throw new Error("invalid_retention_days");
 
 const device: DeviceSnapshot = {
   deviceId: "demo-pixel-01",
@@ -100,6 +104,7 @@ type SessionRuntime = {
 const sessionRuntime = new Map<string, SessionRuntime>();
 const sessionResumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const MAX_PERSISTED_SESSIONS = 100;
+const DATA_RETENTION_MS = retentionDays * 24 * 60 * 60 * 1_000;
 const sessionStore = new SessionStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
 const routeStore = new RouteStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
 const navigationHandoffStore = new NavigationHandoffStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
@@ -113,6 +118,7 @@ const authStore = new AuthStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.
 const LOCAL_OWNER_ID = "local-test-owner";
 const dirtySessionIds = new Set<string>();
 const routes = new Map<string, StoredRoute>();
+const retentionCutoffIso = () => new Date(Date.now() - DATA_RETENTION_MS).toISOString();
 
 const poseDistanceM = (left: PoseEstimate, right: PoseEstimate) => Math.sqrt(
   (left.xM - right.xM) ** 2
@@ -451,7 +457,7 @@ const persistSession = (session: ObservationSession) => {
   const runtime = sessionRuntime.get(session.sessionId);
   sessionStore.save(session, runtime?.rawSamples ?? []);
   dirtySessionIds.delete(session.sessionId);
-  sessionStore.prune(MAX_PERSISTED_SESSIONS);
+  sessionStore.prune(MAX_PERSISTED_SESSIONS, retentionCutoffIso());
 };
 
 const markSessionDirty = (session: ObservationSession) => {
@@ -464,9 +470,24 @@ const flushDirtySessions = () => {
     if (session) persistSession(session);
     else dirtySessionIds.delete(sessionId);
   }
+  const cutoff = retentionCutoffIso();
+  for (const session of [...sessions.values()]) {
+    const updatedAt = Date.parse(session.lastReceivedAt ?? session.startedAt);
+    if (session.status === "stopped" && Number.isFinite(updatedAt) && updatedAt < Date.parse(cutoff)) {
+      sessions.delete(session.sessionId);
+      altitudeReferences.delete(session.sessionId);
+      sessionRuntime.delete(session.sessionId);
+    }
+  }
+  for (const route of [...routes.values()]) {
+    const updatedAt = Date.parse(route.updatedAt);
+    if (Number.isFinite(updatedAt) && updatedAt < Date.parse(cutoff)) routes.delete(route.routeId);
+  }
+  sessionStore.prune(MAX_PERSISTED_SESSIONS, cutoff);
+  routeStore.prune(MAX_ROUTES, cutoff);
 };
 
-for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
+for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS, retentionCutoffIso())) {
   // A restart cannot prove that a previously active capture ended cleanly.
   snapshot.session.track = sortByDeviceTimestamp(snapshot.session.track ?? []);
   snapshot.session.relativeTrack = sortByDeviceTimestamp(snapshot.session.relativeTrack ?? []);
@@ -503,9 +524,9 @@ for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
     lastMotionEventTimestampNs: snapshot.session.motionEvents.at(-1)?.deviceTimestampNs,
   });
 }
-sessionStore.prune(MAX_PERSISTED_SESSIONS);
-for (const route of routeStore.load(MAX_ROUTES)) routes.set(route.routeId, route);
-routeStore.prune(MAX_ROUTES);
+sessionStore.prune(MAX_PERSISTED_SESSIONS, retentionCutoffIso());
+for (const route of routeStore.load(MAX_ROUTES, retentionCutoffIso())) routes.set(route.routeId, route);
+routeStore.prune(MAX_ROUTES, retentionCutoffIso());
 const persistenceTimer = setInterval(flushDirtySessions, 2_000);
 persistenceTimer.unref?.();
 

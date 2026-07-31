@@ -12,11 +12,11 @@ This deployment targets the existing Tencent Cloud host `101.35.246.159` describ
 
 The checked-in IP configuration is intentionally test-only. The production templates are `deploy/tencent-cloud/way-memory-api.production.service` and `deploy/tencent-cloud/way-memory.yxswy.com.nginx.conf.example`; install them only after DNS, ACME certificates, and the protected `/etc/way-memory/way-memory.env` are ready.
 
-The production environment file must contain `WAY_MEMORY_AUTH_MODE=enforced`, a long random `WAY_MEMORY_BOOTSTRAP_TOKEN`, `WAY_MEMORY_PUBLIC_ORIGIN=https://way-memory.yxswy.com`, `WAY_MEMORY_ALLOWED_ORIGIN=https://way-memory.yxswy.com`, and the persistent `WAY_MEMORY_DB_PATH`. Never commit that file or copy its contents into deployment logs.
+The production environment file must contain `WAY_MEMORY_AUTH_MODE=enforced`, a long random `WAY_MEMORY_BOOTSTRAP_TOKEN`, `WAY_MEMORY_PUBLIC_ORIGIN=https://way-memory.yxswy.com`, `WAY_MEMORY_ALLOWED_ORIGIN=https://way-memory.yxswy.com`, `WAY_MEMORY_RETENTION_DAYS=90` (or an explicitly approved 1-3,650 day policy), and the persistent `WAY_MEMORY_DB_PATH`. Never commit that file or copy its contents into deployment logs.
 
 Set `WAY_MEMORY_DB_PATH=/opt/way-memory/data/way-memory.sqlite` in the systemd environment. The service creates the directory and uses a bounded SQLite snapshot store: 100 retained sessions, a 1,024-sample raw replay tail per session, and a two-second flush interval. Keep `/opt/way-memory/data` on the persistent system disk and include it in the backup policy.
 
-The API keeps live sessions in memory for low-latency WebSocket updates and persists bounded session snapshots to SQLite. A process restart recovers recent sessions as stopped instead of losing the learned route. Each retained session keeps a bounded raw replay ring of 1,024 normalized samples, plus bounded Pose, location and event tracks.
+The API keeps live sessions in memory for low-latency WebSocket updates and persists bounded session snapshots to SQLite. A process restart recovers recent sessions as stopped instead of losing the learned route. Each retained session keeps a bounded raw replay ring of 1,024 normalized samples, plus bounded Pose, location and event tracks. The configured retention window automatically removes older stopped sessions and routes from both memory and SQLite.
 
 After restarting `way-memory-api.service`, poll `http://127.0.0.1:8787/health` until it responds before checking the public `/api/health`; systemd may report the unit active a fraction before Bun has bound the socket.
 

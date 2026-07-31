@@ -45,13 +45,22 @@ export class RouteStore {
     `).all(ownerId, limit) as Array<{ route_json: string }>);
   }
 
-  load(limit: number): StoredRoute[] {
-    return this.loadRows(this.database.query(`
-      SELECT route_json
-      FROM route_records
-      ORDER BY updated_at DESC
-      LIMIT ?
-    `).all(limit) as Array<{ route_json: string }>);
+  load(limit: number, retainedAfterIso?: string): StoredRoute[] {
+    const rows = retainedAfterIso
+      ? this.database.query(`
+        SELECT route_json
+        FROM route_records
+        WHERE updated_at >= ?
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `).all(retainedAfterIso, limit)
+      : this.database.query(`
+        SELECT route_json
+        FROM route_records
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `).all(limit);
+    return this.loadRows(rows as Array<{ route_json: string }>);
   }
 
   delete(ownerId: string, routeId: string) {
@@ -59,7 +68,10 @@ export class RouteStore {
     return result.changes > 0;
   }
 
-  prune(maxRoutes: number) {
+  prune(maxRoutes: number, retainedAfterIso?: string) {
+    if (retainedAfterIso) {
+      this.database.query("DELETE FROM route_records WHERE updated_at < ?").run(retainedAfterIso);
+    }
     this.database.query(`
       DELETE FROM route_records
       WHERE route_id NOT IN (
