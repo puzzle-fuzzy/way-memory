@@ -31,7 +31,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps
 For the actual sensor gate, require a physical phone explicitly. The script labels emulator installs as protocol/lifecycle-only and refuses them when this switch is present:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1 -RequirePhysical
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1 `
+  -RequirePhysical -ApiBaseUrl https://way-memory.yxswy.com
 ```
 
 The script only installs and launches the APK. It does not grant permissions silently and does not fabricate route data.

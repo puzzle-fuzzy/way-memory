@@ -1,12 +1,20 @@
 param(
     [string]$ApkPath = "apps\android\app\build\outputs\apk\debug\app-debug.apk",
     [string]$Serial = "",
-    [switch]$RequirePhysical
+    [switch]$RequirePhysical,
+    [string]$ApiBaseUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $resolvedApk = (Resolve-Path (Join-Path $repo $ApkPath)).Path
+$displayApiBaseUrl = if ($ApiBaseUrl.Trim()) {
+    $ApiBaseUrl.TrimEnd('/')
+} elseif ($env:WAY_MEMORY_API_URL) {
+    $env:WAY_MEMORY_API_URL.TrimEnd('/')
+} else {
+    "http://101.35.246.159"
+}
 
 $adbCommand = Get-Command adb -ErrorAction SilentlyContinue
 if ($adbCommand) {
@@ -58,5 +66,6 @@ if ($LASTEXITCODE -ne 0) { throw "APK installation failed with exit code $LASTEX
 if ($LASTEXITCODE -ne 0) { throw "Unable to launch way-memory with exit code $LASTEXITCODE" }
 
 Write-Host "Installed and launched successfully. Complete the manual capture matrix in docs/device-acceptance.md."
-Write-Host "Public API: http://101.35.246.159/api/health"
-Write-Host "Session list: http://101.35.246.159/api/sessions"
+Write-Host "Configured API: $displayApiBaseUrl"
+Write-Host "Health probe: $displayApiBaseUrl/api/health"
+Write-Host "Session evidence: $displayApiBaseUrl/api/sessions/<SESSION_ID>"
