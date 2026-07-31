@@ -51,10 +51,13 @@ const routeStatusLabel = computed(() => {
 const track = computed(() => session.value?.track ?? []);
 const relativeTrack = computed(() => session.value?.relativeTrack ?? []);
 const poseTrack = computed(() => session.value?.poseTrack ?? []);
+const correctedPoseTrack = computed(() => session.value?.closure.adjusted && session.value.correctedPoseTrack?.length
+  ? session.value.correctedPoseTrack
+  : poseTrack.value);
 const totalSampleCount = computed(() => session.value?.sampleCount ?? 0);
 const locationPointCount = computed(() => track.value.length);
 const motionPointCount = computed(() => relativeTrack.value.length);
-const posePointCount = computed(() => poseTrack.value.length);
+const posePointCount = computed(() => correctedPoseTrack.value.length);
 const displayedPointCount = computed(() => visualMode.value === "fused" ? posePointCount.value : visualMode.value === "inertial" ? motionPointCount.value : locationPointCount.value);
 const visualMode = computed<"fused" | "location" | "inertial" | "empty">(() => {
   if (poseTrack.value.length > 1) return "fused";
@@ -64,9 +67,9 @@ const visualMode = computed<"fused" | "location" | "inertial" | "empty">(() => {
 });
 const coordinateBoundsLabel = computed(() => {
   if (visualMode.value === "fused") {
-    const east = poseTrack.value.map((point) => point.xM);
-    const north = poseTrack.value.map((point) => point.yM);
-    const up = poseTrack.value.map((point) => point.zM);
+    const east = correctedPoseTrack.value.map((point) => point.xM);
+    const north = correctedPoseTrack.value.map((point) => point.yM);
+    const up = correctedPoseTrack.value.map((point) => point.zM);
     return `x ${Math.min(...east).toFixed(2)}–${Math.max(...east).toFixed(2)}m · y ${Math.min(...north).toFixed(2)}–${Math.max(...north).toFixed(2)}m · z ${Math.min(...up).toFixed(2)}–${Math.max(...up).toFixed(2)}m`;
   }
   if (visualMode.value === "inertial") {
@@ -95,9 +98,9 @@ const haversineDistanceM = (left: TrackPoint, right: TrackPoint) => {
 const routeDistanceM = computed(() => {
   if (visualMode.value === "fused") {
     let distance = 0;
-    for (let index = 1; index < poseTrack.value.length; index += 1) {
-      const previous = poseTrack.value[index - 1];
-      const current = poseTrack.value[index];
+    for (let index = 1; index < correctedPoseTrack.value.length; index += 1) {
+      const previous = correctedPoseTrack.value[index - 1];
+      const current = correctedPoseTrack.value[index];
       distance += Math.sqrt(
         (current.xM - previous.xM) ** 2
         + (current.yM - previous.yM) ** 2
@@ -407,7 +410,7 @@ const inertialWorldTrack = computed(() => relativeTrack.value.map((point, index)
   accuracyM: point.accuracyM,
 })));
 
-const fusedWorldTrack = computed(() => poseTrack.value.map((point, index) => ({
+const fusedWorldTrack = computed(() => correctedPoseTrack.value.map((point, index) => ({
   index,
   eastM: point.xM,
   northM: point.yM,

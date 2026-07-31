@@ -37,6 +37,7 @@ class PoseFusionEngine {
     private var stationaryFrames = 0
     private var movingFrames = 0
     private var elevatorEvidenceFrames = 0
+    private var stairsEvidenceFrames = 0
     private var lastMotionMode = "unknown"
     private var hasVisual = false
     private var lastVisualX = 0f
@@ -48,7 +49,7 @@ class PoseFusionEngine {
     private var visualRouteOriginY = 0f
     private var visualAlignmentPositionX = 0f
     private var visualAlignmentPositionY = 0f
-    private var visualLoopCandidateEmitted = false
+    private var visualLoopClosureEmitted = false
 
     fun reset() {
         position.fill(0f)
@@ -69,6 +70,7 @@ class PoseFusionEngine {
         stationaryFrames = 0
         movingFrames = 0
         elevatorEvidenceFrames = 0
+        stairsEvidenceFrames = 0
         lastMotionMode = "unknown"
         hasVisual = false
         lastVisualX = 0f
@@ -80,7 +82,7 @@ class PoseFusionEngine {
         visualRouteOriginY = 0f
         visualAlignmentPositionX = 0f
         visualAlignmentPositionY = 0f
-        visualLoopCandidateEmitted = false
+        visualLoopClosureEmitted = false
     }
 
     fun updatePressure(pressureHpa: Float, timestampNs: Long) {
@@ -237,8 +239,10 @@ class PoseFusionEngine {
         }
 
         val horizontalSpeed = hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat()
-        val elevatorEvidence = abs(barometerVerticalSpeedMps) > 0.25f && horizontalSpeed < 1.5f && movingFrames > 3
+        val elevatorEvidence = abs(barometerVerticalSpeedMps) > 0.25f && horizontalSpeed < 0.9f && movingFrames > 3
         if (elevatorEvidence) elevatorEvidenceFrames = min(40, elevatorEvidenceFrames + 1) else elevatorEvidenceFrames = maxOf(0, elevatorEvidenceFrames - 1)
+        val stairsEvidence = abs(barometerVerticalSpeedMps) > 0.12f && horizontalSpeed >= 0.3f && movingFrames > 3 && !elevatorEvidence
+        if (stairsEvidence) stairsEvidenceFrames = min(40, stairsEvidenceFrames + 1) else stairsEvidenceFrames = maxOf(0, stairsEvidenceFrames - 1)
         return buildUpdate(timestampNs, force = false)
     }
 
@@ -249,19 +253,24 @@ class PoseFusionEngine {
         val stationaryNow = stationaryFrames >= 3
         val motionMode = when {
             elevatorEvidenceFrames >= 5 -> "elevator"
+            stairsEvidenceFrames >= 5 -> "stairs"
             stationaryNow -> "stationary"
             horizontalSpeed >= 0.12f || movingFrames >= 3 -> "walking"
             else -> "unknown"
         }
+        val visualLoopClosure = visualAligned
+            && !visualLoopClosureEmitted
+            && visualTravelledM >= 8f
+            && hypot(lastVisualX.toDouble(), lastVisualY.toDouble()) <= 1.5
+        if (visualLoopClosure) visualLoopClosureEmitted = true
         val event = when {
-            visualAligned && !visualLoopCandidateEmitted && visualTravelledM >= 8f
-                && hypot(lastVisualX.toDouble(), lastVisualY.toDouble()) <= 1.5 -> MotionEventSample(
+            visualLoopClosure -> MotionEventSample(
                 eventId = UUID.randomUUID().toString(),
                 deviceTimestampNs = timestampNs,
-                type = "loop-candidate",
-                confidence = 0.68f,
+                type = "loop-closed",
+                confidence = 0.72f,
                 details = mapOf("visualTravelledM" to visualTravelledM),
-            ).also { visualLoopCandidateEmitted = true }
+            )
             motionMode != lastMotionMode && motionMode == "elevator" -> MotionEventSample(
                 eventId = UUID.randomUUID().toString(),
                 deviceTimestampNs = timestampNs,
@@ -269,11 +278,27 @@ class PoseFusionEngine {
                 confidence = (0.55f + elevatorEvidenceFrames / 40f).coerceAtMost(0.92f),
                 details = mapOf("barometerVerticalSpeedMps" to barometerVerticalSpeedMps),
             )
+            motionMode != lastMotionMode && motionMode == "stairs" -> MotionEventSample(
+                eventId = UUID.randomUUID().toString(),
+                deviceTimestampNs = timestampNs,
+                type = "stairs-enter",
+                confidence = (0.52f + stairsEvidenceFrames / 40f).coerceAtMost(0.88f),
+                details = mapOf(
+                    "barometerVerticalSpeedMps" to barometerVerticalSpeedMps,
+                    "horizontalSpeedMps" to horizontalSpeed,
+                ),
+            )
             lastMotionMode == "elevator" && motionMode != "elevator" -> MotionEventSample(
                 eventId = UUID.randomUUID().toString(),
                 deviceTimestampNs = timestampNs,
                 type = "elevator-exit",
                 confidence = 0.72f,
+            )
+            lastMotionMode == "stairs" && motionMode != "stairs" -> MotionEventSample(
+                eventId = UUID.randomUUID().toString(),
+                deviceTimestampNs = timestampNs,
+                type = "stairs-exit",
+                confidence = 0.7f,
             )
             motionMode != lastMotionMode && motionMode == "stationary" -> MotionEventSample(
                 eventId = UUID.randomUUID().toString(),
@@ -301,6 +326,7 @@ class PoseFusionEngine {
             if (hasBarometer) add("barometer")
             if (hasVisual) add("visual")
             if (visualAligned) add("visual-aligned")
+            if (visualLoopClosure) add("loop-closure")
         }
         val confidence = (1f - accuracy / 50f).coerceIn(0.05f, 0.98f)
         return PoseUpdate(

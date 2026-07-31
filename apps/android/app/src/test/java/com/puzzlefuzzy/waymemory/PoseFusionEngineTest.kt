@@ -37,6 +37,22 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun sustainedVerticalMotionWithHorizontalTravelProducesStairsEvent() {
+        val engine = PoseFusionEngine()
+        var stairsEvent = false
+        var timestampNs = 1_000_000_000L
+        engine.updatePressure(1013.25f, timestampNs)
+        engine.updateImu(timestampNs, floatArrayOf(0.4f, 0f, 0f), 0.05f)
+        repeat(30) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(1013.25f - (it + 1) * 0.015f, timestampNs)
+            val update = engine.updateImu(timestampNs, floatArrayOf(0.4f, 0f, 0f), 0.05f)
+            if (update?.motionEvent?.type == "stairs-enter") stairsEvent = true
+        }
+        assertTrue(stairsEvent)
+    }
+
+    @Test
     fun visualPoseIsPromotedOnlyAfterFrameAlignment() {
         val engine = PoseFusionEngine()
         engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
@@ -55,7 +71,7 @@ class PoseFusionEngineTest {
     }
 
     @Test
-    fun visualReturnEmitsLoopCandidateWithoutSnappingRoute() {
+    fun visualReturnEmitsLoopClosureEvidence() {
         val engine = PoseFusionEngine()
         engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
         engine.updateVisual(VisualPoseSample(1_100_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
@@ -67,6 +83,7 @@ class PoseFusionEngineTest {
         engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 4f, 0f, 0f, 0.15f, 0.9f, "tracking"))
         engine.updateVisual(VisualPoseSample(timestampNs + 200_000_000L, 8f, 0f, 0f, 0.15f, 0.9f, "tracking"))
         val returned = engine.updateVisual(VisualPoseSample(timestampNs + 300_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
-        assertEquals("loop-candidate", returned?.motionEvent?.type)
+        assertEquals("loop-closed", returned?.motionEvent?.type)
+        assertTrue(returned?.pose?.sourceFlags?.contains("loop-closure") == true)
     }
 }

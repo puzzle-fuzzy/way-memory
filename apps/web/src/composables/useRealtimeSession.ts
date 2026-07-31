@@ -62,6 +62,7 @@ export function useRealtimeSession() {
       track: [...current.track, ...delta.trackPoints].slice(-500),
       relativeTrack: [...current.relativeTrack, ...delta.relativePoints].slice(-500),
       poseTrack: [...current.poseTrack, ...delta.posePoints].slice(-1200),
+      correctedPoseTrack: delta.correctedPosePoints ?? current.correctedPoseTrack,
       latestPose: delta.latestPose ?? current.latestPose,
       motionMode: delta.motionMode,
       closure: delta.closure,

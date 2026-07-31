@@ -101,7 +101,7 @@ export interface PoseEstimate {
 export interface MotionEvent {
   eventId: string;
   deviceTimestampNs: number;
-  type: "stationary-enter" | "stationary-exit" | "elevator-candidate" | "elevator-exit" | "loop-candidate";
+  type: "stationary-enter" | "stationary-exit" | "stairs-enter" | "stairs-exit" | "elevator-candidate" | "elevator-exit" | "loop-candidate" | "loop-closed";
   confidence: number;
   details?: Record<string, number | string | boolean>;
 }
@@ -166,6 +166,7 @@ export interface ObservationSession {
   track: TrackPoint[];
   relativeTrack: RelativeMotionPoint[];
   poseTrack: PoseEstimate[];
+  correctedPoseTrack?: PoseEstimate[];
   latestPose?: PoseEstimate;
   motionMode: MotionMode;
   closure: ClosureState;
@@ -191,6 +192,7 @@ export interface SessionDelta {
   trackPoints: TrackPoint[];
   relativePoints: RelativeMotionPoint[];
   posePoints: PoseEstimate[];
+  correctedPosePoints?: PoseEstimate[];
   latestPose?: ObservationSession["latestPose"];
   motionMode: ObservationSession["motionMode"];
   closure: ObservationSession["closure"];

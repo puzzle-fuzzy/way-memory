@@ -271,9 +271,12 @@ const normalizePose = (value: unknown): PoseEstimate | null => {
 const motionEventTypes = new Set<MotionEvent["type"]>([
   "stationary-enter",
   "stationary-exit",
+  "stairs-enter",
+  "stairs-exit",
   "elevator-candidate",
   "elevator-exit",
   "loop-candidate",
+  "loop-closed",
 ]);
 
 const normalizeMotionEvent = (value: unknown): MotionEvent | null => {
@@ -463,6 +466,29 @@ const poseDistanceM = (left: PoseEstimate, right: PoseEstimate) => Math.sqrt(
   + (left.zM - right.zM) ** 2,
 );
 
+const applyLoopCorrection = (session: ObservationSession) => {
+  if (session.poseTrack.length < 2) return;
+  const start = session.poseTrack[0];
+  const end = session.poseTrack.at(-1);
+  if (!end) return;
+  const correction = {
+    xM: end.xM - start.xM,
+    yM: end.yM - start.yM,
+    zM: end.zM - start.zM,
+  };
+  const denominator = Math.max(1, session.poseTrack.length - 1);
+  session.correctedPoseTrack = session.poseTrack.map((pose, index) => {
+    const ratio = index / denominator;
+    return {
+      ...pose,
+      xM: pose.xM - correction.xM * ratio,
+      yM: pose.yM - correction.yM * ratio,
+      zM: pose.zM - correction.zM * ratio,
+      sourceFlags: [...new Set([...pose.sourceFlags, "loop-corrected"])],
+    };
+  });
+};
+
 const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => {
   const runtime = sessionRuntime.get(session.sessionId) ?? {};
   if (!runtime.startPose) {
@@ -482,7 +508,8 @@ const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => 
   const uncertaintyM = Math.max(1.5, Math.min(12, startPose.accuracyM + pose.accuracyM));
   const travelledM = runtime.travelledM ?? 0;
   const candidate = travelledM >= 8 && gapM <= Math.max(2, uncertaintyM * 0.75);
-  const visualLoop = pose.sourceFlags.includes("loop-closure");
+  const visualLoop = pose.sourceFlags.includes("loop-closure") && pose.sourceFlags.includes("visual-aligned");
+  const wasAdjusted = session.closure.adjusted;
   const confidence = candidate
     ? clamp(1 - gapM / Math.max(2, uncertaintyM), 0, 1) * 0.85
     : 0;
@@ -493,6 +520,13 @@ const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => 
     // Never alter raw points until a visual loop-closure source is present.
     adjusted: false,
   } satisfies ClosureState;
+  if (session.closure.status === "closed" && !wasAdjusted) {
+    applyLoopCorrection(session);
+    session.closure = {
+      ...session.closure,
+      adjusted: true,
+    };
+  }
 };
 
 const createSession = (input: CreateSessionInput): ObservationSession => {
@@ -513,6 +547,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     track: [],
     relativeTrack: [],
     poseTrack: [],
+    correctedPoseTrack: [],
     motionMode: "unknown",
     closure: { status: "open", confidence: 0, adjusted: false },
     motionEvents: [],
@@ -533,7 +568,9 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   const trackPoints: TrackPoint[] = [];
   const relativePoints: RelativeMotionPoint[] = [];
   const posePoints: PoseEstimate[] = [];
+  const correctedPosePoints: PoseEstimate[] = [];
   const motionEvents: MotionEvent[] = [];
+  const wasClosureAdjusted = session.closure.adjusted;
   const samples = rawSamples
     .map(normalizeSensorSample)
     .filter((sample): sample is SensorSample => sample !== null)
@@ -553,6 +590,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
     const sensorType = normalizeSensorType(sample.sensorType);
     if (sample.pose) {
       session.poseTrack.push(sample.pose);
+      session.correctedPoseTrack?.push(sample.pose);
       posePoints.push(sample.pose);
       session.latestPose = sample.pose;
       session.motionMode = sample.pose.motionMode;
@@ -587,10 +625,12 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   if (session.track.length > MAX_TRACK_POINTS) session.track = session.track.slice(-MAX_TRACK_POINTS);
   if (session.relativeTrack.length > MAX_RELATIVE_TRACK_POINTS) session.relativeTrack = session.relativeTrack.slice(-MAX_RELATIVE_TRACK_POINTS);
   if (session.poseTrack.length > MAX_POSE_TRACK_POINTS) session.poseTrack = session.poseTrack.slice(-MAX_POSE_TRACK_POINTS);
+  if (session.correctedPoseTrack && session.correctedPoseTrack.length > MAX_POSE_TRACK_POINTS) session.correctedPoseTrack = session.correctedPoseTrack.slice(-MAX_POSE_TRACK_POINTS);
   if (session.motionEvents.length > MAX_MOTION_EVENTS) session.motionEvents = session.motionEvents.slice(-MAX_MOTION_EVENTS);
+  if (!wasClosureAdjusted && session.closure.adjusted) correctedPosePoints.push(...(session.correctedPoseTrack ?? []));
   device.lastSeen = session.lastReceivedAt ?? device.lastSeen;
   device.connected = true;
-  return { accepted: samples.length, dropped: session.droppedSampleCount, session, trackPoints, relativePoints, posePoints, motionEvents };
+  return { accepted: samples.length, dropped: session.droppedSampleCount, session, trackPoints, relativePoints, posePoints, correctedPosePoints, motionEvents };
 };
 
 const publishSession = (server: Bun.Server<RealtimeClient>, session: ObservationSession) => {
@@ -618,6 +658,7 @@ const publishSessionDelta = (
     trackPoints: result.trackPoints,
     relativePoints: result.relativePoints,
     posePoints: result.posePoints,
+    ...(result.correctedPosePoints.length ? { correctedPosePoints: result.correctedPosePoints } : {}),
     latestPose: session.latestPose,
     motionMode: session.motionMode,
     closure: session.closure,
