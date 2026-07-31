@@ -123,6 +123,16 @@ internal fun buildSessionStartRequest(
     client: CaptureClientSample? = null,
 ): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory, client)
 
+internal fun buildSamplesMessage(sessionId: String, batch: List<CollectedSample>): JSONObject = JSONObject()
+    .put("type", "samples")
+    .put("sessionId", sessionId)
+    .put("samples", JSONArray().apply {
+        // The durable queue stores one JSON object per line as text, but the
+        // WebSocket contract requires an array of objects, not an array of
+        // JSON-encoded strings.
+        batch.forEach { put(JSONObject(CollectedSampleCodec.encode(it))) }
+    })
+
 internal fun parseSessionLifecycleEvent(message: JSONObject): SessionLifecycleEvent? {
     val type = message.optString("type")
     if (type != "session.started" && type != "session.resumed") return null
@@ -398,6 +408,7 @@ class SessionUploader(
                 }
                 "error" -> {
                     val error = message.optString("error")
+                    if (BuildConfig.DEBUG) Log.w(TAG, "server error=$error")
                     if (error == "session_resume_failed" && activeSessionId != null && running) {
                         activeSessionId = null
                         sessionIdFile.delete()
@@ -445,10 +456,7 @@ class SessionUploader(
         val batch = queue.peek(MAX_BATCH)
         if (batch.isEmpty()) return
 
-        val payload = JSONObject()
-            .put("type", "samples")
-            .put("sessionId", sessionId)
-            .put("samples", JSONArray().apply { batch.forEach { put(CollectedSampleCodec.encode(it)) } })
+        val payload = buildSamplesMessage(sessionId, batch)
         // Record the batch before send(). OkHttp may deliver a very fast server
         // ACK on another callback thread before send() returns to this method.
         inFlightBatchSize = batch.size
