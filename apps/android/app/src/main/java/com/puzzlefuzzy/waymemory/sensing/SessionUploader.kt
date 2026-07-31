@@ -110,8 +110,8 @@ class SessionUploader(
     private var connectionJob: Job? = null
     private var deviceId: String = "android-device"
     private var sensorInventory: List<SensorInventorySample> = emptyList()
-    private var activeSessionId: String? = null
-    private var running = false
+    @Volatile private var activeSessionId: String? = null
+    @Volatile private var running = false
     private var nextConnectAtMs = 0L
     private var reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
     private var lastQueueUiPublishMs = 0L
@@ -160,18 +160,30 @@ class SessionUploader(
     }
 
     fun stop() {
+        if (!running) return
         running = false
         connectionJob?.cancel()
-        repeat(10) {
-            if (queue.size() == 0) return@repeat
-            flush()
+        val stopSocket = socket
+        val stopSessionId = activeSessionId
+        if (stopSocket == null || stopSessionId == null) {
+            finishStop(stopSocket)
+            return
         }
-        activeSessionId?.let { sessionId ->
-            socket?.send(JSONObject().put("type", "session.stop").put("sessionId", sessionId).toString())
+        scope.launch {
+            val deadlineMs = System.currentTimeMillis() + STOP_DRAIN_TIMEOUT_MS
+            while (queue.size() > 0 && stopSocket === socket && System.currentTimeMillis() < deadlineMs) {
+                if (inFlightBatchSize == 0) flush()
+                delay(STOP_DRAIN_POLL_MS)
+            }
+            stopSocket.send(JSONObject().put("type", "session.stop").put("sessionId", stopSessionId).toString())
+            finishStop(stopSocket)
         }
+    }
+
+    private fun finishStop(stopSocket: WebSocket?) {
         connectionJob = null
-        socket?.close(1000, "session stopped")
-        socket = null
+        stopSocket?.close(1000, "session stopped")
+        if (socket === stopSocket) socket = null
         inFlightBatchSize = 0
         inFlightSocket = null
         sessionIdFile.delete()
@@ -330,6 +342,8 @@ class SessionUploader(
         private const val MAX_SENSOR_INVENTORY = 128
         private const val FLUSH_INTERVAL_MS = 80L
         private const val QUEUE_UI_INTERVAL_MS = 250L
+        private const val STOP_DRAIN_TIMEOUT_MS = 1_500L
+        private const val STOP_DRAIN_POLL_MS = 20L
         private const val INITIAL_RECONNECT_DELAY_MS = 250L
         private const val MAX_RECONNECT_DELAY_MS = 10_000L
     }
