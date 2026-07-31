@@ -187,17 +187,26 @@ export interface SensorInventoryEntry {
   registered: boolean;
 }
 
+export interface CaptureClientInfo {
+  applicationId: string;
+  versionName: string;
+  buildType: "debug" | "release" | "unknown";
+  apiBaseUrl: string;
+}
+
 export interface CreateSessionInput {
   deviceId: string;
   mode: ObservationMode;
   routeId?: string;
   sensors?: SensorInventoryEntry[];
+  client?: CaptureClientInfo;
 }
 
 export interface ObservationSession {
   sessionId: string;
   deviceId: string;
   mode: ObservationMode;
+  client?: CaptureClientInfo;
   routeId?: string;
   startedAt: string;
   lastReceivedAt?: string;

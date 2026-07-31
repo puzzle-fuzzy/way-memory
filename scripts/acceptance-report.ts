@@ -96,6 +96,11 @@ try {
   const sampleIds = rawSamples.map((sample) => sample.sampleId).filter((id): id is string => typeof id === "string" && id.length > 0);
   const duplicateSampleIds = sampleIds.length - new Set(sampleIds).size;
   const closure = (session.closure ?? {}) as JsonRecord;
+  const client = (session.client ?? {}) as JsonRecord;
+  const expectedApiOrigin = new URL(apiBase).origin;
+  const clientApiOrigin = typeof client.apiBaseUrl === "string"
+    ? (() => { try { return new URL(client.apiBaseUrl).origin; } catch { return null; } })()
+    : null;
   const checks = {
     sessionLoaded: session.sessionId === sessionId,
     sensorInventory: inventory.length > 0 && registeredSensors > 0,
@@ -110,9 +115,13 @@ try {
     routeOrderingClean: Number(session.outOfOrderSampleCount ?? 0) <= maximumOutOfOrderSampleCount,
     closureConsistent: closure.adjusted !== true || (closure.status === "closed" && corrected.length >= poses.length),
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
+    clientManifest: client.applicationId === "com.puzzlefuzzy.waymemory"
+      && typeof client.versionName === "string"
+      && (client.buildType === "debug" || client.buildType === "release")
+      && clientApiOrigin === expectedApiOrigin,
   };
   const caseChecks: Record<string, boolean> = {
-    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.routeOrderingClean && checks.serverBounds,
+    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.routeOrderingClean && checks.serverBounds && checks.clientManifest,
     "3d": checks.poseStream && checks.threeAxisMovement,
     rotation: checks.rotationSensorEvidence && checks.rotationTranslationBounded,
     loop: checks.closureConsistent && closure.status === "closed" && closure.adjusted === true && corrected.length > 0,
@@ -159,6 +168,7 @@ try {
       limitM: maximumRotationTranslationM,
     },
     sourceFlags,
+    client,
     closure,
     checks,
     casePassed: caseChecks[acceptanceCase] ?? false,

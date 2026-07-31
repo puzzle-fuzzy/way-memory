@@ -1,6 +1,7 @@
 import type {
   ClosureState,
   ClosureAnchor,
+  CaptureClientInfo,
   CreateSessionInput,
   DeviceSnapshot,
   LiveSensorSnapshot,
@@ -76,6 +77,7 @@ const MAX_SENSOR_VALUES = 16;
 const MAX_JSON_BYTES = 512 * 1024;
 const MAX_DEVICE_ID_LENGTH = 128;
 const MAX_ROUTE_ID_LENGTH = 128;
+const MAX_CLIENT_FIELD_LENGTH = 128;
 const MAX_SAMPLE_ID_LENGTH = 128;
 const MAX_SEEN_SAMPLE_IDS = 8_192;
 const SESSION_RESUME_GRACE_MS = 2 * 60 * 1_000;
@@ -203,6 +205,30 @@ type RealtimeClient = {
   role: "device" | "dashboard";
   deviceId?: string;
   sessionId?: string;
+};
+
+const normalizeCaptureClient = (input: unknown): CaptureClientInfo | undefined => {
+  if (!input || typeof input !== "object") return undefined;
+  const candidate = input as Partial<CaptureClientInfo>;
+  const applicationId = typeof candidate.applicationId === "string"
+    ? candidate.applicationId.trim().slice(0, MAX_CLIENT_FIELD_LENGTH)
+    : "";
+  const versionName = typeof candidate.versionName === "string"
+    ? candidate.versionName.trim().slice(0, MAX_CLIENT_FIELD_LENGTH)
+    : "";
+  const buildType = candidate.buildType === "debug" || candidate.buildType === "release"
+    ? candidate.buildType
+    : "unknown";
+  if (!applicationId || !versionName || typeof candidate.apiBaseUrl !== "string") return undefined;
+  try {
+    const url = new URL(candidate.apiBaseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    // Store only an origin. This prevents accidental credentials, query strings,
+    // or path tokens from entering the session evidence.
+    return { applicationId, versionName, buildType, apiBaseUrl: url.origin };
+  } catch {
+    return undefined;
+  }
 };
 
 const parseJson = async <T>(request: Request): Promise<T | null> => {
@@ -732,6 +758,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     sessionId: crypto.randomUUID(),
     deviceId,
     mode: input.mode === "navigation" ? "navigation" : "learning",
+    client: normalizeCaptureClient(input.client),
     routeId,
     startedAt: new Date().toISOString(),
     sampleCount: 0,
@@ -1016,7 +1043,7 @@ const server = Bun.serve<RealtimeClient>({
         ws.send(JSON.stringify({ type: "error", error: "message_too_large" }));
         return;
       }
-      let message: { type?: string; deviceId?: string; mode?: CreateSessionInput["mode"]; routeId?: string; sessionId?: string; samples?: unknown[]; sensors?: unknown[] };
+      let message: { type?: string; deviceId?: string; mode?: CreateSessionInput["mode"]; routeId?: string; sessionId?: string; samples?: unknown[]; sensors?: unknown[]; client?: CreateSessionInput["client"] };
       try {
         message = JSON.parse(String(raw));
       } catch {
@@ -1032,6 +1059,7 @@ const server = Bun.serve<RealtimeClient>({
             mode: message.mode ?? "learning",
             routeId: message.routeId,
             sensors: message.sensors as SensorInventoryEntry[] | undefined,
+            client: message.client,
           });
         } catch (error) {
           ws.send(JSON.stringify({ type: "error", error: error instanceof Error && error.message === "session_limit" ? "session_limit" : "session_start_failed" }));

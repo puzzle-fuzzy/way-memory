@@ -101,17 +101,35 @@ data class SensorInventorySample(
 internal data class SessionStartRequest(
     val deviceId: String,
     val sensorInventory: List<SensorInventorySample>,
+    val client: CaptureClientSample? = null,
+)
+
+internal data class CaptureClientSample(
+    val applicationId: String,
+    val versionName: String,
+    val buildType: String,
+    val apiBaseUrl: String,
 )
 
 internal fun buildSessionStartRequest(
     deviceId: String,
     sensorInventory: List<SensorInventorySample>,
-): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory)
+    client: CaptureClientSample? = null,
+): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory, client)
 
 private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
     .put("type", "session.start")
     .put("deviceId", deviceId)
     .put("mode", "learning")
+    .apply {
+        client?.let {
+            put("client", JSONObject()
+                .put("applicationId", it.applicationId)
+                .put("versionName", it.versionName)
+                .put("buildType", it.buildType)
+                .put("apiBaseUrl", it.apiBaseUrl))
+        }
+    }
     .put("sensors", JSONArray().apply {
         sensorInventory.forEach { sensor ->
             put(JSONObject().apply {
@@ -352,7 +370,16 @@ class SessionUploader(
         // and the server's bounded dedupe window prevents double counting.
     }
 
-    private fun sessionStartMessage(): JSONObject = buildSessionStartRequest(deviceId, sensorInventory).toJson()
+    private fun sessionStartMessage(): JSONObject = buildSessionStartRequest(
+        deviceId = deviceId,
+        sensorInventory = sensorInventory,
+        client = CaptureClientSample(
+            applicationId = "com.puzzlefuzzy.waymemory",
+            versionName = BuildConfig.VERSION_NAME,
+            buildType = if (BuildConfig.DEBUG) "debug" else "release",
+            apiBaseUrl = baseUrl,
+        ),
+    ).toJson()
 
     companion object {
         private const val TAG = "WayMemorySync"
