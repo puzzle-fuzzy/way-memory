@@ -10,8 +10,13 @@ This is the gate between “the code builds” and “the product recorded a rea
 
 ```powershell
 cd E:\__Super_Core__\way-memory
+$env:JAVA_HOME='D:\software\JetBeains\Programs\Android Studio\jbr'
+Push-Location apps\android
+try { .\gradlew.bat :app:assembleDebug -PwayMemoryApiUrl=http://101.35.246.159 --offline --no-daemon --no-parallel } finally { Pop-Location }
 bun run android:acceptance
 ```
+
+The `-PwayMemoryApiUrl` value is important: `10.0.2.2` is only the Android emulator host and is not reachable from a physical phone. The acceptance APK must be built with the public API URL (or an explicitly reachable HTTPS deployment).
 
 If more than one device is connected, use:
 

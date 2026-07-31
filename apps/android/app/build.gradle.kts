@@ -10,7 +10,8 @@ val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
-val apiBaseUrl = localProperties.getProperty("wayMemoryApiUrl", "http://10.0.2.2:8787")
+val apiBaseUrl = (providers.gradleProperty("wayMemoryApiUrl").orNull
+    ?: localProperties.getProperty("wayMemoryApiUrl", "http://10.0.2.2:8787"))
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 
