@@ -10,12 +10,14 @@ import type {
   ObservationSession,
   PoseEstimate,
   RelativeMotionPoint,
+  RouteObservationSummary,
   SessionDelta,
   SensorSample,
   SensorInventoryEntry,
   TrackPoint,
 } from "@way-memory/contracts";
 import { AuthStore, type AuthPrincipal, type AuthRole } from "./authStore";
+import { RouteStore, type StoredRoute } from "./routeStore";
 import { SessionStore } from "./sessionStore";
 
 const port = Number(Bun.env.PORT ?? 8787);
@@ -46,6 +48,10 @@ const sessions = new Map<string, ObservationSession>();
 const altitudeReferences = new Map<string, { gnssM?: number; pressureHpa?: number }>();
 
 const MAX_SESSIONS = 20;
+const MAX_ROUTES = 100;
+const MAX_ROUTE_OBSERVATIONS = 50;
+const MAX_ROUTE_TRACK_POINTS = 500;
+const MAX_ROUTE_POSE_POINTS = 1_200;
 const MAX_TRACK_POINTS = 500;
 const MAX_RELATIVE_TRACK_POINTS = 500;
 const MAX_POSE_TRACK_POINTS = 1_200;
@@ -88,6 +94,7 @@ const sessionRuntime = new Map<string, SessionRuntime>();
 const sessionResumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const MAX_PERSISTED_SESSIONS = 100;
 const sessionStore = new SessionStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
+const routeStore = new RouteStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
 const authMode = Bun.env.WAY_MEMORY_AUTH_MODE ?? "off";
 if (authMode !== "off" && authMode !== "enforced") throw new Error("invalid_auth_mode");
 if (authMode === "enforced" && !Bun.env.WAY_MEMORY_BOOTSTRAP_TOKEN) throw new Error("production_auth_requires_bootstrap_token");
@@ -97,6 +104,7 @@ if (runtimeEnvironment === "production" && (authMode !== "enforced" || !Bun.env.
 const authStore = new AuthStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
 const LOCAL_OWNER_ID = "local-test-owner";
 const dirtySessionIds = new Set<string>();
+const routes = new Map<string, StoredRoute>();
 
 const poseDistanceM = (left: PoseEstimate, right: PoseEstimate) => Math.sqrt(
   (left.xM - right.xM) ** 2
@@ -108,6 +116,88 @@ const poseTrackDistanceM = (poses: PoseEstimate[]) => {
   let distanceM = 0;
   for (let index = 1; index < poses.length; index += 1) distanceM += poseDistanceM(poses[index - 1], poses[index]);
   return distanceM;
+};
+
+const geographicDistanceM = (left: TrackPoint, right: TrackPoint) => {
+  const earthRadiusM = 6_371_000;
+  const toRadians = (value: number) => value * Math.PI / 180;
+  const lat1 = toRadians(left.lat);
+  const lat2 = toRadians(right.lat);
+  const dLat = lat2 - lat1;
+  const dLng = toRadians(right.lng - left.lng);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadiusM * Math.asin(Math.sqrt(a));
+};
+
+const trackDistanceM = (track: TrackPoint[]) => {
+  let distanceM = 0;
+  for (let index = 1; index < track.length; index += 1) distanceM += geographicDistanceM(track[index - 1], track[index]);
+  return distanceM;
+};
+
+const observationConfidence = (session: ObservationSession) => {
+  const values = session.poseTrack.length
+    ? session.poseTrack.map((pose) => pose.confidence)
+    : session.track.map((point) => point.confidence);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+};
+
+const toObservationSummary = (session: ObservationSession, attachedAt: string): RouteObservationSummary => ({
+  sessionId: session.sessionId,
+  startedAt: session.startedAt,
+  sampleCount: session.sampleCount,
+  rawSampleCount: session.rawSampleCount,
+  poseCount: session.poseTrack.length,
+  locationPointCount: session.track.length,
+  motionMode: session.motionMode,
+  sourceFlags: [...new Set(session.poseTrack.flatMap((pose) => pose.sourceFlags))].slice(0, 32),
+  attachedAt,
+});
+
+const publicRoute = (route: StoredRoute) => {
+  const { ownerId: _ownerId, ...response } = route;
+  return response;
+};
+
+const createRoute = (ownerId: string, name: string): StoredRoute => {
+  const now = new Date().toISOString();
+  return {
+    routeId: crypto.randomUUID(),
+    ownerId,
+    name,
+    status: "draft",
+    distanceM: 0,
+    observations: 0,
+    nodes: 0,
+    confidence: 0,
+    updatedAt: now,
+    track: [],
+    poseTrack: [],
+    observationSummaries: [],
+  };
+};
+
+const attachObservation = (route: StoredRoute, session: ObservationSession) => {
+  if (session.status !== "stopped") throw new Error("route_observation_must_be_stopped");
+  if (route.observationSummaries.some((observation) => observation.sessionId === session.sessionId)) return route;
+  if (route.observationSummaries.length >= MAX_ROUTE_OBSERVATIONS) throw new Error("route_observation_limit");
+  const attachedAt = new Date().toISOString();
+  const observation = toObservationSummary(session, attachedAt);
+  route.observationSummaries.push(observation);
+  route.observations = route.observationSummaries.length;
+  // A local ENU pose from another capture cannot be appended safely until a
+  // GNSS/visual alignment transform exists. Keep the first real observation as
+  // the reference and preserve later observation summaries for that next step.
+  if (!route.referenceSessionId) {
+    route.referenceSessionId = session.sessionId;
+    route.track = session.track.slice(-MAX_ROUTE_TRACK_POINTS);
+    route.poseTrack = session.poseTrack.slice(-MAX_ROUTE_POSE_POINTS);
+    route.distanceM = route.poseTrack.length > 1 ? poseTrackDistanceM(route.poseTrack) : trackDistanceM(route.track);
+    route.confidence = observationConfidence(session);
+  }
+  route.updatedAt = attachedAt;
+  return route;
 };
 
 const sortByDeviceTimestamp = <T extends { deviceTimestampNs?: number }>(points: T[]) => [...points].sort(
@@ -188,6 +278,8 @@ for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
   });
 }
 sessionStore.prune(MAX_PERSISTED_SESSIONS);
+for (const route of routeStore.load(MAX_ROUTES)) routes.set(route.routeId, route);
+routeStore.prune(MAX_ROUTES);
 const persistenceTimer = setInterval(flushDirtySessions, 2_000);
 persistenceTimer.unref?.();
 
@@ -746,6 +838,7 @@ const createSession = (input: CreateSessionInput, ownerId = LOCAL_OWNER_ID): Obs
   const deviceId = typeof input.deviceId === "string" ? input.deviceId.trim().slice(0, MAX_DEVICE_ID_LENGTH) : "";
   if (!deviceId) throw new Error("invalid_session");
   const routeId = typeof input.routeId === "string" ? input.routeId.trim().slice(0, MAX_ROUTE_ID_LENGTH) || undefined : undefined;
+  if (routeId && routes.get(routeId)?.ownerId !== ownerId) throw new Error("invalid_route");
   const session: ObservationSession = {
     sessionId: crypto.randomUUID(),
     deviceId,
@@ -1062,15 +1155,48 @@ const server = Bun.serve<RealtimeClient>({
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
       return json([device]);
     }
-    if (url.pathname === "/api/routes") {
+    if (url.pathname === "/api/routes" && (request.method === "GET" || request.method === "POST")) {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
-      // Route persistence/merging is intentionally not implemented by the
-      // capture MVP yet. Never return a fabricated route as if it belonged to
-      // the authenticated owner.
-      return json([]);
+      if (request.method === "GET") return json(routeStore.list(dashboard.ownerId, MAX_ROUTES).map(publicRoute));
+      if (routes.size >= MAX_ROUTES) return json({ error: "route_limit" }, { status: 429 });
+      const body = await parseJson<{ name?: unknown }>(request);
+      const name = typeof body?.name === "string" ? body.name.trim().slice(0, MAX_CLIENT_FIELD_LENGTH) : "";
+      if (!name) return json({ error: "invalid_route" }, { status: 400 });
+      const route = createRoute(dashboard.ownerId, name);
+      routes.set(route.routeId, route);
+      routeStore.save(route);
+      return json(publicRoute(route), { status: 201 });
     }
-    if (url.pathname.startsWith("/api/routes/")) {
+    const routeMatch = url.pathname.match(/^\/api\/routes\/([^/]+)(?:\/(observations|publish))?$/);
+    if (routeMatch) {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
+      const route = routes.get(routeMatch[1]);
+      if (!route || route.ownerId !== dashboard.ownerId) return json({ error: "route_not_found" }, { status: 404 });
+      const action = routeMatch[2];
+      if (!action && request.method === "GET") return json(publicRoute(route));
+      if (!action && request.method === "DELETE") {
+        routes.delete(route.routeId);
+        routeStore.delete(dashboard.ownerId, route.routeId);
+        return json({ deleted: true });
+      }
+      if (action === "observations" && request.method === "POST") {
+        const body = await parseJson<{ sessionId?: unknown }>(request);
+        const sessionId = typeof body?.sessionId === "string" ? body.sessionId.trim() : "";
+        const session = sessions.get(sessionId);
+        if (!session || !sessionBelongsTo(session, dashboard)) return json({ error: "session_not_found" }, { status: 404 });
+        try {
+          attachObservation(route, session);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "route_observation_failed";
+          const status = reason === "route_observation_limit" ? 429 : 409;
+          return json({ error: reason }, { status });
+        }
+        routeStore.save(route);
+        return json(publicRoute(route));
+      }
+      if (action === "publish" && request.method === "POST") {
+        return json({ error: "route_alignment_required" }, { status: 409 });
+      }
       return json({ error: "route_not_found" }, { status: 404 });
     }
     if (url.pathname === "/api/sessions" && request.method === "GET") {
@@ -1088,6 +1214,7 @@ const server = Bun.serve<RealtimeClient>({
       } catch (error) {
         if (error instanceof Error && error.message === "session_limit") return json({ error: "session_limit" }, { status: 429 });
         if (error instanceof Error && error.message === "invalid_session") return json({ error: "invalid_session" }, { status: 400 });
+        if (error instanceof Error && error.message === "invalid_route") return json({ error: "invalid_route" }, { status: 404 });
         throw error;
       }
       return json(session, { status: 201 });
@@ -1167,7 +1294,8 @@ const server = Bun.serve<RealtimeClient>({
             client: message.client,
           }, ws.data.ownerId);
         } catch (error) {
-          ws.send(JSON.stringify({ type: "error", error: error instanceof Error && error.message === "session_limit" ? "session_limit" : "session_start_failed" }));
+          const reason = error instanceof Error ? error.message : "session_start_failed";
+          ws.send(JSON.stringify({ type: "error", error: reason === "session_limit" || reason === "invalid_route" ? reason : "session_start_failed" }));
           return;
         }
         ws.data.sessionId = session.sessionId;

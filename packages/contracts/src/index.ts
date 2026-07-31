@@ -54,13 +54,28 @@ export interface DeviceSnapshot {
 export interface RouteSummary {
   routeId: string;
   name: string;
-  status: "draft" | "verified";
+  status: "draft" | "verified" | "archived";
   distanceM: number;
   observations: number;
   nodes: number;
   confidence: number;
   updatedAt: string;
   track: TrackPoint[];
+  poseTrack: PoseEstimate[];
+  referenceSessionId?: string;
+  observationSummaries: RouteObservationSummary[];
+}
+
+export interface RouteObservationSummary {
+  sessionId: string;
+  startedAt: string;
+  sampleCount: number;
+  rawSampleCount: number;
+  poseCount: number;
+  locationPointCount: number;
+  motionMode: MotionMode;
+  sourceFlags: string[];
+  attachedAt: string;
 }
 
 export type ObservationMode = "learning" | "navigation";

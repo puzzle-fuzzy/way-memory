@@ -28,7 +28,7 @@ Web 使用 Vue 3 + Vite + TypeScript + Tailwind CSS，开发服务器由 Vite �
 
 ## 第一版 API 方向
 
-路线 CRUD 尚未进入可用实现阶段。`GET /routes` 只返回当前 owner 已持久化的真实路线；在路线存储和多次观测合并完成前，空数组是预期结果，服务端不会提供演示路线或伪造轨迹。
+路线注册和观测绑定已进入服务端：`GET /routes`、`POST /routes`、`GET /routes/:id`、`POST /routes/:id/observations`、`DELETE /routes/:id` 均按 owner 隔离并写入 SQLite。每条路线最多保留 50 次观测摘要、500 个地理点和 1,200 个参考 Pose 点；不同会话的局部坐标不会直接首尾拼接。`POST /routes/:id/publish` 在坐标对齐引擎完成前返回 `route_alignment_required`，避免把未对齐数据发布成导航路线。
 
 - `POST /devices/pair`
 - `POST /sessions`
@@ -36,7 +36,8 @@ Web 使用 Vue 3 + Vite + TypeScript + Tailwind CSS，开发服务器由 Vite �
 - `POST /observations/:id/samples`
 - `GET /routes`
 - `POST /routes`
-- `POST /routes/:id/nodes`
+- `GET /routes/:id`
+- `POST /routes/:id/observations`
 - `POST /routes/:id/publish`
 - `DELETE /routes/:id`
 - `WS /realtime`

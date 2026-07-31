@@ -11,6 +11,10 @@
 - `endNodeId`
 - `createdAt`
 - `updatedAt`
+- `referenceSessionId`（第一条真实观测；后续观测在完成坐标对齐前只保存摘要）
+- `observationSummaries`（有界的观测质量和来源摘要）
+- `track`（最多 500 个参考观测 GNSS 点）
+- `poseTrack`（最多 1,200 个参考观测局部 Pose 点）
 
 ## Observation
 
@@ -24,6 +28,8 @@
 - `rawDataRef`
 - `derivedTrackRef`
 - `qualitySummary`
+
+路线合并不能把不同采集会话的局部 ENU 坐标直接拼接。当前服务端先保存真实观测摘要和第一条参考观测；只有在 GNSS 锚点、视觉回环或人工对齐证据足够时，才允许后续版本生成可发布的统一路线。
 
 ## SensorSample
 
