@@ -183,6 +183,7 @@ export interface SensorInventoryEntry {
   minDelayUs?: number;
   maxDelayUs?: number;
   reportingMode?: number;
+  transportMaxHz?: number;
   registered: boolean;
 }
 

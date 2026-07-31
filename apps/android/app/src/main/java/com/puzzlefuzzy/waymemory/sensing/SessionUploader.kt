@@ -94,6 +94,7 @@ data class SensorInventorySample(
     val minDelayUs: Int? = null,
     val maxDelayUs: Int? = null,
     val reportingMode: Int? = null,
+    val transportMaxHz: Int? = null,
     val registered: Boolean,
 )
 
@@ -233,6 +234,7 @@ class SessionUploader(
                             sensor.minDelayUs?.let { put("minDelayUs", it) }
                             sensor.maxDelayUs?.let { put("maxDelayUs", it) }
                             sensor.reportingMode?.let { put("reportingMode", it) }
+                            sensor.transportMaxHz?.let { put("transportMaxHz", it) }
                             put("registered", sensor.registered)
                         })
                     }

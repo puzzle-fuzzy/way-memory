@@ -31,6 +31,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val sensorInventory = mutableListOf<SensorInventorySample>()
     private val registeredSensorKeys = mutableSetOf<String>()
     private val uploader = SessionUploader(storageDirectory = File(appContext.filesDir, "capture-queue"))
+    private val transportLimiter = SensorTransportRateLimiter()
     private val poseFusion = PoseFusionEngine()
     private val visualCollector = ArCorePoseCollector(
         appContext = appContext,
@@ -77,6 +78,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         totalCollectedSamples = 0L
         lastSensorUiPublishMs = 0L
         lastPoseUiPublishMs = 0L
+        transportLimiter.reset()
         resetMotionState()
         hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
         sensorManager.getSensorList(Sensor.TYPE_ALL).forEach { sensor ->
@@ -139,6 +141,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             minDelayUs = sensor.minDelay.takeIf { it >= 0 },
             maxDelayUs = sensor.maxDelay.takeIf { it >= 0 },
             reportingMode = sensor.reportingMode,
+            transportMaxHz = transportLimiter.maxHz(sensorWireType(sensor)),
             registered = registered,
         )
         readings[key] = if (registered) {
@@ -186,6 +189,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             else -> values.take(3).joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
         }
         readings[key] = SensorReading(label, SensorState.READY, detail, values)
+        val wireType = sensorWireType(event.sensor)
         when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_GRAVITY -> updateGravity(values)
             Sensor.TYPE_MAGNETIC_FIELD -> updateMagneticField(values)
@@ -209,17 +213,34 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             }
             else -> null
         }
-        uploader.enqueue(
-            CollectedSample(
-                deviceTimestampNs = event.timestamp,
-                sensorType = sensorWireType(event.sensor),
-                values = values,
-                sensorAccuracy = event.accuracy.takeIf { it >= 0 },
-                relativePosition = poseUpdate?.pose?.toRelativePosition(),
-                pose = poseUpdate?.pose,
-                motionEvent = poseUpdate?.motionEvent,
-            ),
+        val rawAccepted = transportLimiter.shouldTransmit(
+            streamKey = key,
+            sensorType = wireType,
+            timestampNs = event.timestamp,
         )
+        val poseAccepted = poseUpdate?.let { update ->
+            transportLimiter.shouldTransmit(
+                streamKey = POSE_TRANSPORT_KEY,
+                sensorType = "fused.pose",
+                timestampNs = update.pose.deviceTimestampNs,
+                priority = update.motionEvent != null,
+            )
+        } == true
+        if (rawAccepted) {
+            uploader.enqueue(
+                CollectedSample(
+                    deviceTimestampNs = event.timestamp,
+                    sensorType = wireType,
+                    values = values,
+                    sensorAccuracy = event.accuracy.takeIf { it >= 0 },
+                    relativePosition = if (poseAccepted) poseUpdate?.pose?.toRelativePosition() else null,
+                    pose = if (poseAccepted) poseUpdate?.pose else null,
+                    motionEvent = if (poseAccepted) poseUpdate?.motionEvent else null,
+                ),
+            )
+        } else if (poseAccepted) {
+            enqueuePose(poseUpdate!!)
+        }
         poseUpdate?.let(::publishPose)
         publishSample()
     }
@@ -259,17 +280,49 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
     private fun onVisualPose(sample: VisualPoseSample) {
         val poseUpdate = poseFusion.updateVisual(sample)
+        val rawAccepted = transportLimiter.shouldTransmit(
+            streamKey = VISUAL_TRANSPORT_KEY,
+            sensorType = "arcore.visual-pose",
+            timestampNs = sample.deviceTimestampNs,
+        )
+        val poseAccepted = poseUpdate?.let { update ->
+            transportLimiter.shouldTransmit(
+                streamKey = POSE_TRANSPORT_KEY,
+                sensorType = "fused.pose",
+                timestampNs = update.pose.deviceTimestampNs,
+                priority = update.motionEvent != null,
+            )
+        } == true
+        if (rawAccepted) {
+            uploader.enqueue(
+                CollectedSample(
+                    deviceTimestampNs = sample.deviceTimestampNs,
+                    sensorType = "arcore.visual-pose",
+                    values = listOf(sample.xM, sample.yM, sample.zM),
+                    accuracy = sample.accuracyM,
+                    pose = if (poseAccepted) poseUpdate?.pose else null,
+                    motionEvent = if (poseAccepted) poseUpdate?.motionEvent else null,
+                ),
+            )
+        } else if (poseAccepted) {
+            enqueuePose(poseUpdate!!)
+        }
+        poseUpdate?.let(::publishPose)
+    }
+
+    private fun enqueuePose(update: PoseUpdate) {
+        val pose = update.pose
         uploader.enqueue(
             CollectedSample(
-                deviceTimestampNs = sample.deviceTimestampNs,
-                sensorType = "arcore.visual-pose",
-                values = listOf(sample.xM, sample.yM, sample.zM),
-                accuracy = sample.accuracyM,
-                pose = poseUpdate?.pose,
-                motionEvent = poseUpdate?.motionEvent,
+                deviceTimestampNs = pose.deviceTimestampNs,
+                sensorType = "fused.pose",
+                values = listOf(pose.xM, pose.yM, pose.zM),
+                accuracy = pose.accuracyM,
+                relativePosition = pose.toRelativePosition(),
+                pose = pose,
+                motionEvent = update.motionEvent,
             ),
         )
-        poseUpdate?.let(::publishPose)
     }
 
     private fun publishSample() {
@@ -443,6 +496,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     )
 
     companion object {
+        private const val POSE_TRANSPORT_KEY = "fused.pose"
+        private const val VISUAL_TRANSPORT_KEY = "arcore.visual-pose"
         private const val SENSOR_UI_INTERVAL_MS = 100L
         private const val POSE_UI_INTERVAL_MS = 50L
     }

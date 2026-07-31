@@ -429,6 +429,7 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
     const minDelayUs = item.minDelayUs === undefined ? undefined : finiteNumber(item.minDelayUs);
     const maxDelayUs = item.maxDelayUs === undefined ? undefined : finiteNumber(item.maxDelayUs);
     const reportingMode = item.reportingMode === undefined ? undefined : finiteNumber(item.reportingMode);
+    const transportMaxHz = item.transportMaxHz === undefined ? undefined : finiteNumber(item.transportMaxHz);
     if (
       vendor === null
       || (version !== undefined && (version === null || !Number.isInteger(version) || version < 0 || version > 1_000_000))
@@ -436,6 +437,7 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
       || (minDelayUs !== undefined && (minDelayUs === null || !Number.isInteger(minDelayUs) || minDelayUs < 0 || minDelayUs > 1_000_000_000))
       || (maxDelayUs !== undefined && (maxDelayUs === null || !Number.isInteger(maxDelayUs) || maxDelayUs < 0 || maxDelayUs > 1_000_000_000))
       || (reportingMode !== undefined && (reportingMode === null || !Number.isInteger(reportingMode) || reportingMode < 0 || reportingMode > 16))
+      || (transportMaxHz !== undefined && (transportMaxHz === null || !Number.isInteger(transportMaxHz) || transportMaxHz < 1 || transportMaxHz > 1_000))
     ) continue;
     result.push({
       sensorType,
@@ -446,6 +448,7 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
       ...(minDelayUs === undefined || minDelayUs === null ? {} : { minDelayUs }),
       ...(maxDelayUs === undefined || maxDelayUs === null ? {} : { maxDelayUs }),
       ...(reportingMode === undefined || reportingMode === null ? {} : { reportingMode }),
+      ...(transportMaxHz === undefined || transportMaxHz === null ? {} : { transportMaxHz }),
       registered: item.registered,
     });
     if (result.length >= MAX_SENSOR_INVENTORY) break;
