@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+.tmp-build/
 .env
 .env.*
 !.env.example
