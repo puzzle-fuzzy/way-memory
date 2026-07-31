@@ -25,3 +25,17 @@ Runtime memory protection and coordinate validation are documented in `docs/data
 This MVP entry point is HTTP/WS on the server IP and is not a production privacy boundary. The API authorization core is implemented but not enabled on this test deployment; do not send real user route history to it. Before production use, finish the Android Keystore and dashboard enrollment clients, configure `WAY_MEMORY_ENV=production`, `WAY_MEMORY_AUTH_MODE=enforced`, a one-time `WAY_MEMORY_BOOTSTRAP_TOKEN`, and `WAY_MEMORY_PUBLIC_ORIGIN=https://...`, then add the domain/TLS proxy. The production guard refuses to bind if the HTTPS/auth configuration is missing.
 
 `/health` is intentionally kept as the loopback service check and is not exposed by the Nginx SPA fallback. Use `/api/health` for a public deployment probe; it is proxied to the same API process.
+
+## Latest test deployment evidence
+
+The latest anonymous test deployment was built from Git commit `171e11e` and switched only after a remote API SHA-256 comparison. The remote API bundle hash was `eca255e013d8b329c08b3849d3c1d748c037f26bc3964f7dd340f0d0aaefeb8e`; the web index hash was `5865a3d896c8f0b845d41ca20f65c0615570f7ee2d5138c7b225a777a0342834`.
+
+- Backup retained on the host: `/var/backups/way-memory/20260731T163254Z/`;
+- `way-memory-api.service`: active after restart;
+- public `/`: HTTP 200;
+- public `/api/health`: HTTP 200;
+- public Pose WebSocket smoke: passed;
+- public long-closure smoke: passed with 1,200 retained Pose points;
+- `/opt/way-memory/data`: approximately 6.8 MB at verification time.
+
+These are test-environment facts, not a production release claim: the public entry point is still IP-based HTTP/WS with `WAY_MEMORY_AUTH_MODE=off`. The HTTPS/authenticated templates below remain uninstalled until DNS, certificates, and protected environment variables are available.
