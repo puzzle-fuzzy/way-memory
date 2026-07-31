@@ -20,7 +20,7 @@ const maximumRecoveryJumpM = Number(valueFor("--max-recovery-jump-m") ?? "1.5");
 const maximumOutOfOrderSampleCount = Number(valueFor("--max-out-of-order") ?? "0");
 
 if (!sessionId) {
-  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|rotation|loop|stairs|elevator|recovery] [--max-out-of-order=0] [--max-recovery-jump-m=1.5] [--out=<file>]");
+  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|rotation|loop|stairs|elevator|recovery|visual-recovery] [--max-out-of-order=0] [--max-recovery-jump-m=1.5] [--out=<file>]");
   process.exit(2);
 }
 
@@ -49,6 +49,7 @@ try {
   const inventory = Array.isArray(session.sensorInventory) ? session.sensorInventory as JsonRecord[] : [];
   const motionEvents = Array.isArray(session.motionEvents) ? session.motionEvents as JsonRecord[] : [];
   const sourceFlags = [...new Set(poses.flatMap((pose) => Array.isArray(pose.sourceFlags) ? pose.sourceFlags.filter((item): item is string => typeof item === "string") : []))].sort();
+  const visualResetPoseCount = poses.filter((pose) => Array.isArray(pose.sourceFlags) && pose.sourceFlags.includes("visual-reset")).length;
   const motionModes = [...new Set(poses.map((pose) => pose.motionMode).filter((item): item is string => typeof item === "string"))].sort();
   const rotationMotionModesSafe = poses.length > 0 && poses.every((pose) => pose.motionMode === "stationary" || pose.motionMode === "unknown");
   const eventTypes = [...new Set(motionEvents.map((event) => event.type).filter((item): item is string => typeof item === "string"))].sort();
@@ -132,6 +133,7 @@ try {
     routeOrderingClean: Number(session.outOfOrderSampleCount ?? 0) <= maximumOutOfOrderSampleCount,
     closureConsistent: closure.adjusted !== true || (closure.status === "closed" && corrected.length >= poses.length),
     recoveryAnchorContinuity,
+    visualResetEvidence: visualResetPoseCount > 0,
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
     clientManifest: client.applicationId === "com.puzzlefuzzy.waymemory"
       && typeof client.versionName === "string"
@@ -146,6 +148,7 @@ try {
     stairs: (motionModes.includes("stairs") || eventTypes.includes("stairs-enter")) && axes.zM.span >= minimumAxisM,
     elevator: eventTypes.includes("elevator-candidate") && eventTypes.includes("elevator-exit") && axes.zM.span >= minimumAxisM,
     recovery: checks.sessionLoaded && checks.poseStream && recoveryAnchorContinuity,
+    "visual-recovery": checks.sessionLoaded && checks.poseStream && checks.poseTimestampMonotonic && checks.visualResetEvidence && checks.serverBounds,
   };
   const report = {
     generatedAt: new Date().toISOString(),
@@ -194,6 +197,10 @@ try {
       continuity: recoveryAnchorContinuity,
       firstRecoveredTimestampNs: recoveryFirstPose?.deviceTimestampNs ?? null,
       previousTimestampNs: recoveryPreviousPose?.deviceTimestampNs ?? null,
+    },
+    visualRecovery: {
+      resetPoseCount: visualResetPoseCount,
+      sourceFlag: "visual-reset",
     },
     sourceFlags,
     client,
