@@ -83,13 +83,13 @@ try {
 
   second = startApi();
   await waitForHealth();
-  const sessions = await requestJson("/api/sessions") as Array<{ sessionId: string; status: string; poseTrack: unknown[] }>;
+  const sessions = await requestJson("/api/sessions") as Array<{ sessionId: string; status: string; posePointCount?: number }>;
   const restored = sessions.find((item) => item.sessionId === session.sessionId);
   const raw = await requestJson(`/api/sessions/${session.sessionId}/raw`) as { retainedSamples: number };
-  if (!restored || restored.status !== "stopped" || restored.poseTrack.length !== 1 || raw.retainedSamples !== 1) {
+  if (!restored || restored.status !== "stopped" || restored.posePointCount !== 1 || raw.retainedSamples !== 1) {
     throw new Error("persistence assertion failed");
   }
-  console.log("Persistence smoke passed", { sessionId: session.sessionId, posePoints: restored.poseTrack.length, raw: raw.retainedSamples });
+  console.log("Persistence smoke passed", { sessionId: session.sessionId, posePoints: restored.posePointCount, raw: raw.retainedSamples });
 } finally {
   if (first && !first.killed) first.kill();
   if (second && !second.killed) second.kill();

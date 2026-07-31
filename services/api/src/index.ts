@@ -1540,6 +1540,45 @@ const server = Bun.serve<RealtimeClient>({
       return json(session, { status: 201 });
     }
 
+    const sessionExportMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/export$/);
+    if (sessionExportMatch && request.method === "GET") {
+      if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
+      const sessionId = sessionExportMatch[1];
+      const session = getSession(sessionId);
+      if (!session || !sessionBelongsTo(session, dashboard)) return json({ error: "session_not_found" }, { status: 404 });
+      const runtime = sessionRuntime.get(sessionId);
+      return json({
+        format: "way-memory.session-export.v1",
+        exportedAt: new Date().toISOString(),
+        session,
+        rawSamples: runtime?.rawSamples ?? [],
+        rawReplay: {
+          totalSamples: session.rawSampleCount,
+          retainedSamples: runtime?.rawSamples?.length ?? 0,
+          maxRetainedSamples: MAX_RAW_REPLAY_SAMPLES,
+        },
+      }, { headers: { "cache-control": "no-store", "content-disposition": `attachment; filename="way-memory-${sessionId}.json"` } });
+    }
+
+    const sessionDeleteMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+    if (sessionDeleteMatch && request.method === "DELETE") {
+      if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
+      const sessionId = sessionDeleteMatch[1];
+      const session = getSession(sessionId);
+      if (!session || !sessionBelongsTo(session, dashboard)) return json({ error: "session_not_found" }, { status: 404 });
+      if (session.status !== "stopped") return json({ error: "session_must_be_stopped" }, { status: 409 });
+      if ([...routes.values()].some((route) => route.ownerId === dashboard.ownerId && route.observationSummaries.some((observation) => observation.sessionId === sessionId))) {
+        return json({ error: "session_attached_to_route" }, { status: 409 });
+      }
+      cancelSessionResume(sessionId);
+      dirtySessionIds.delete(sessionId);
+      sessions.delete(sessionId);
+      sessionRuntime.delete(sessionId);
+      altitudeReferences.delete(sessionId);
+      sessionStore.delete(sessionId);
+      return json({ deleted: true, sessionId });
+    }
+
     const rawSessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/raw$/);
     if (rawSessionMatch && request.method === "GET") {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });

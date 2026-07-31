@@ -12,7 +12,8 @@ The API now has an opt-in enforced authorization mode for the single-node MVP. S
 - WebSocket upgrades require a 60-second role-specific ticket obtained through an authenticated HTTP request; long-lived access tokens are not accepted in the WebSocket URL.
 - Access-token and ticket rows are pruned on insert and capped at 10,000 rows; expired/revoked tickets cannot grow the SQLite file without bound.
 - `POST /api/auth/rotate` revokes the old access token immediately and returns a replacement; `POST /api/auth/revoke` revokes the current token.
-- `bun run smoke:auth` exercises the unauthorized, bootstrap, owner binding, role separation, ticket, and rotation paths.
+- A dashboard can export its own bounded session snapshot and retained raw replay through `GET /api/sessions/<id>/export`. It can delete a stopped session through `DELETE /api/sessions/<id>`; active sessions are rejected, and a session already attached to a route must be removed from that route first so derived route data is not silently left behind.
+- `bun run smoke:auth` exercises the unauthorized, bootstrap, owner binding, role separation, ticket, rotation, and in-memory deletion/export paths. `bun run smoke:lifecycle` repeats the export, route-attachment guard, deletion, and post-restart deletion check against SQLite.
 
 The Android client now encrypts the device token with an Android Keystore-backed AES-GCM key and exchanges it for a short-lived WebSocket ticket before connecting. It still needs a user-facing enrollment handoff and the dashboard sign-in screen before enabling it for real users; copying a token through the current diagnostic field is an acceptance bridge, not the final onboarding UX.
 
@@ -52,7 +53,7 @@ The following are required before calling the service production-ready:
 - authenticated session creation, resume, dashboard read, raw replay, and unauthorized-access rejection tests;
 - per-user isolation test proving one account cannot list or fetch another user's route;
 - token rotation/revocation test;
-- deletion/export test covering the database snapshot and replay tail;
+- deletion/export test covering the database snapshot and replay tail (`bun run smoke:lifecycle`);
 - backup restore test with secrets excluded from source control and logs.
 
 The repository includes a production systemd/Nginx template, but no public TLS deployment is claimed until `way-memory.yxswy.com` serves the built web app, `/api/health` over HTTPS, and a WSS ticket flow from a phone network.

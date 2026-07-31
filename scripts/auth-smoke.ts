@@ -100,6 +100,12 @@ try {
   if (deviceList.response.status !== 401) throw new Error("device credential can list dashboard sessions");
   const dashboardRead = await json(`/api/sessions/${session.sessionId}`, { headers: authHeaders(dashboardToken) });
   if (dashboardRead.response.status !== 200 || dashboardRead.body.ownerId !== ownerId) throw new Error("dashboard session read failed");
+  const activeDelete = await json(`/api/sessions/${session.sessionId}`, { method: "DELETE", headers: authHeaders(dashboardToken) });
+  if (activeDelete.response.status !== 409 || activeDelete.body.error !== "session_must_be_stopped") throw new Error("active session deletion was not rejected");
+  const deviceDelete = await json(`/api/sessions/${session.sessionId}`, { method: "DELETE", headers: authHeaders(deviceToken) });
+  if (deviceDelete.response.status !== 401) throw new Error("device credential can delete sessions");
+  const exported = await json(`/api/sessions/${session.sessionId}/export`, { headers: authHeaders(dashboardToken) });
+  if (exported.response.status !== 200 || exported.body.format !== "way-memory.session-export.v1" || !exported.body.session || !Array.isArray(exported.body.rawSamples)) throw new Error("session export failed");
   const routeCreated = await json("/api/routes", { method: "POST", headers: { ...authHeaders(dashboardToken), "content-type": "application/json" }, body: JSON.stringify({ name: "owner-scoped route" }) });
   if (routeCreated.response.status !== 201 || !routeCreated.body.routeId) throw new Error("dashboard route creation failed");
   const deviceRouteList = await json("/api/routes", { headers: authHeaders(deviceToken) });
@@ -108,6 +114,14 @@ try {
   if (deviceRouteRead.response.status !== 401) throw new Error("device credential can read routes");
   const dashboardWrite = await json(`/api/sessions/${session.sessionId}/samples`, { method: "POST", headers: { ...authHeaders(dashboardToken), "content-type": "application/json" }, body: JSON.stringify({ samples: [] }) });
   if (dashboardWrite.response.status !== 401) throw new Error("dashboard credential can write device samples");
+
+  const stopped = await json(`/api/sessions/${session.sessionId}/stop`, { method: "POST", headers: authHeaders(deviceToken) });
+  if (stopped.response.status !== 200 || stopped.body.status !== "stopped") throw new Error("session stop for deletion failed");
+  const deleted = await json(`/api/sessions/${session.sessionId}`, { method: "DELETE", headers: authHeaders(dashboardToken) });
+  if (deleted.response.status !== 200 || deleted.body.deleted !== true) throw new Error("session deletion failed");
+  const deletedRead = await json(`/api/sessions/${session.sessionId}`, { headers: authHeaders(dashboardToken) });
+  const deletedRaw = await json(`/api/sessions/${session.sessionId}/raw`, { headers: authHeaders(dashboardToken) });
+  if (deletedRead.response.status !== 404 || deletedRaw.response.status !== 404) throw new Error("deleted session remained readable");
 
   const rotated = await json("/api/auth/rotate", { method: "POST", headers: authHeaders(dashboardToken) });
   if (rotated.response.status !== 200 || !rotated.body.token) throw new Error("dashboard token rotation failed");

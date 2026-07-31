@@ -73,6 +73,12 @@ export class SessionStore {
     });
   }
 
+  delete(sessionId: string) {
+    const result = this.database.query("DELETE FROM session_snapshots WHERE session_id = ?").run(sessionId);
+    this.database.exec("PRAGMA incremental_vacuum(64)");
+    return result.changes > 0;
+  }
+
   prune(maxSessions: number) {
     this.database.query(`
       DELETE FROM session_snapshots
