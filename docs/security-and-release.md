@@ -62,7 +62,7 @@ After DNS, certificates, Nginx, and the protected API environment are installed,
 ```powershell
 $env:WAY_MEMORY_PUBLIC_BASE_URL = "https://way-memory.yxswy.com"
 $env:WAY_MEMORY_REQUIRE_AUTH = "1"
-$env:WAY_MEMORY_DASHBOARD_TOKEN = "<short-lived operator environment value>"
+$env:WAY_MEMORY_DASHBOARD_TOKEN = "<operator environment value; the script exchanges it for a short-lived WSS ticket>"
 bun run preflight:public-tls
 ```
 
