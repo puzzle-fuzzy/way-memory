@@ -48,6 +48,18 @@ The latest anonymous test deployment uses API commit `3cb2b17` and Web commit `7
 
 These are test-environment facts, not a production release claim: the public entry point is still IP-based HTTP/WS with `WAY_MEMORY_AUTH_MODE=off`. The HTTPS/authenticated templates below remain uninstalled until DNS, certificates, and protected environment variables are available.
 
+## Current release boundary (2026-08-01)
+
+The repository `main` branch contains the authenticated route-learning and one-time navigation-handoff regression gate through commit `197c45b`. The current public IP deployment has not been switched to this protected release: it remains the anonymous HTTP/WS test environment described above.
+
+The production cutover is currently blocked by external host state, not by the local API checks:
+
+- `way-memory-api.service` is active and the loopback API returns HTTP 200 on `127.0.0.1:8787`.
+- The host has no `way-memory.yxswy.com` Nginx server block, no ACME certificate for that hostname, and no `/etc/way-memory/way-memory.env`.
+- `way-memory.yxswy.com` currently resolves to `198.18.0.248`, not `101.35.246.159`, from both the workstation resolver and Cloudflare's public resolver.
+
+Before any production restart, create the DNS A record `way-memory.yxswy.com -> 101.35.246.159`, obtain the certificate, provision the protected environment file, and install the checked-in Nginx/systemd templates. Then run the strict TLS preflight and the authenticated public smoke from outside the host. Do not send real route data to the IP-based test endpoint while this boundary remains.
+
 After the production templates are installed, verify the edge before building a release APK:
 
 ```powershell
