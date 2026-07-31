@@ -50,6 +50,7 @@ export function useRealtimeSession() {
       lastReceivedAt: delta.lastReceivedAt ?? current.lastReceivedAt,
       lastSampleAt: delta.lastSampleAt ?? current.lastSampleAt,
       sampleCount: delta.sampleCount,
+      rawSampleCount: delta.rawSampleCount,
       droppedSampleCount: delta.droppedSampleCount,
       latestLocation: delta.latestLocation ?? current.latestLocation,
       latestAltitudeM: delta.latestAltitudeM ?? current.latestAltitudeM,
@@ -57,6 +58,11 @@ export function useRealtimeSession() {
       latestRelativePosition: delta.latestRelativePosition ?? current.latestRelativePosition,
       track: [...current.track, ...delta.trackPoints].slice(-500),
       relativeTrack: [...current.relativeTrack, ...delta.relativePoints].slice(-500),
+      poseTrack: [...current.poseTrack, ...delta.posePoints].slice(-1200),
+      latestPose: delta.latestPose ?? current.latestPose,
+      motionMode: delta.motionMode,
+      closure: delta.closure,
+      motionEvents: [...current.motionEvents, ...delta.motionEvents].slice(-128),
       latestSensors: delta.latestSensors,
     });
   }

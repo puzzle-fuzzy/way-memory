@@ -1,8 +1,12 @@
 import type {
+  ClosureState,
   CreateSessionInput,
   DeviceSnapshot,
   LiveSensorSnapshot,
+  MotionEvent,
+  MotionMode,
   ObservationSession,
+  PoseEstimate,
   RelativeMotionPoint,
   RouteSummary,
   SessionDelta,
@@ -59,6 +63,9 @@ const altitudeReferences = new Map<string, { gnssM?: number; pressureHpa?: numbe
 const MAX_SESSIONS = 20;
 const MAX_TRACK_POINTS = 500;
 const MAX_RELATIVE_TRACK_POINTS = 500;
+const MAX_POSE_TRACK_POINTS = 1_200;
+const MAX_MOTION_EVENTS = 128;
+const MAX_RAW_REPLAY_SAMPLES = 1_024;
 const MAX_LIVE_SENSORS = 32;
 const MAX_SENSOR_VALUES = 16;
 const MAX_JSON_BYTES = 512 * 1024;
@@ -75,6 +82,10 @@ type SessionRuntime = {
     accuracyM: number;
     deviceTimestampNs: number;
   };
+  startPose?: PoseEstimate;
+  lastPose?: PoseEstimate;
+  travelledM?: number;
+  rawSamples?: SensorSample[];
 };
 
 const sessionRuntime = new Map<string, SessionRuntime>();
@@ -171,6 +182,87 @@ const normalizeRelativePosition = (value: unknown): SensorSample["relativePositi
   };
 };
 
+const motionModes = new Set<MotionMode>(["stationary", "walking", "stairs", "elevator", "vehicle", "unknown"]);
+const poseSources = new Set<PoseEstimate["source"]>(["imu", "gnss", "barometer", "visual", "fused"]);
+
+const normalizePose = (value: unknown): PoseEstimate | null => {
+  if (!isRecord(value)) return null;
+  const deviceTimestampNs = finiteNumber(value.deviceTimestampNs);
+  const xM = finiteNumber(value.xM);
+  const yM = finiteNumber(value.yM);
+  const zM = finiteNumber(value.zM);
+  const velocityXMps = finiteNumber(value.velocityXMps);
+  const velocityYMps = finiteNumber(value.velocityYMps);
+  const velocityZMps = finiteNumber(value.velocityZMps);
+  const accuracyM = finiteNumber(value.accuracyM);
+  const verticalAccuracyM = value.verticalAccuracyM === undefined ? undefined : finiteNumber(value.verticalAccuracyM);
+  const confidence = finiteNumber(value.confidence);
+  const source = value.source;
+  const motionMode = value.motionMode;
+  const sourceFlags = value.sourceFlags;
+  if (
+    deviceTimestampNs === null || !Number.isSafeInteger(deviceTimestampNs) || deviceTimestampNs <= 0
+    || xM === null || yM === null || zM === null
+    || velocityXMps === null || velocityYMps === null || velocityZMps === null
+    || accuracyM === null || accuracyM < 0 || accuracyM > 100_000
+    || confidence === null || confidence < 0 || confidence > 1
+    || typeof source !== "string" || !poseSources.has(source as PoseEstimate["source"])
+    || typeof motionMode !== "string" || !motionModes.has(motionMode as MotionMode)
+    || !Array.isArray(sourceFlags) || sourceFlags.length > 16
+    || sourceFlags.some((item) => typeof item !== "string" || item.length > 32)
+    || typeof value.stationary !== "boolean"
+  ) return null;
+  if ([xM, yM, zM, velocityXMps, velocityYMps, velocityZMps].some((coordinate) => Math.abs(coordinate) > 100_000)) return null;
+  return {
+    deviceTimestampNs,
+    xM,
+    yM,
+    zM,
+    velocityXMps,
+    velocityYMps,
+    velocityZMps,
+    accuracyM,
+    ...(verticalAccuracyM === undefined || verticalAccuracyM === null ? {} : { verticalAccuracyM }),
+    confidence,
+    source: source as PoseEstimate["source"],
+    sourceFlags: sourceFlags as string[],
+    motionMode: motionMode as MotionMode,
+    stationary: value.stationary,
+  };
+};
+
+const motionEventTypes = new Set<MotionEvent["type"]>([
+  "stationary-enter",
+  "stationary-exit",
+  "elevator-candidate",
+  "elevator-exit",
+  "loop-candidate",
+]);
+
+const normalizeMotionEvent = (value: unknown): MotionEvent | null => {
+  if (!isRecord(value)) return null;
+  const eventId = typeof value.eventId === "string" ? value.eventId.trim() : "";
+  const deviceTimestampNs = finiteNumber(value.deviceTimestampNs);
+  const type = value.type;
+  const confidence = finiteNumber(value.confidence);
+  if (
+    !eventId || eventId.length > 128
+    || deviceTimestampNs === null || !Number.isSafeInteger(deviceTimestampNs) || deviceTimestampNs <= 0
+    || typeof type !== "string" || !motionEventTypes.has(type as MotionEvent["type"])
+    || confidence === null || confidence < 0 || confidence > 1
+  ) return null;
+  const details = isRecord(value.details)
+    ? Object.fromEntries(Object.entries(value.details).filter(([key, item]) => key.length <= 64 && (typeof item === "number" || typeof item === "string" || typeof item === "boolean")))
+    : undefined;
+  return {
+    eventId,
+    deviceTimestampNs,
+    type: type as MotionEvent["type"],
+    confidence,
+    ...(details && Object.keys(details).length ? { details } : {}),
+  };
+};
+
 const normalizeSensorSample = (value: unknown): SensorSample | null => {
   if (!isRecord(value) || typeof value.sensorType !== "string") return null;
   const sensorType = normalizeSensorType(value.sensorType.trim());
@@ -186,6 +278,10 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
   if (value.location !== undefined && location === null) return null;
   const relativePosition = value.relativePosition === undefined ? undefined : normalizeRelativePosition(value.relativePosition);
   if (value.relativePosition !== undefined && relativePosition === null) return null;
+  const pose = value.pose === undefined ? undefined : normalizePose(value.pose);
+  if (value.pose !== undefined && pose === null) return null;
+  const motionEvent = value.motionEvent === undefined ? undefined : normalizeMotionEvent(value.motionEvent);
+  if (value.motionEvent !== undefined && motionEvent === null) return null;
   return {
     deviceTimestampNs,
     sensorType,
@@ -193,6 +289,8 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
     ...(accuracy === undefined || accuracy === null ? {} : { accuracy }),
     ...(location ? { location } : {}),
     ...(relativePosition ? { relativePosition } : {}),
+    ...(pose ? { pose } : {}),
+    ...(motionEvent ? { motionEvent } : {}),
   };
 };
 
@@ -322,6 +420,44 @@ const toRelativeMotionPoint = (relativePosition: NonNullable<SensorSample["relat
   };
 };
 
+const poseDistanceM = (left: PoseEstimate, right: PoseEstimate) => Math.sqrt(
+  (left.xM - right.xM) ** 2
+  + (left.yM - right.yM) ** 2
+  + (left.zM - right.zM) ** 2,
+);
+
+const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => {
+  const runtime = sessionRuntime.get(session.sessionId) ?? {};
+  if (!runtime.startPose) {
+    runtime.startPose = pose;
+    runtime.lastPose = pose;
+    runtime.travelledM = 0;
+    sessionRuntime.set(session.sessionId, runtime);
+    session.closure = { status: "open", confidence: 0, adjusted: false };
+    return;
+  }
+  if (runtime.lastPose) runtime.travelledM = (runtime.travelledM ?? 0) + poseDistanceM(runtime.lastPose, pose);
+  runtime.lastPose = pose;
+  sessionRuntime.set(session.sessionId, runtime);
+
+  const startPose = runtime.startPose;
+  const gapM = poseDistanceM(startPose, pose);
+  const uncertaintyM = Math.max(1.5, Math.min(12, startPose.accuracyM + pose.accuracyM));
+  const travelledM = runtime.travelledM ?? 0;
+  const candidate = travelledM >= 8 && gapM <= Math.max(2, uncertaintyM * 0.75);
+  const visualLoop = pose.sourceFlags.includes("loop-closure");
+  const confidence = candidate
+    ? clamp(1 - gapM / Math.max(2, uncertaintyM), 0, 1) * 0.85
+    : 0;
+  session.closure = {
+    status: visualLoop && candidate ? "closed" : candidate ? "candidate" : "open",
+    gapM,
+    confidence,
+    // Never alter raw points until a visual loop-closure source is present.
+    adjusted: false,
+  } satisfies ClosureState;
+};
+
 const createSession = (input: CreateSessionInput): ObservationSession => {
   pruneStoppedSessions();
   if (sessions.size >= MAX_SESSIONS) throw new Error("session_limit");
@@ -335,15 +471,20 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     routeId,
     startedAt: new Date().toISOString(),
     sampleCount: 0,
+    rawSampleCount: 0,
     droppedSampleCount: 0,
     track: [],
     relativeTrack: [],
+    poseTrack: [],
+    motionMode: "unknown",
+    closure: { status: "open", confidence: 0, adjusted: false },
+    motionEvents: [],
     latestSensors: [],
     status: "active",
   };
   sessions.set(session.sessionId, session);
   altitudeReferences.set(session.sessionId, {});
-  sessionRuntime.set(session.sessionId, {});
+  sessionRuntime.set(session.sessionId, { rawSamples: [] });
   device.connected = true;
   device.lastSeen = session.startedAt;
   return session;
@@ -353,18 +494,35 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   const receivedAt = new Date().toISOString();
   const trackPoints: TrackPoint[] = [];
   const relativePoints: RelativeMotionPoint[] = [];
+  const posePoints: PoseEstimate[] = [];
+  const motionEvents: MotionEvent[] = [];
   const samples = rawSamples
     .map(normalizeSensorSample)
     .filter((sample): sample is SensorSample => sample !== null)
     .sort((left, right) => left.deviceTimestampNs - right.deviceTimestampNs);
   session.droppedSampleCount += rawSamples.length - samples.length;
   session.sampleCount += samples.length;
+  session.rawSampleCount += samples.length;
+  const runtime = sessionRuntime.get(session.sessionId) ?? { rawSamples: [] };
+  runtime.rawSamples = [...(runtime.rawSamples ?? []), ...samples].slice(-MAX_RAW_REPLAY_SAMPLES);
+  sessionRuntime.set(session.sessionId, runtime);
   if (samples.length) {
     session.lastReceivedAt = receivedAt;
     session.lastSampleAt = receivedAt;
   }
   for (const sample of samples) {
     const sensorType = normalizeSensorType(sample.sensorType);
+    if (sample.pose) {
+      session.poseTrack.push(sample.pose);
+      posePoints.push(sample.pose);
+      session.latestPose = sample.pose;
+      session.motionMode = sample.pose.motionMode;
+      updateClosureState(session, sample.pose);
+    }
+    if (sample.motionEvent) {
+      session.motionEvents.push(sample.motionEvent);
+      motionEvents.push(sample.motionEvent);
+    }
     if (sample.relativePosition) {
       const motionPoint = toRelativeMotionPoint(sample.relativePosition, sample.deviceTimestampNs);
       session.relativeTrack.push(motionPoint);
@@ -389,9 +547,11 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   }
   if (session.track.length > MAX_TRACK_POINTS) session.track = session.track.slice(-MAX_TRACK_POINTS);
   if (session.relativeTrack.length > MAX_RELATIVE_TRACK_POINTS) session.relativeTrack = session.relativeTrack.slice(-MAX_RELATIVE_TRACK_POINTS);
+  if (session.poseTrack.length > MAX_POSE_TRACK_POINTS) session.poseTrack = session.poseTrack.slice(-MAX_POSE_TRACK_POINTS);
+  if (session.motionEvents.length > MAX_MOTION_EVENTS) session.motionEvents = session.motionEvents.slice(-MAX_MOTION_EVENTS);
   device.lastSeen = session.lastReceivedAt ?? device.lastSeen;
   device.connected = true;
-  return { accepted: samples.length, dropped: session.droppedSampleCount, session, trackPoints, relativePoints };
+  return { accepted: samples.length, dropped: session.droppedSampleCount, session, trackPoints, relativePoints, posePoints, motionEvents };
 };
 
 const publishSession = (server: Bun.Server<RealtimeClient>, session: ObservationSession) => {
@@ -410,6 +570,7 @@ const publishSessionDelta = (
     lastReceivedAt: session.lastReceivedAt,
     lastSampleAt: session.lastSampleAt,
     sampleCount: session.sampleCount,
+    rawSampleCount: session.rawSampleCount,
     droppedSampleCount: session.droppedSampleCount,
     latestLocation: session.latestLocation,
     latestAltitudeM: session.latestAltitudeM,
@@ -417,6 +578,11 @@ const publishSessionDelta = (
     latestRelativePosition: session.latestRelativePosition,
     trackPoints: result.trackPoints,
     relativePoints: result.relativePoints,
+    posePoints: result.posePoints,
+    latestPose: session.latestPose,
+    motionMode: session.motionMode,
+    closure: session.closure,
+    motionEvents: result.motionEvents,
     latestSensors: session.latestSensors,
   };
   server.publish("dashboard", JSON.stringify(delta));
@@ -465,16 +631,30 @@ const server = Bun.serve<RealtimeClient>({
       return json(session, { status: 201 });
     }
 
+    const rawSessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/raw$/);
+    if (rawSessionMatch && request.method === "GET") {
+      const sessionId = rawSessionMatch[1];
+      const session = getSession(sessionId);
+      if (!session) return json({ error: "session_not_found" }, { status: 404 });
+      const runtime = sessionRuntime.get(sessionId);
+      return json({
+        sessionId,
+        totalSamples: session.rawSampleCount,
+        retainedSamples: runtime?.rawSamples?.length ?? 0,
+        maxRetainedSamples: MAX_RAW_REPLAY_SAMPLES,
+        samples: runtime?.rawSamples ?? [],
+      });
+    }
+
     const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/samples|\/stop)?$/);
     if (sessionMatch) {
       const sessionId = sessionMatch[1];
       const session = getSession(sessionId);
       if (!session) return json({ error: "session_not_found" }, { status: 404 });
-      if (url.pathname.endsWith("/stop") && request.method === "POST") {
+    if (url.pathname.endsWith("/stop") && request.method === "POST") {
         session.status = "stopped";
         session.lastReceivedAt = new Date().toISOString();
         altitudeReferences.delete(session.sessionId);
-        sessionRuntime.delete(session.sessionId);
         device.connected = false;
         return json(session);
       }
@@ -544,7 +724,6 @@ const server = Bun.serve<RealtimeClient>({
           session.status = "stopped";
           session.lastReceivedAt = new Date().toISOString();
           altitudeReferences.delete(session.sessionId);
-          sessionRuntime.delete(session.sessionId);
           device.connected = false;
           publishSession(server, session);
         }
@@ -559,7 +738,6 @@ const server = Bun.serve<RealtimeClient>({
         session.status = "stopped";
         session.lastReceivedAt = new Date().toISOString();
         altitudeReferences.delete(session.sessionId);
-        sessionRuntime.delete(session.sessionId);
         device.connected = false;
         publishSession(server, session);
       }

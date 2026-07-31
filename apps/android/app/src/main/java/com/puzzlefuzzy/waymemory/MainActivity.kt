@@ -106,7 +106,9 @@ private fun SensorScreen(collector: SensorCollector) {
                             style = MaterialTheme.typography.bodySmall,
                         )
                         sync.lastError?.let { Text("同步错误：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                        Spacer(Modifier.height(12.dp))
+                         Text("Pose: ${state.poseText}", style = MaterialTheme.typography.bodySmall)
+                         Text("Motion mode: ${state.motionMode}", style = MaterialTheme.typography.bodySmall)
+                         Spacer(Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = {
                                 if (state.collecting) {

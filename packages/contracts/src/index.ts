@@ -65,6 +65,52 @@ export interface RouteSummary {
 
 export type ObservationMode = "learning" | "navigation";
 
+export type MotionMode =
+  | "stationary"
+  | "walking"
+  | "stairs"
+  | "elevator"
+  | "vehicle"
+  | "unknown";
+
+export type PoseSource = "imu" | "gnss" | "barometer" | "visual" | "fused";
+
+/**
+ * The only trajectory point the product is allowed to use as its primary
+ * route. Raw sensor samples and legacy relative points remain diagnostic data.
+ */
+export interface PoseEstimate {
+  deviceTimestampNs: number;
+  xM: number;
+  yM: number;
+  zM: number;
+  velocityXMps: number;
+  velocityYMps: number;
+  velocityZMps: number;
+  accuracyM: number;
+  verticalAccuracyM?: number;
+  confidence: number;
+  source: PoseSource;
+  sourceFlags: string[];
+  motionMode: MotionMode;
+  stationary: boolean;
+}
+
+export interface MotionEvent {
+  eventId: string;
+  deviceTimestampNs: number;
+  type: "stationary-enter" | "stationary-exit" | "elevator-candidate" | "elevator-exit" | "loop-candidate";
+  confidence: number;
+  details?: Record<string, number | string | boolean>;
+}
+
+export interface ClosureState {
+  status: "open" | "candidate" | "closed";
+  gapM?: number;
+  confidence: number;
+  adjusted: boolean;
+}
+
 export interface SensorSample {
   deviceTimestampNs: number;
   sensorType: string;
@@ -82,6 +128,8 @@ export interface SensorSample {
     zM: number;
     accuracyM?: number;
   };
+  pose?: PoseEstimate;
+  motionEvent?: MotionEvent;
 }
 
 export interface LiveSensorSnapshot {
@@ -108,12 +156,18 @@ export interface ObservationSession {
   lastReceivedAt?: string;
   lastSampleAt?: string;
   sampleCount: number;
+  rawSampleCount: number;
   droppedSampleCount: number;
   latestLocation?: SensorSample["location"];
   latestAltitudeM?: number;
   altitudeSource?: "gnss" | "barometer";
   track: TrackPoint[];
   relativeTrack: RelativeMotionPoint[];
+  poseTrack: PoseEstimate[];
+  latestPose?: PoseEstimate;
+  motionMode: MotionMode;
+  closure: ClosureState;
+  motionEvents: MotionEvent[];
   latestRelativePosition?: RelativeMotionPoint;
   latestSensors: LiveSensorSnapshot[];
   status: "active" | "stopped";
@@ -126,6 +180,7 @@ export interface SessionDelta {
   lastReceivedAt?: string;
   lastSampleAt?: string;
   sampleCount: number;
+  rawSampleCount: number;
   droppedSampleCount: number;
   latestLocation?: ObservationSession["latestLocation"];
   latestAltitudeM?: number;
@@ -133,5 +188,10 @@ export interface SessionDelta {
   latestRelativePosition?: ObservationSession["latestRelativePosition"];
   trackPoints: TrackPoint[];
   relativePoints: RelativeMotionPoint[];
+  posePoints: PoseEstimate[];
+  latestPose?: ObservationSession["latestPose"];
+  motionMode: ObservationSession["motionMode"];
+  closure: ObservationSession["closure"];
+  motionEvents: MotionEvent[];
   latestSensors: LiveSensorSnapshot[];
 }

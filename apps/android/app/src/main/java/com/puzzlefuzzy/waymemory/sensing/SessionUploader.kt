@@ -29,6 +29,8 @@ data class CollectedSample(
     val accuracy: Float? = null,
     val location: LocationSample? = null,
     val relativePosition: RelativePositionSample? = null,
+    val pose: PoseEstimateSample? = null,
+    val motionEvent: MotionEventSample? = null,
 )
 
 data class LocationSample(
@@ -43,6 +45,31 @@ data class RelativePositionSample(
     val yM: Float,
     val zM: Float,
     val accuracyM: Float,
+)
+
+data class PoseEstimateSample(
+    val deviceTimestampNs: Long,
+    val xM: Float,
+    val yM: Float,
+    val zM: Float,
+    val velocityXMps: Float,
+    val velocityYMps: Float,
+    val velocityZMps: Float,
+    val accuracyM: Float,
+    val verticalAccuracyM: Float? = null,
+    val confidence: Float,
+    val source: String,
+    val sourceFlags: List<String>,
+    val motionMode: String,
+    val stationary: Boolean,
+)
+
+data class MotionEventSample(
+    val eventId: String,
+    val deviceTimestampNs: Long,
+    val type: String,
+    val confidence: Float,
+    val details: Map<String, Any?> = emptyMap(),
 )
 
 data class SessionSyncState(
@@ -176,6 +203,37 @@ class SessionUploader(
                 put("yM", it.yM)
                 put("zM", it.zM)
                 put("accuracyM", it.accuracyM)
+            })
+        }
+        pose?.let {
+            put("pose", JSONObject().apply {
+                put("deviceTimestampNs", it.deviceTimestampNs)
+                put("xM", it.xM)
+                put("yM", it.yM)
+                put("zM", it.zM)
+                put("velocityXMps", it.velocityXMps)
+                put("velocityYMps", it.velocityYMps)
+                put("velocityZMps", it.velocityZMps)
+                put("accuracyM", it.accuracyM)
+                it.verticalAccuracyM?.let { value -> put("verticalAccuracyM", value) }
+                put("confidence", it.confidence)
+                put("source", it.source)
+                put("sourceFlags", JSONArray(it.sourceFlags))
+                put("motionMode", it.motionMode)
+                put("stationary", it.stationary)
+            })
+        }
+        motionEvent?.let {
+            put("motionEvent", JSONObject().apply {
+                put("eventId", it.eventId)
+                put("deviceTimestampNs", it.deviceTimestampNs)
+                put("type", it.type)
+                put("confidence", it.confidence)
+                if (it.details.isNotEmpty()) {
+                    put("details", JSONObject().apply {
+                        it.details.forEach { (key, value) -> value?.let { item -> put(key, item) } }
+                    })
+                }
             })
         }
     }

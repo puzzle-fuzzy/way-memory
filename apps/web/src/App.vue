@@ -40,16 +40,25 @@ const routeStatusLabel = computed(() => {
 
 const track = computed(() => session.value?.track ?? []);
 const relativeTrack = computed(() => session.value?.relativeTrack ?? []);
+const poseTrack = computed(() => session.value?.poseTrack ?? []);
 const totalSampleCount = computed(() => session.value?.sampleCount ?? 0);
 const locationPointCount = computed(() => track.value.length);
 const motionPointCount = computed(() => relativeTrack.value.length);
-const displayedPointCount = computed(() => visualMode.value === "inertial" ? motionPointCount.value : locationPointCount.value);
-const visualMode = computed<"location" | "inertial" | "empty">(() => {
+const posePointCount = computed(() => poseTrack.value.length);
+const displayedPointCount = computed(() => visualMode.value === "fused" ? posePointCount.value : visualMode.value === "inertial" ? motionPointCount.value : locationPointCount.value);
+const visualMode = computed<"fused" | "location" | "inertial" | "empty">(() => {
+  if (poseTrack.value.length > 1) return "fused";
   if (relativeTrack.value.length > 1) return "inertial";
   if (track.value.length) return "location";
   return "empty";
 });
 const coordinateBoundsLabel = computed(() => {
+  if (visualMode.value === "fused") {
+    const east = poseTrack.value.map((point) => point.xM);
+    const north = poseTrack.value.map((point) => point.yM);
+    const up = poseTrack.value.map((point) => point.zM);
+    return `x ${Math.min(...east).toFixed(2)}–${Math.max(...east).toFixed(2)}m · y ${Math.min(...north).toFixed(2)}–${Math.max(...north).toFixed(2)}m · z ${Math.min(...up).toFixed(2)}–${Math.max(...up).toFixed(2)}m`;
+  }
   if (visualMode.value === "inertial") {
     const east = relativeTrack.value.map((point) => point.xM);
     const north = relativeTrack.value.map((point) => point.yM);
@@ -74,6 +83,19 @@ const haversineDistanceM = (left: TrackPoint, right: TrackPoint) => {
 };
 
 const routeDistanceM = computed(() => {
+  if (visualMode.value === "fused") {
+    let distance = 0;
+    for (let index = 1; index < poseTrack.value.length; index += 1) {
+      const previous = poseTrack.value[index - 1];
+      const current = poseTrack.value[index];
+      distance += Math.sqrt(
+        (current.xM - previous.xM) ** 2
+        + (current.yM - previous.yM) ** 2
+        + (current.zM - previous.zM) ** 2,
+      );
+    }
+    return Math.round(distance);
+  }
   if (visualMode.value === "inertial") {
     let distance = 0;
     for (let index = 1; index < relativeTrack.value.length; index += 1) {
@@ -98,6 +120,8 @@ const routeDistanceM = computed(() => {
 
 const altitudeValues = computed(() => visualMode.value === "inertial"
   ? relativeTrack.value.map((point) => point.zM)
+  : visualMode.value === "fused"
+    ? poseTrack.value.map((point) => point.zM)
   : track.value.flatMap((point) => typeof point.altitudeM === "number" ? [point.altitudeM] : []));
 const hasAltitude = computed(() => altitudeValues.value.length > 0);
 const altitudeDeltaM = computed(() => {
@@ -110,6 +134,7 @@ const latestAltitudeLabel = computed(() => {
   return `${altitudeM >= 0 ? "+" : ""}${altitudeM.toFixed(1)}m`;
 });
 const altitudeSourceLabel = computed(() => {
+  if (visualMode.value === "fused") return session.value?.latestPose?.sourceFlags.join("+") ?? "fused pose";
   if (visualMode.value === "inertial") return "传感器融合 Z 轴";
   return session.value?.altitudeSource === "gnss" ? "GNSS 相对高度" : session.value?.altitudeSource === "barometer" ? "气压计相对高度" : "尚未建立 Z 轴";
 });
@@ -365,11 +390,37 @@ const inertialWorldTrack = computed(() => relativeTrack.value.map((point, index)
   accuracyM: point.accuracyM,
 })));
 
-const displayedWorldTrack = computed(() => visualMode.value === "inertial" ? inertialWorldTrack.value : geographicWorldTrack.value);
+const fusedWorldTrack = computed(() => poseTrack.value.map((point, index) => ({
+  index,
+  eastM: point.xM,
+  northM: point.yM,
+  altitudeM: point.zM,
+  hasAltitude: true,
+  accuracyM: point.accuracyM,
+})));
+
+const displayedWorldTrack = computed(() => visualMode.value === "fused"
+  ? fusedWorldTrack.value
+  : visualMode.value === "inertial" ? inertialWorldTrack.value : geographicWorldTrack.value);
 const projectionScene = computed(() => buildProjectionScene(displayedWorldTrack.value));
 const displayedTrack = computed(() => projectionScene.value.points);
 
-const routeRenderModeLabel = computed(() => visualMode.value === "inertial"
+const motionModeLabel = computed(() => ({
+  stationary: "静止",
+  walking: "步行",
+  stairs: "楼梯候选",
+  elevator: "电梯候选",
+  vehicle: "交通工具",
+  unknown: "状态未知",
+}[session.value?.motionMode ?? "unknown"]));
+const closureLabel = computed(() => {
+  const closure = session.value?.closure;
+  if (!closure || closure.status === "open") return "未检测到闭环";
+  if (closure.status === "closed") return `已闭环 · ${closure.gapM?.toFixed(1) ?? "—"}m`;
+  return `闭环候选 · 间隙 ${closure.gapM?.toFixed(1) ?? "—"}m`;
+});
+
+const routeRenderModeLabel = computed(() => visualMode.value === "fused"
   ? "传感器融合相对运动点 · 每个圆点对应一个真实样本"
   : "实时定位点展示 · 每个圆点对应一个真实样本");
 
@@ -679,7 +730,9 @@ const activities = computed(() => {
         </div>
         <div class="flex shrink-0 items-center gap-2 text-[10px] text-muted sm:gap-3">
           <span class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 sm:inline-flex">{{ displayedPointCount }} points · {{ routeDistanceM }}m</span>
-          <span class="connection-pill"><span :class="['connection-dot', connection === 'connected' ? 'bg-sage' : connection === 'connecting' ? 'bg-amber' : 'bg-ember']" />{{ connectionLabel }}</span>
+           <span class="rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5">{{ motionModeLabel }}</span>
+           <span class="rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5">{{ closureLabel }}</span>
+           <span class="connection-pill"><span :class="['connection-dot', connection === 'connected' ? 'bg-sage' : connection === 'connecting' ? 'bg-amber' : 'bg-ember']" />{{ connectionLabel }}</span>
         </div>
       </header>
 
@@ -687,7 +740,8 @@ const activities = computed(() => {
         <canvas ref="pointCanvas" class="point-canvas block h-full w-full" width="620" height="300" role="img" aria-label="可旋转的三维实时运动轨迹" />
         <div class="pointer-events-none absolute left-4 top-4 rounded-2xl border border-white/70 bg-white/70 px-3 py-2 text-[10px] leading-5 text-muted shadow-sm backdrop-blur sm:left-7 sm:top-6">
           <strong class="block text-ink">{{ displayedPointCount }} 个实时点</strong>
-          <span>{{ coordinateBoundsLabel }}</span>
+           <span>{{ coordinateBoundsLabel }}</span>
+           <span class="block">{{ session?.latestPose ? `Pose ±${session.latestPose.accuracyM.toFixed(1)}m` : "等待统一 Pose" }}</span>
         </div>
         <div v-if="!displayedTrack.length" class="pointer-events-none absolute inset-0 grid place-items-center text-sm text-muted">等待 Android 上报轨迹点</div>
         <div class="pointer-events-none absolute bottom-4 left-4 flex flex-wrap items-center gap-2 text-[10px] text-muted sm:bottom-6 sm:left-7">
