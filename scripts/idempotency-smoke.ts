@@ -4,22 +4,29 @@ import { resolve } from "node:path";
 const cwd = process.cwd();
 const dbPath = resolve(cwd, ".data/idempotency-check.sqlite");
 const files = [dbPath, `${dbPath}-shm`, `${dbPath}-wal`];
-const api = Bun.spawn(["bun", "run", "services/api/src/index.ts"], {
+const configuredApiUrl = Bun.env.WAY_MEMORY_API_URL?.replace(/\/$/, "");
+const baseUrl = configuredApiUrl ?? "http://127.0.0.1:8830";
+
+const request = async (path: string, init?: RequestInit) => {
+  const response = await fetch(`${baseUrl}${path}`, init);
+  const body = await response.json() as Record<string, any>;
+  if (!response.ok) throw new Error(`${path} failed: ${response.status} ${JSON.stringify(body)}`);
+  return body;
+};
+
+const startApi = () => Bun.spawn(["bun", "run", "services/api/src/index.ts"], {
   cwd,
   env: { ...process.env, PORT: "8830", WAY_MEMORY_DB_PATH: dbPath },
   stdout: "pipe",
   stderr: "pipe",
 });
 
-const request = async (path: string, init?: RequestInit) => {
-  const response = await fetch(`http://127.0.0.1:8830${path}`, init);
-  const body = await response.json() as Record<string, any>;
-  if (!response.ok) throw new Error(`${path} failed: ${response.status} ${JSON.stringify(body)}`);
-  return body;
-};
-
+let api: ReturnType<typeof startApi> | undefined;
 try {
-  await Promise.all(files.map((path) => rm(path, { force: true })));
+  if (!configuredApiUrl) {
+    await Promise.all(files.map((path) => rm(path, { force: true })));
+    api = startApi();
+  }
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       if ((await request("/health")).ok) break;
@@ -33,7 +40,7 @@ try {
     body: JSON.stringify({ deviceId: "idempotency-check", mode: "learning" }),
   });
   const sample = {
-    sampleId: "stable-sample-1",
+    sampleId: `stable-sample-${Date.now()}`,
     deviceTimestampNs: 1,
     sensorType: "android.sensor.test",
     values: [1, 2, 3],
@@ -57,13 +64,14 @@ try {
   }
 
   console.log("Idempotency smoke passed", {
+    baseUrl,
     sessionId: session.sessionId,
     acceptedFirstBatch: first.accepted,
     acceptedReplay: replayed.accepted,
     retainedRaw: replayed.session.rawSampleCount,
   });
 } finally {
-  if (!api.killed) api.kill();
-  await api.exited;
-  await Promise.all(files.map((path) => rm(path, { force: true })));
+  if (api && !api.killed) api.kill();
+  await api?.exited;
+  if (!configuredApiUrl) await Promise.all(files.map((path) => rm(path, { force: true })));
 }
