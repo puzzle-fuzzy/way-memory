@@ -17,10 +17,11 @@ const acceptanceCase = valueFor("--case") ?? "baseline";
 const minimumAxisM = Number(valueFor("--min-axis-m") ?? "0.2");
 const maximumRotationTranslationM = Number(valueFor("--max-translation-m") ?? "0.75");
 const maximumRecoveryJumpM = Number(valueFor("--max-recovery-jump-m") ?? "1.5");
+const maximumVisualResetJumpM = Number(valueFor("--max-visual-reset-jump-m") ?? "5");
 const maximumOutOfOrderSampleCount = Number(valueFor("--max-out-of-order") ?? "0");
 
 if (!sessionId) {
-  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|rotation|loop|stairs|elevator|recovery|visual-recovery] [--max-out-of-order=0] [--max-recovery-jump-m=1.5] [--out=<file>]");
+  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|rotation|loop|stairs|elevator|recovery|visual-recovery] [--max-out-of-order=0] [--max-recovery-jump-m=1.5] [--max-visual-reset-jump-m=5] [--out=<file>]");
   process.exit(2);
 }
 
@@ -49,10 +50,15 @@ try {
   const inventory = Array.isArray(session.sensorInventory) ? session.sensorInventory as JsonRecord[] : [];
   const motionEvents = Array.isArray(session.motionEvents) ? session.motionEvents as JsonRecord[] : [];
   const sourceFlags = [...new Set(poses.flatMap((pose) => Array.isArray(pose.sourceFlags) ? pose.sourceFlags.filter((item): item is string => typeof item === "string") : []))].sort();
-  const visualResetPoseCount = poses.filter((pose) => Array.isArray(pose.sourceFlags) && pose.sourceFlags.includes("visual-reset")).length;
+  const visualResetPoseIndex = poses.findIndex((pose) => Array.isArray(pose.sourceFlags) && pose.sourceFlags.includes("visual-reset"));
+  const visualResetPoseCount = visualResetPoseIndex >= 0 ? poses.filter((pose) => Array.isArray(pose.sourceFlags) && pose.sourceFlags.includes("visual-reset")).length : 0;
+  const visualResetPreviousPose = visualResetPoseIndex > 0 ? poses[visualResetPoseIndex - 1] : null;
+  const visualResetPose = visualResetPoseIndex >= 0 ? poses[visualResetPoseIndex] : null;
+  const visualResetJumpM = visualResetPose && visualResetPreviousPose ? poseDistanceM(visualResetPose, visualResetPreviousPose) : null;
   const motionModes = [...new Set(poses.map((pose) => pose.motionMode).filter((item): item is string => typeof item === "string"))].sort();
   const rotationMotionModesSafe = poses.length > 0 && poses.every((pose) => pose.motionMode === "stationary" || pose.motionMode === "unknown");
   const eventTypes = [...new Set(motionEvents.map((event) => event.type).filter((item): item is string => typeof item === "string"))].sort();
+  const loopClosureEventCount = motionEvents.filter((event) => event.type === "loop-closed").length;
   const rawSensorTypes = [...new Set(rawSamples.map((sample) => sample.sensorType).filter((item): item is string => typeof item === "string"))].sort();
   const rawSensorTypeCounts = Object.fromEntries(rawSamples.reduce((counts, sample) => {
     if (typeof sample.sensorType === "string") counts.set(sample.sensorType, (counts.get(sample.sensorType) ?? 0) + 1);
@@ -134,6 +140,7 @@ try {
     closureConsistent: closure.adjusted !== true || (closure.status === "closed" && corrected.length >= poses.length),
     recoveryAnchorContinuity,
     visualResetEvidence: visualResetPoseCount > 0,
+    visualResetContinuity: visualResetJumpM !== null && visualResetJumpM <= maximumVisualResetJumpM,
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
     clientManifest: client.applicationId === "com.puzzlefuzzy.waymemory"
       && typeof client.versionName === "string"
@@ -148,7 +155,13 @@ try {
     stairs: (motionModes.includes("stairs") || eventTypes.includes("stairs-enter")) && axes.zM.span >= minimumAxisM,
     elevator: eventTypes.includes("elevator-candidate") && eventTypes.includes("elevator-exit") && axes.zM.span >= minimumAxisM,
     recovery: checks.sessionLoaded && checks.poseStream && recoveryAnchorContinuity,
-    "visual-recovery": checks.sessionLoaded && checks.poseStream && checks.poseTimestampMonotonic && checks.visualResetEvidence && checks.serverBounds,
+    "visual-recovery": checks.sessionLoaded
+      && checks.poseStream
+      && checks.poseTimestampMonotonic
+      && checks.visualResetEvidence
+      && checks.visualResetContinuity
+      && loopClosureEventCount <= 1
+      && checks.serverBounds,
   };
   const report = {
     generatedAt: new Date().toISOString(),
@@ -201,6 +214,10 @@ try {
     visualRecovery: {
       resetPoseCount: visualResetPoseCount,
       sourceFlag: "visual-reset",
+      jumpM: visualResetJumpM,
+      limitM: maximumVisualResetJumpM,
+      continuity: checks.visualResetContinuity,
+      loopClosureCount: loopClosureEventCount,
     },
     sourceFlags,
     client,

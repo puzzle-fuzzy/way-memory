@@ -77,7 +77,7 @@ bun run acceptance:report --case=loop --out=artifacts/<SESSION_ID>-loop.json
 bun run acceptance:report --case=stairs --out=artifacts/<SESSION_ID>-stairs.json
 bun run acceptance:report --case=elevator --out=artifacts/<SESSION_ID>-elevator.json
 bun run acceptance:report --case=recovery --max-recovery-jump-m=1.5 --out=artifacts/<SESSION_ID>-recovery.json
-bun run acceptance:report --case=visual-recovery --out=artifacts/<SESSION_ID>-visual-recovery.json
+bun run acceptance:report --case=visual-recovery --max-visual-reset-jump-m=5 --out=artifacts/<SESSION_ID>-visual-recovery.json
 ```
 
 也可以用一次性证据采集脚本保存选定 case 的报告和 raw replay：
