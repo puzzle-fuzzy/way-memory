@@ -20,7 +20,8 @@ The Android client combines:
 1. IMU acceleration transformed by the best available rotation vector;
 2. GNSS position and accuracy when precise location is available;
 3. barometric relative altitude and vertical speed;
-4. optional ARCore session-local visual-inertial pose.
+4. optional ARCore session-local visual-inertial pose;
+5. optional Android step detector/counter with the current rotation-derived heading.
 
 The output is an uncertainty-bearing estimate, not a promise of centimeter-level accuracy. IMU double integration is corrected when external observations are available, and stationary periods learn a small acceleration bias.
 
@@ -33,6 +34,8 @@ ARCore 1.54.0 is integrated as an optional feature. It starts only after camera 
 ARCore uses a session-local metric frame. The adapter converts `+X right, +Y up, -Z forward` into the display frame `X right, Y forward, Z up`. It waits for meaningful visual and inertial displacement before estimating horizontal alignment. Samples before alignment remain diagnostic and are not promoted into the unified route. Promoted poses carry `visual` and `visual-aligned` source flags.
 
 Visual correction also contributes velocity in meters per second using the frame timestamp interval. It is not computed from a raw position error, which would mix meters and meters per second. When visual frames pause, subsequent inertial poses expose `visual-stale` until a fresh tracked frame arrives.
+
+When a step sensor is registered, the client maintains a separate step-PDR track using a conservative 0.65 m default stride. It blends that track into the inertial pose instead of adding the full stride on top of integrated acceleration, and marks the resulting source as `step-pdr`. This is a walking fallback, not a phone-lift detector and not an absolute positioning guarantee. Android 10+ may require `ACTIVITY_RECOGNITION`; a denied registration remains visible in `sensorInventory` and does not stop the other fusion sources.
 
 The server defaults legacy payloads without `frame` to `local-enu`. The web console shows the active coordinate reference so an ARCore local pose cannot silently be mistaken for a geographic coordinate.
 

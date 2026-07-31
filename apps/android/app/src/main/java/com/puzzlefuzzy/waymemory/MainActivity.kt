@@ -154,6 +154,7 @@ private fun SensorScreen(collector: SensorCollector) {
                                             Manifest.permission.ACCESS_COARSE_LOCATION,
                                             Manifest.permission.CAMERA,
                                             Manifest.permission.POST_NOTIFICATIONS,
+                                            Manifest.permission.ACTIVITY_RECOGNITION,
                                         ),
                                     )
                                 }
@@ -167,6 +168,7 @@ private fun SensorScreen(collector: SensorCollector) {
                                             Manifest.permission.ACCESS_COARSE_LOCATION,
                                             Manifest.permission.CAMERA,
                                             Manifest.permission.POST_NOTIFICATIONS,
+                                            Manifest.permission.ACTIVITY_RECOGNITION,
                                         ),
                                     )
                                 }) { Text("重新授权") }

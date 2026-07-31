@@ -72,6 +72,17 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun stepAidedPositionAddsWalkingDisplacementInTheCurrentHeading() {
+        val engine = PoseFusionEngine()
+        val first = engine.updateStep(1_000_000_000L, 0f)
+        val second = engine.updateStep(2_000_000_000L, 0f)
+
+        assertTrue((first?.pose?.yM ?: 0f) > 0.2f)
+        assertTrue((second?.pose?.yM ?: 0f) > (first?.pose?.yM ?: 0f))
+        assertTrue(second?.pose?.sourceFlags?.contains("step-pdr") == true)
+    }
+
+    @Test
     fun sustainedPressureChangeProducesElevatorCandidate() {
         val engine = PoseFusionEngine()
         var elevatorEvent = false

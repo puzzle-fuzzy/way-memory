@@ -46,6 +46,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private var hasRotationVector = false
     private var hasMagneticField = false
     private var hasLinearAccelerationSensor = false
+    private var stepDetectorRegistered = false
+    private var lastStepCounter: Float? = null
     private var gravityInitialized = false
     private var lastLinearAccelerationTimestampNs = 0L
     private var angularRateMagnitude = 0f
@@ -79,6 +81,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         lastSensorUiPublishMs = 0L
         lastPoseUiPublishMs = 0L
         transportLimiter.reset()
+        stepDetectorRegistered = false
+        lastStepCounter = null
         resetMotionState()
         hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
         sensorManager.getSensorList(Sensor.TYPE_ALL).forEach { sensor ->
@@ -132,6 +136,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         val registered = runCatching {
             sensorManager.registerListener(this, sensor, delay)
         }.getOrDefault(false)
+        if (sensor.type == Sensor.TYPE_STEP_DETECTOR && registered) stepDetectorRegistered = true
         sensorInventory += SensorInventorySample(
             sensorType = sensorWireType(sensor),
             name = sensor.name.take(128),
@@ -200,6 +205,20 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             Sensor.TYPE_PRESSURE -> updateBarometer(values.firstOrNull())
         }
         val poseUpdate = when {
+            event.sensor.type == Sensor.TYPE_STEP_DETECTOR -> {
+                integrateSteps(event.timestamp, 1)
+            }
+            event.sensor.type == Sensor.TYPE_STEP_COUNTER -> {
+                val counter = values.firstOrNull()?.takeIf { it.isFinite() }
+                val previous = lastStepCounter
+                lastStepCounter = counter
+                if (!stepDetectorRegistered && counter != null && previous != null) {
+                    val delta = (counter - previous).toInt().coerceIn(0, MAX_COUNTER_STEP_DELTA)
+                    delta.takeIf { it > 0 }?.let { integrateSteps(event.timestamp, it) }
+                } else {
+                    null
+                }
+            }
             event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION -> {
                 lastLinearAccelerationTimestampNs = event.timestamp
                 integrateMotion(event.timestamp, values)
@@ -417,6 +436,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         gravityInitialized = false
         lastLinearAccelerationTimestampNs = 0L
         angularRateMagnitude = 0f
+        lastStepCounter = null
         poseFusion.reset()
     }
 
@@ -488,6 +508,14 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         return poseFusion.updateImu(timestampNs, worldAcceleration, angularRateMagnitude)
     }
 
+    private fun integrateSteps(timestampNs: Long, steps: Int): PoseUpdate? {
+        if (!hasRotationMatrix) return null
+        val orientation = FloatArray(3)
+        SensorManager.getOrientation(rotationMatrix, orientation)
+        val heading = orientation.firstOrNull()?.takeIf { it.isFinite() } ?: return null
+        return poseFusion.updateStep(timestampNs, heading, steps)
+    }
+
     private fun PoseEstimateSample.toRelativePosition() = RelativePositionSample(
         xM = xM,
         yM = yM,
@@ -498,6 +526,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     companion object {
         private const val POSE_TRANSPORT_KEY = "fused.pose"
         private const val VISUAL_TRANSPORT_KEY = "arcore.visual-pose"
+        private const val MAX_COUNTER_STEP_DELTA = 8
         private const val SENSOR_UI_INTERVAL_MS = 100L
         private const val POSE_UI_INTERVAL_MS = 50L
     }

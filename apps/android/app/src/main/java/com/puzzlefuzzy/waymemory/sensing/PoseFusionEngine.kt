@@ -36,6 +36,11 @@ class PoseFusionEngine {
     private var pressureReferenceHpa: Float? = null
     private var barometerAltitudeM = 0f
     private var barometerVerticalSpeedMps = 0f
+    private var lastStepTimestampNs = 0L
+    private var stepTrackX = 0f
+    private var stepTrackY = 0f
+    private var hasStepTrack = false
+    private var stepCount = 0L
     private var hasBarometer = false
     private var hasGnss = false
     private var hasImu = false
@@ -79,6 +84,11 @@ class PoseFusionEngine {
         pressureReferenceHpa = null
         barometerAltitudeM = 0f
         barometerVerticalSpeedMps = 0f
+        lastStepTimestampNs = 0L
+        stepTrackX = 0f
+        stepTrackY = 0f
+        hasStepTrack = false
+        stepCount = 0L
         hasBarometer = false
         hasGnss = false
         hasImu = false
@@ -163,9 +173,14 @@ class PoseFusionEngine {
             measuredAccuracy <= 15f -> 0.32f
             else -> 0.15f
         }
+        val previousPosition = position.copyOf()
         position[0] += (targetEast - position[0]) * gain
         position[1] += (targetNorth - position[1]) * gain
         position[2] += (targetAltitude - position[2]) * (gain * 0.7f)
+        if (hasStepTrack) {
+            stepTrackX += position[0] - previousPosition[0]
+            stepTrackY += position[1] - previousPosition[1]
+        }
 
         val elapsedGnssNs = timestampNs - lastGnssTimestampNs
         if (lastGnssTimestampNs > 0L && elapsedGnssNs in 100_000_000L..5_000_000_000L) {
@@ -256,6 +271,10 @@ class PoseFusionEngine {
         position[0] += (targetX - position[0]) * 0.58f
         position[1] += (targetY - position[1]) * 0.58f
         position[2] += (sample.zM - position[2]) * 0.58f
+        if (hasStepTrack) {
+            stepTrackX += position[0] - previousPosition[0]
+            stepTrackY += position[1] - previousPosition[1]
+        }
         val visualElapsedNs = sample.deviceTimestampNs - previousVisualTimestampNs
         if (previousVisualTimestampNs > 0L && visualElapsedNs in 10_000_000L..1_000_000_000L) {
             val elapsedSeconds = visualElapsedNs / 1_000_000_000f
@@ -315,6 +334,63 @@ class PoseFusionEngine {
         }
 
         val horizontalSpeed = hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat()
+        updateMotionEvidence(horizontalSpeed)
+        return buildUpdate(timestampNs, force = false)
+    }
+
+    /**
+     * Step-aided pedestrian dead reckoning. The step track is kept separate
+     * from the inertial position and blended toward it, so a step event does
+     * not double-count an acceleration pulse that was already integrated.
+     * Heading is measured clockwise from north; local ENU therefore uses
+     * sin(heading) for east and cos(heading) for north.
+     */
+    @Synchronized
+    fun updateStep(timestampNs: Long, headingRadians: Float, steps: Int = 1): PoseUpdate? {
+        if (
+            timestampNs <= 0L
+            || !headingRadians.isFinite()
+            || steps <= 0
+            || (lastStepTimestampNs > 0L && timestampNs <= lastStepTimestampNs)
+        ) return null
+
+        if (!hasStepTrack) {
+            stepTrackX = position[0]
+            stepTrackY = position[1]
+            hasStepTrack = true
+        }
+
+        val stepCountDelta = steps.coerceAtMost(MAX_STEPS_PER_EVENT)
+        val distanceM = STEP_LENGTH_M * stepCountDelta
+        val previousStepX = stepTrackX
+        val previousStepY = stepTrackY
+        stepTrackX += sin(headingRadians) * distanceM
+        stepTrackY += cos(headingRadians) * distanceM
+        val fusionGain = when {
+            isFresh(timestampNs, lastGnssTimestampNs, GNSS_FRESHNESS_NS) -> 0.25f
+            isFresh(timestampNs, lastVisualTimestampNs, VISUAL_FRESHNESS_NS) -> 0.25f
+            else -> 0.55f
+        }
+        position[0] += (stepTrackX - position[0]) * fusionGain
+        position[1] += (stepTrackY - position[1]) * fusionGain
+
+        val elapsedNs = timestampNs - lastStepTimestampNs
+        if (lastStepTimestampNs > 0L && elapsedNs in 250_000_000L..3_000_000_000L) {
+            val elapsedSeconds = elapsedNs / 1_000_000_000f
+            val measuredEastMps = (stepTrackX - previousStepX) / elapsedSeconds
+            val measuredNorthMps = (stepTrackY - previousStepY) / elapsedSeconds
+            velocity[0] = velocity[0] * 0.45f + measuredEastMps * 0.55f
+            velocity[1] = velocity[1] * 0.45f + measuredNorthMps * 0.55f
+        }
+        stationaryFrames = 0
+        movingFrames = min(40, movingFrames + stepCountDelta)
+        stepCount += stepCountDelta.toLong()
+        lastStepTimestampNs = timestampNs
+        updateMotionEvidence(hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat())
+        return buildUpdate(timestampNs, force = true)
+    }
+
+    private fun updateMotionEvidence(horizontalSpeed: Float) {
         val elevatorEvidence = abs(barometerVerticalSpeedMps) > 0.25f && horizontalSpeed < 0.9f && movingFrames > 3
         // Exit evidence must decay faster than it accumulates. Otherwise a
         // short low-horizontal-speed phase at the bottom of a staircase can
@@ -322,7 +398,6 @@ class PoseFusionEngine {
         if (elevatorEvidence) elevatorEvidenceFrames = min(40, elevatorEvidenceFrames + 1) else elevatorEvidenceFrames = maxOf(0, elevatorEvidenceFrames - 3)
         val stairsEvidence = abs(barometerVerticalSpeedMps) > 0.12f && horizontalSpeed >= 0.3f && movingFrames > 3 && !elevatorEvidence
         if (stairsEvidence) stairsEvidenceFrames = min(40, stairsEvidenceFrames + 1) else stairsEvidenceFrames = maxOf(0, stairsEvidenceFrames - 2)
-        return buildUpdate(timestampNs, force = false)
     }
 
     private fun buildUpdate(timestampNs: Long, force: Boolean, visualAligned: Boolean = false): PoseUpdate? {
@@ -402,6 +477,7 @@ class PoseFusionEngine {
         val gnssFresh = isFresh(timestampNs, lastGnssTimestampNs, GNSS_FRESHNESS_NS)
         val pressureFresh = isFresh(timestampNs, lastPressureTimestampNs, PRESSURE_FRESHNESS_NS)
         val visualFresh = isFresh(timestampNs, lastVisualTimestampNs, VISUAL_FRESHNESS_NS)
+        val stepFresh = isFresh(timestampNs, lastStepTimestampNs, STEP_FRESHNESS_NS)
         val gnssAgeSeconds = ageSeconds(timestampNs, lastGnssTimestampNs)
         val baseAccuracy = when {
             visualAligned -> lastVisualAccuracyM
@@ -420,6 +496,7 @@ class PoseFusionEngine {
             if (gnssFresh) add("gnss") else if (hasGnss) add("gnss-stale")
             if (pressureFresh) add("barometer") else if (hasBarometer) add("barometer-stale")
             if (visualFresh) add("visual") else if (hasVisual) add("visual-stale")
+            if (stepFresh) add("step-pdr") else if (hasStepTrack) add("step-pdr-stale")
             if (visualAligned) add("visual-aligned")
             if (visualLoopClosure) add("loop-closure")
             if (isEmpty()) add("unknown")
@@ -470,6 +547,9 @@ class PoseFusionEngine {
         private const val GNSS_FRESHNESS_NS = 5_000_000_000L
         private const val PRESSURE_FRESHNESS_NS = 3_000_000_000L
         private const val VISUAL_FRESHNESS_NS = 750_000_000L
+        private const val STEP_FRESHNESS_NS = 3_000_000_000L
+        private const val STEP_LENGTH_M = 0.65f
+        private const val MAX_STEPS_PER_EVENT = 8
     }
 }
 
