@@ -306,7 +306,10 @@ class PoseFusionEngine {
         if (elapsedNs !in 5_000_000L..250_000_000L) return null
         val deltaSeconds = (elapsedNs / 1_000_000_000f).coerceIn(0.005f, 0.1f)
         val accelerationMagnitude = magnitude(worldAcceleration)
-        val stationaryNow = accelerationMagnitude < 0.14f && angularRateMagnitude < 0.14f && abs(barometerVerticalSpeedMps) < 0.12f
+        // Stationary here means translationally stationary. A blind user's
+        // phone may rotate in the hand while the body remains in place; gyro
+        // activity must not turn that into walking or artificial displacement.
+        val stationaryNow = accelerationMagnitude < 0.14f && abs(barometerVerticalSpeedMps) < 0.12f
 
         if (stationaryNow) {
             stationaryFrames += 1
@@ -405,11 +408,12 @@ class PoseFusionEngine {
         lastEmitTimestampNs = timestampNs
         val horizontalSpeed = hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat()
         val stationaryNow = stationaryFrames >= 3
+        val stepFresh = isFresh(timestampNs, lastStepTimestampNs, STEP_FRESHNESS_NS)
         val motionMode = when {
             elevatorEvidenceFrames >= 5 -> "elevator"
             stairsEvidenceFrames >= 5 -> "stairs"
             stationaryNow -> "stationary"
-            horizontalSpeed >= 0.12f || movingFrames >= 3 -> "walking"
+            horizontalSpeed >= 0.12f || abs(velocity[2]) >= 0.12f || stepFresh -> "walking"
             else -> "unknown"
         }
         val visualLoopClosure = visualAligned
@@ -477,7 +481,6 @@ class PoseFusionEngine {
         val gnssFresh = isFresh(timestampNs, lastGnssTimestampNs, GNSS_FRESHNESS_NS)
         val pressureFresh = isFresh(timestampNs, lastPressureTimestampNs, PRESSURE_FRESHNESS_NS)
         val visualFresh = isFresh(timestampNs, lastVisualTimestampNs, VISUAL_FRESHNESS_NS)
-        val stepFresh = isFresh(timestampNs, lastStepTimestampNs, STEP_FRESHNESS_NS)
         val gnssAgeSeconds = ageSeconds(timestampNs, lastGnssTimestampNs)
         val baseAccuracy = when {
             visualAligned -> lastVisualAccuracyM

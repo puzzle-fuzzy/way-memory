@@ -72,6 +72,24 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun pureRotationKeepsTranslationAtTheOrigin() {
+        val engine = PoseFusionEngine()
+        var timestampNs = 1_000_000_000L
+        engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0f)
+        var last: com.puzzlefuzzy.waymemory.sensing.PoseUpdate? = null
+        repeat(30) {
+            timestampNs += 100_000_000L
+            last = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 1.8f)
+        }
+
+        assertNotNull(last)
+        assertEquals("stationary", last?.pose?.motionMode)
+        assertTrue(kotlin.math.abs(last?.pose?.xM ?: 1f) < 0.01f)
+        assertTrue(kotlin.math.abs(last?.pose?.yM ?: 1f) < 0.01f)
+        assertTrue(kotlin.math.abs(last?.pose?.zM ?: 1f) < 0.01f)
+    }
+
+    @Test
     fun stepAidedPositionAddsWalkingDisplacementInTheCurrentHeading() {
         val engine = PoseFusionEngine()
         val first = engine.updateStep(1_000_000_000L, 0f)
