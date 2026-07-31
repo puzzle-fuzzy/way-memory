@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { LiveSensorSnapshot, TrackPoint } from "@way-memory/contracts";
 import { useRealtimeSession } from "./composables/useRealtimeSession";
 
@@ -131,6 +131,10 @@ const sensors = computed(() => (session.value?.latestSensors ?? []).map((sensor)
 const cameraYaw = ref(-0.72);
 const cameraPitch = ref(0.62);
 const dragState = ref<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
+const pointCanvas = ref<HTMLCanvasElement | null>(null);
+const pointCanvasHost = ref<HTMLElement | null>(null);
+let canvasResizeObserver: ResizeObserver | undefined;
+let canvasDrawFrame: number | undefined;
 
 const beginCameraDrag = (event: PointerEvent) => {
   const target = event.currentTarget as HTMLElement | null;
@@ -197,8 +201,111 @@ const projectedTrack = computed(() => {
   });
 });
 
-const currentMapPoint = computed(() => projectedTrack.value.at(-1));
 const routeRenderModeLabel = computed(() => "实时定位点展示 · 每个圆点对应一个真实样本");
+
+const drawPointCanvas = () => {
+  const canvas = pointCanvas.value;
+  const host = pointCanvasHost.value;
+  if (!canvas || !host) return;
+
+  const bounds = host.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(bounds.width));
+  const cssHeight = Math.max(1, Math.round(bounds.height));
+  const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelWidth = Math.max(1, Math.round(cssWidth * devicePixelRatio));
+  const pixelHeight = Math.max(1, Math.round(cssHeight * devicePixelRatio));
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  context.clearRect(0, 0, cssWidth, cssHeight);
+  context.fillStyle = "#e9f0eb";
+  context.fillRect(0, 0, cssWidth, cssHeight);
+
+  const viewWidth = 620;
+  const viewHeight = 300;
+  const viewScale = Math.min(cssWidth / viewWidth, cssHeight / viewHeight);
+  const offsetX = (cssWidth - viewWidth * viewScale) / 2;
+  const offsetY = (cssHeight - viewHeight * viewScale) / 2;
+  const toCanvasPoint = (x: number, y: number) => ({
+    x: offsetX + x * viewScale,
+    y: offsetY + y * viewScale,
+  });
+
+  const points = projectedTrack.value;
+  if (!points.length) return;
+
+  const currentIndex = points.length - 1;
+  const orderedPoints = [...points]
+    .filter((point) => point.index !== currentIndex)
+    .sort((left, right) => left.depth - right.depth || left.index - right.index);
+
+  for (const point of orderedPoints) {
+    const position = toCanvasPoint(point.x, point.y);
+    const radius = Math.max(1.8, Math.min(4.5, 5.5 - point.accuracyM * 0.04) * viewScale);
+    context.beginPath();
+    context.arc(position.x, position.y, radius, 0, Math.PI * 2);
+    context.globalAlpha = 0.35 + ((point.index + 1) / Math.max(points.length, 1)) * 0.65;
+    context.fillStyle = "#3f8b68";
+    context.fill();
+    context.globalAlpha = Math.min(1, context.globalAlpha + 0.15);
+    context.lineWidth = Math.max(0.75, 1.5 * viewScale);
+    context.strokeStyle = "#ffffff";
+    context.stroke();
+  }
+
+  const firstPoint = toCanvasPoint(points[0].x, points[0].y);
+  context.globalAlpha = 1;
+  context.beginPath();
+  context.arc(firstPoint.x, firstPoint.y, Math.max(4, 8 * viewScale), 0, Math.PI * 2);
+  context.fillStyle = "#ffffff";
+  context.fill();
+  context.lineWidth = Math.max(2, 4 * viewScale);
+  context.strokeStyle = "#e05c3b";
+  context.stroke();
+  context.fillStyle = "#19352d";
+  context.font = `${Math.max(9, 10 * viewScale)}px Manrope, sans-serif`;
+  context.textAlign = "center";
+  context.fillText("起点", firstPoint.x, firstPoint.y - Math.max(10, 16 * viewScale));
+
+  const latestPoint = toCanvasPoint(points[currentIndex].x, points[currentIndex].y);
+  context.beginPath();
+  context.arc(latestPoint.x, latestPoint.y, Math.max(9, 15 * viewScale), 0, Math.PI * 2);
+  context.fillStyle = "#e05c3b33";
+  context.fill();
+  context.lineWidth = Math.max(1, 2 * viewScale);
+  context.strokeStyle = "#e05c3b99";
+  context.stroke();
+  context.beginPath();
+  context.arc(latestPoint.x, latestPoint.y, Math.max(3.5, 6 * viewScale), 0, Math.PI * 2);
+  context.fillStyle = "#e05c3b";
+  context.fill();
+};
+
+const scheduleCanvasDraw = () => {
+  if (canvasDrawFrame !== undefined) window.cancelAnimationFrame(canvasDrawFrame);
+  canvasDrawFrame = window.requestAnimationFrame(() => {
+    canvasDrawFrame = undefined;
+    drawPointCanvas();
+  });
+};
+
+watch([projectedTrack, cameraYaw, cameraPitch], scheduleCanvasDraw, { flush: "post" });
+
+onMounted(() => {
+  canvasResizeObserver = new ResizeObserver(scheduleCanvasDraw);
+  if (pointCanvasHost.value) canvasResizeObserver.observe(pointCanvasHost.value);
+  scheduleCanvasDraw();
+});
+
+onBeforeUnmount(() => {
+  canvasResizeObserver?.disconnect();
+  if (canvasDrawFrame !== undefined) window.cancelAnimationFrame(canvasDrawFrame);
+});
 
 const activities = computed(() => {
   if (!session.value) return [];
@@ -258,18 +365,11 @@ const activities = computed(() => {
           <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前会话轨迹</span></div><div><strong class="metric">{{ session?.sampleCount ?? 0 }}</strong><span class="metric-label">个实时样本</span></div><div><strong class="metric">{{ confidencePercent === null ? '—' : `${confidencePercent}%` }}</strong><span class="metric-label">位置置信度</span></div></div>
           <div class="map-frame mt-6 overflow-hidden">
             <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">实时定位点 · X / Y / Z</p><p class="mt-1 text-[11px] text-muted">每个圆点都是服务端收到的真实位置样本</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
-            <div class="relative touch-none select-none bg-[#e9f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
-              <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="可旋转的三维实时路线轨迹">
-                <rect width="620" height="300" fill="#e9f0eb" />
-                <g class="measurement-points"><circle v-for="point in projectedTrack" :key="`point-${point.index}`" :cx="point.x" :cy="point.y" :r="point.index === projectedTrack.length - 1 ? 6 : Math.max(2.5, Math.min(4.5, 5.5 - point.accuracyM * 0.04))" :fill="point.index === projectedTrack.length - 1 ? '#e05c3b' : '#3f8b68'" :opacity="0.35 + ((point.index + 1) / Math.max(projectedTrack.length, 1)) * 0.65" stroke="#fff" stroke-width="1.5" /></g>
-                <template v-if="projectedTrack.length">
-                  <g class="map-node"><circle :cx="projectedTrack[0].x" :cy="projectedTrack[0].y" r="8" /><text :x="projectedTrack[0].x" :y="projectedTrack[0].y - 16">起点</text></g>
-                  <g v-if="currentMapPoint" class="current-pos"><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="15" /><circle :cx="currentMapPoint.x" :cy="currentMapPoint.y" r="6" /></g>
-                </template>
-                <text v-else x="310" y="145" text-anchor="middle" fill="#75857d" font-size="13">等待 Android 上报位置样本</text>
-              </svg>
-              <div class="pointer-events-none absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1.5 text-[9px] text-muted shadow-sm backdrop-blur">按住拖动旋转 · 高度视觉放大 2.2×</div>
-            </div>
+             <div ref="pointCanvasHost" class="relative touch-none select-none bg-[#e9f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
+               <canvas ref="pointCanvas" class="point-canvas block w-full" width="620" height="300" role="img" aria-label="可旋转的三维实时定位点" />
+               <div v-if="!projectedTrack.length" class="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-muted">等待 Android 上报位置样本</div>
+               <div class="pointer-events-none absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1.5 text-[9px] text-muted shadow-sm backdrop-blur">按住拖动旋转 · 高度视觉放大 2.2×</div>
+             </div>
             <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-sage" />真实定位点</span><span><i class="legend-dot bg-ember" />最新点</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
           </div>
           <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ track.length }} real-time points · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
