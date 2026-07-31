@@ -3,6 +3,7 @@ import type {
   DeviceSnapshot,
   LiveSensorSnapshot,
   ObservationSession,
+  RelativeMotionPoint,
   RouteSummary,
   SensorSample,
   TrackPoint,
@@ -56,6 +57,7 @@ const altitudeReferences = new Map<string, { gnssM?: number; pressureHpa?: numbe
 
 const MAX_SESSIONS = 20;
 const MAX_TRACK_POINTS = 500;
+const MAX_RELATIVE_TRACK_POINTS = 500;
 const MAX_LIVE_SENSORS = 32;
 const MAX_SENSOR_VALUES = 16;
 const MAX_JSON_BYTES = 512 * 1024;
@@ -122,6 +124,7 @@ const normalizeSensorType = (sensorType: string) => {
     magnetic_field: "magnetometer",
     pressure: "barometer",
     rotation_vector: "rotation-vector",
+    linear_acceleration: "linear-acceleration",
   }[normalized] ?? normalized;
 };
 
@@ -148,6 +151,23 @@ const normalizeLocation = (value: unknown): SensorSample["location"] | null => {
   };
 };
 
+const normalizeRelativePosition = (value: unknown): SensorSample["relativePosition"] | null => {
+  if (!isRecord(value)) return null;
+  const xM = finiteNumber(value.xM);
+  const yM = finiteNumber(value.yM);
+  const zM = finiteNumber(value.zM);
+  const accuracyM = value.accuracyM === undefined ? undefined : finiteNumber(value.accuracyM);
+  if (xM === null || yM === null || zM === null) return null;
+  if ([xM, yM, zM].some((coordinate) => Math.abs(coordinate) > 100_000)) return null;
+  if (value.accuracyM !== undefined && (accuracyM === null || accuracyM < 0 || accuracyM > 100_000)) return null;
+  return {
+    xM,
+    yM,
+    zM,
+    ...(accuracyM === undefined || accuracyM === null ? {} : { accuracyM }),
+  };
+};
+
 const normalizeSensorSample = (value: unknown): SensorSample | null => {
   if (!isRecord(value) || typeof value.sensorType !== "string") return null;
   const sensorType = normalizeSensorType(value.sensorType.trim());
@@ -161,12 +181,15 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
   if (value.accuracy !== undefined && (accuracy === null || accuracy < 0 || accuracy > 10_000)) return null;
   const location = value.location === undefined ? undefined : normalizeLocation(value.location);
   if (value.location !== undefined && location === null) return null;
+  const relativePosition = value.relativePosition === undefined ? undefined : normalizeRelativePosition(value.relativePosition);
+  if (value.relativePosition !== undefined && relativePosition === null) return null;
   return {
     deviceTimestampNs,
     sensorType,
     values: values as number[],
     ...(accuracy === undefined || accuracy === null ? {} : { accuracy }),
     ...(location ? { location } : {}),
+    ...(relativePosition ? { relativePosition } : {}),
   };
 };
 
@@ -283,6 +306,19 @@ const toTrackPoint = (session: ObservationSession, location: NonNullable<SensorS
   };
 };
 
+const toRelativeMotionPoint = (relativePosition: NonNullable<SensorSample["relativePosition"]>, deviceTimestampNs: number): RelativeMotionPoint => {
+  const accuracyM = Math.max(0.1, relativePosition.accuracyM ?? 5);
+  return {
+    deviceTimestampNs,
+    xM: relativePosition.xM,
+    yM: relativePosition.yM,
+    zM: relativePosition.zM,
+    accuracyM,
+    confidence: clamp(1 - accuracyM / 20, 0, 1),
+    source: "inertial",
+  };
+};
+
 const createSession = (input: CreateSessionInput): ObservationSession => {
   pruneStoppedSessions();
   if (sessions.size >= MAX_SESSIONS) throw new Error("session_limit");
@@ -298,6 +334,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     sampleCount: 0,
     droppedSampleCount: 0,
     track: [],
+    relativeTrack: [],
     latestSensors: [],
     status: "active",
   };
@@ -323,6 +360,11 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   }
   for (const sample of samples) {
     const sensorType = normalizeSensorType(sample.sensorType);
+    if (sample.relativePosition) {
+      const motionPoint = toRelativeMotionPoint(sample.relativePosition, sample.deviceTimestampNs);
+      session.relativeTrack.push(motionPoint);
+      session.latestRelativePosition = motionPoint;
+    }
     if (sample.location) {
       if (shouldDropLocation(session, sample.location, sample.deviceTimestampNs)) {
         session.droppedSampleCount += 1;
@@ -339,6 +381,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
     }
   }
   if (session.track.length > MAX_TRACK_POINTS) session.track = session.track.slice(-MAX_TRACK_POINTS);
+  if (session.relativeTrack.length > MAX_RELATIVE_TRACK_POINTS) session.relativeTrack = session.relativeTrack.slice(-MAX_RELATIVE_TRACK_POINTS);
   device.lastSeen = session.lastReceivedAt ?? device.lastSeen;
   device.connected = true;
   return { accepted: samples.length, dropped: session.droppedSampleCount, session };

@@ -1,5 +1,6 @@
 export type SensorType =
   | "accelerometer"
+  | "linear-acceleration"
   | "gyroscope"
   | "magnetometer"
   | "barometer"
@@ -27,6 +28,16 @@ export interface TrackPoint {
   source: "gnss" | "fused" | "visual" | "manual";
   altitudeM?: number;
   altitudeSource?: "gnss" | "barometer";
+}
+
+export interface RelativeMotionPoint {
+  deviceTimestampNs: number;
+  xM: number;
+  yM: number;
+  zM: number;
+  accuracyM: number;
+  confidence: number;
+  source: "inertial" | "visual" | "fused";
 }
 
 export interface DeviceSnapshot {
@@ -65,6 +76,12 @@ export interface SensorSample {
     accuracyM?: number;
     altitudeM?: number;
   };
+  relativePosition?: {
+    xM: number;
+    yM: number;
+    zM: number;
+    accuracyM?: number;
+  };
 }
 
 export interface LiveSensorSnapshot {
@@ -96,6 +113,8 @@ export interface ObservationSession {
   latestAltitudeM?: number;
   altitudeSource?: "gnss" | "barometer";
   track: TrackPoint[];
+  relativeTrack: RelativeMotionPoint[];
+  latestRelativePosition?: RelativeMotionPoint;
   latestSensors: LiveSensorSnapshot[];
   status: "active" | "stopped";
 }

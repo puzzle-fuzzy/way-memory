@@ -39,9 +39,23 @@ const routeStatusLabel = computed(() => {
 });
 
 const track = computed(() => session.value?.track ?? []);
+const relativeTrack = computed(() => session.value?.relativeTrack ?? []);
 const totalSampleCount = computed(() => session.value?.sampleCount ?? 0);
 const locationPointCount = computed(() => track.value.length);
+const motionPointCount = computed(() => relativeTrack.value.length);
+const displayedPointCount = computed(() => visualMode.value === "inertial" ? motionPointCount.value : locationPointCount.value);
+const visualMode = computed<"location" | "inertial" | "empty">(() => {
+  if (relativeTrack.value.length > 1) return "inertial";
+  if (track.value.length) return "location";
+  return "empty";
+});
 const coordinateBoundsLabel = computed(() => {
+  if (visualMode.value === "inertial") {
+    const east = relativeTrack.value.map((point) => point.xM);
+    const north = relativeTrack.value.map((point) => point.yM);
+    const up = relativeTrack.value.map((point) => point.zM);
+    return `x ${Math.min(...east).toFixed(2)}…${Math.max(...east).toFixed(2)}m · y ${Math.min(...north).toFixed(2)}…${Math.max(...north).toFixed(2)}m · z ${Math.min(...up).toFixed(2)}…${Math.max(...up).toFixed(2)}m`;
+  }
   if (!track.value.length) return "等待真实定位点";
   const latitudes = track.value.map((point) => point.lat);
   const longitudes = track.value.map((point) => point.lng);
@@ -60,6 +74,19 @@ const haversineDistanceM = (left: TrackPoint, right: TrackPoint) => {
 };
 
 const routeDistanceM = computed(() => {
+  if (visualMode.value === "inertial") {
+    let distance = 0;
+    for (let index = 1; index < relativeTrack.value.length; index += 1) {
+      const previous = relativeTrack.value[index - 1];
+      const current = relativeTrack.value[index];
+      distance += Math.sqrt(
+        (current.xM - previous.xM) ** 2
+        + (current.yM - previous.yM) ** 2
+        + (current.zM - previous.zM) ** 2,
+      );
+    }
+    return Math.round(distance);
+  }
   let distance = 0;
   for (let index = 1; index < track.value.length; index += 1) {
     const planarDistance = haversineDistanceM(track.value[index - 1], track.value[index]);
@@ -69,7 +96,9 @@ const routeDistanceM = computed(() => {
   return Math.round(distance);
 });
 
-const altitudeValues = computed(() => track.value.flatMap((point) => typeof point.altitudeM === "number" ? [point.altitudeM] : []));
+const altitudeValues = computed(() => visualMode.value === "inertial"
+  ? relativeTrack.value.map((point) => point.zM)
+  : track.value.flatMap((point) => typeof point.altitudeM === "number" ? [point.altitudeM] : []));
 const hasAltitude = computed(() => altitudeValues.value.length > 0);
 const altitudeDeltaM = computed(() => {
   if (!altitudeValues.value.length) return null;
@@ -80,7 +109,10 @@ const latestAltitudeLabel = computed(() => {
   if (typeof altitudeM !== "number") return "等待高度数据";
   return `${altitudeM >= 0 ? "+" : ""}${altitudeM.toFixed(1)}m`;
 });
-const altitudeSourceLabel = computed(() => session.value?.altitudeSource === "gnss" ? "GNSS 相对高度" : session.value?.altitudeSource === "barometer" ? "气压计相对高度" : "尚未建立 Z 轴");
+const altitudeSourceLabel = computed(() => {
+  if (visualMode.value === "inertial") return "传感器融合 Z 轴";
+  return session.value?.altitudeSource === "gnss" ? "GNSS 相对高度" : session.value?.altitudeSource === "barometer" ? "气压计相对高度" : "尚未建立 Z 轴";
+});
 
 const confidencePercent = computed(() => {
   const accuracyM = session.value?.latestLocation?.accuracyM;
@@ -107,6 +139,7 @@ const formatSensorValues = (sensor: LiveSensorSnapshot) => {
 
 const sensorNames: Record<string, string> = {
   accelerometer: "加速度计",
+  "linear-acceleration": "线性加速度",
   gyroscope: "陀螺仪",
   magnetometer: "磁力计",
   barometer: "气压计",
@@ -116,6 +149,7 @@ const sensorNames: Record<string, string> = {
 
 const sensorIcons: Record<string, string> = {
   accelerometer: "↗",
+  "linear-acceleration": "⇢",
   gyroscope: "⟳",
   magnetometer: "⌁",
   barometer: "◒",
@@ -153,18 +187,17 @@ const moveCameraDrag = (event: PointerEvent) => {
 const endCameraDrag = () => { dragState.value = null; };
 const resetCamera = () => { cameraYaw.value = -0.72; cameraPitch.value = 0.62; };
 
-const projectedTrack = computed(() => {
-  if (!track.value.length) return [];
-  const origin = track.value[0];
-  const originLatRad = origin.lat * Math.PI / 180;
-  const worldPoints = track.value.map((point, index) => ({
-    index,
-    eastM: (point.lng - origin.lng) * Math.PI / 180 * 6371000 * Math.cos(originLatRad),
-    northM: (point.lat - origin.lat) * Math.PI / 180 * 6371000,
-    altitudeM: point.altitudeM ?? 0,
-    hasAltitude: typeof point.altitudeM === "number",
-    accuracyM: point.accuracyM,
-  }));
+type WorldPoint = {
+  index: number;
+  eastM: number;
+  northM: number;
+  altitudeM: number;
+  hasAltitude: boolean;
+  accuracyM: number;
+};
+
+const projectWorldPoints = (worldPoints: WorldPoint[]) => {
+  if (!worldPoints.length) return [];
   const eastCenter = (Math.min(...worldPoints.map((point) => point.eastM)) + Math.max(...worldPoints.map((point) => point.eastM))) / 2;
   const northCenter = (Math.min(...worldPoints.map((point) => point.northM)) + Math.max(...worldPoints.map((point) => point.northM))) / 2;
   const altitudeValues = worldPoints.filter((point) => point.hasAltitude).map((point) => point.altitudeM);
@@ -184,7 +217,7 @@ const projectedTrack = computed(() => {
     rotatedX: point.eastM * yawCos - point.northM * yawSin,
     rotatedY: point.eastM * yawSin + point.northM * yawCos,
   }));
-  const hasZ = hasAltitude.value;
+  const hasZ = worldPoints.some((point) => point.hasAltitude);
   const horizontalXExtent = Math.max(...rotatedWorldPoints.map((point) => Math.abs(point.rotatedX)), 1);
   const verticalScreenExtent = Math.max(...rotatedWorldPoints.map((point) => Math.abs(
     point.rotatedY * (hasZ ? pitchSin : 1) + point.altitudeM * 2.2 * (hasZ ? pitchCos : 0),
@@ -201,9 +234,36 @@ const projectedTrack = computed(() => {
       depth: point.rotatedY * pitchCos - displayAltitude * pitchSin,
     };
   });
+};
+
+const projectedTrack = computed(() => {
+  if (!track.value.length) return [];
+  const origin = track.value[0];
+  const originLatRad = origin.lat * Math.PI / 180;
+  return projectWorldPoints(track.value.map((point, index) => ({
+    index,
+    eastM: (point.lng - origin.lng) * Math.PI / 180 * 6371000 * Math.cos(originLatRad),
+    northM: (point.lat - origin.lat) * Math.PI / 180 * 6371000,
+    altitudeM: point.altitudeM ?? 0,
+    hasAltitude: typeof point.altitudeM === "number",
+    accuracyM: point.accuracyM,
+  })));
 });
 
-const routeRenderModeLabel = computed(() => "实时定位点展示 · 每个圆点对应一个真实样本");
+const projectedRelativeTrack = computed(() => projectWorldPoints(relativeTrack.value.map((point, index) => ({
+  index,
+  eastM: point.xM,
+  northM: point.yM,
+  altitudeM: point.zM,
+  hasAltitude: true,
+  accuracyM: point.accuracyM,
+}))));
+
+const displayedTrack = computed(() => visualMode.value === "inertial" ? projectedRelativeTrack.value : projectedTrack.value);
+
+const routeRenderModeLabel = computed(() => visualMode.value === "inertial"
+  ? "传感器融合相对运动点 · 每个圆点对应一个真实样本"
+  : "实时定位点展示 · 每个圆点对应一个真实样本");
 
 const drawPointCanvas = () => {
   const canvas = pointCanvas.value;
@@ -238,7 +298,7 @@ const drawPointCanvas = () => {
     y: offsetY + y * viewScale,
   });
 
-  const points = projectedTrack.value;
+  const points = displayedTrack.value;
   if (!points.length) return;
 
   const currentIndex = points.length - 1;
@@ -296,7 +356,7 @@ const scheduleCanvasDraw = () => {
   });
 };
 
-watch([projectedTrack, cameraYaw, cameraPitch], scheduleCanvasDraw, { flush: "post" });
+watch([displayedTrack, cameraYaw, cameraPitch], scheduleCanvasDraw, { flush: "post" });
 
 onMounted(() => {
   canvasResizeObserver = new ResizeObserver(scheduleCanvasDraw);
@@ -364,19 +424,20 @@ const activities = computed(() => {
       <section class="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,.75fr)]">
         <article class="panel p-5 sm:p-7">
           <div class="flex items-start justify-between gap-3"><div><p class="section-label">当前路线</p><h2 class="mt-1 text-xl font-extrabold tracking-[-0.05em]">{{ routeLabel }}</h2></div><span class="status-pill">{{ routeStatusLabel }}</span></div>
-          <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前会话轨迹</span></div><div><strong class="metric">{{ locationPointCount }}</strong><span class="metric-label">个真实位置点</span></div><div><strong class="metric">{{ totalSampleCount }}</strong><span class="metric-label">个传感器样本</span></div></div>
+          <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前相对轨迹</span></div><div><strong class="metric">{{ displayedPointCount }}</strong><span class="metric-label">个当前显示点</span></div><div><strong class="metric">{{ totalSampleCount }}</strong><span class="metric-label">个传感器样本</span></div></div>
           <div class="map-frame mt-6 overflow-hidden">
-            <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">实时定位点 · X / Y / Z</p><p class="mt-1 text-[11px] text-muted">每个圆点都是服务端收到的真实位置样本</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
-             <div ref="pointCanvasHost" class="relative touch-none select-none bg-[#e9f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
+            <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">{{ visualMode === 'inertial' ? '实时传感器运动点 · X / Y / Z' : '实时定位点 · X / Y / Z' }}</p><p class="mt-1 text-[11px] text-muted">每个圆点都是服务端收到的真实位置或相对运动样本</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
+            <div ref="pointCanvasHost" class="relative touch-none select-none bg-[#e9f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
                <canvas ref="pointCanvas" class="point-canvas block w-full" width="620" height="300" role="img" aria-label="可旋转的三维实时定位点" />
-               <div v-if="!projectedTrack.length" class="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-muted">等待 Android 上报位置样本</div>
+               <div v-if="!displayedTrack.length" class="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-muted">等待 Android 上报位置或传感器运动样本</div>
                <div class="pointer-events-none absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1.5 text-[9px] text-muted shadow-sm backdrop-blur">按住拖动旋转 · 高度视觉放大 2.2×</div>
              </div>
-            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-sage" />真实定位点</span><span><i class="legend-dot bg-ember" />最新点</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
+            <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-sage" />{{ visualMode === 'inertial' ? '传感器相对运动点' : '真实定位点' }}</span><span><i class="legend-dot bg-ember" />最新点</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
           </div>
-          <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ track.length }} location points · {{ totalSampleCount }} total samples · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
+          <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ displayedPointCount }} displayed points · {{ locationPointCount }} location · {{ motionPointCount }} inertial · {{ totalSampleCount }} total samples · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
           <div class="mt-2 px-1 text-[10px] text-muted">{{ routeRenderModeLabel }}<span v-if="hasAltitude"> · {{ altitudeSourceLabel }}</span><span v-else> · 当前按经纬度平面路线显示</span></div>
-          <div v-if="session && totalSampleCount > Math.max(locationPointCount * 20, 100)" class="mt-3 rounded-xl border border-[#f1d8bd] bg-[#fff8ee] px-3 py-2 text-[10px] leading-5 text-[#8c6845]">当前收到大量惯性传感器样本，但只有 {{ locationPointCount }} 个经纬度位置点。传感器样本不能直接当作位置点；请在 Android 端授予“精确位置”并打开系统定位。</div>
+          <div v-if="visualMode === 'inertial'" class="mt-3 rounded-xl border border-[#d7e4db] bg-[#f3f8f3] px-3 py-2 text-[10px] leading-5 text-[#4d715c]">当前没有足够的 GNSS 轨迹，网页正在显示手机传感器融合出的局部相对运动点；该轨迹会随时间漂移，不能替代最终导航定位。</div>
+          <div v-else-if="session && totalSampleCount > Math.max(locationPointCount * 20, 100)" class="mt-3 rounded-xl border border-[#f1d8bd] bg-[#fff8ee] px-3 py-2 text-[10px] leading-5 text-[#8c6845]">当前收到大量传感器样本，但还没有足够的位置或相对运动点；请继续采集，或检查 Android 传感器能力。</div>
         </article>
 
         <div class="flex flex-col gap-5">

@@ -18,6 +18,8 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 class SensorCollector(context: Context) : SensorEventListener, LocationListener {
     private val appContext = context.applicationContext
@@ -27,6 +29,17 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val readings = linkedMapOf<String, SensorReading>()
     private val uploader = SessionUploader()
     private var lastPublishedLocation: Location? = null
+    private val rotationMatrix = FloatArray(9)
+    private val gravity = FloatArray(3)
+    private val motionVelocity = FloatArray(3)
+    private val motionPosition = FloatArray(3)
+    private var hasRotationMatrix = false
+    private var hasLinearAccelerationSensor = false
+    private var gravityInitialized = false
+    private var lastMotionTimestampNs = 0L
+    private var lastMotionEmitTimestampNs = 0L
+    private var firstPressureHpa: Float? = null
+    private var barometerRelativeAltitudeM = 0f
 
     val uiState: StateFlow<SensorUiState> = state.asStateFlow()
     val syncState: StateFlow<SessionSyncState> = uploader.syncState
@@ -48,7 +61,10 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
         readings.clear()
         lastPublishedLocation = null
+        resetMotionState()
+        hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
         registerSensor(Sensor.TYPE_ACCELEROMETER, "Accelerometer", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
+        registerSensor(Sensor.TYPE_LINEAR_ACCELERATION, "Linear acceleration", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
         registerSensor(Sensor.TYPE_GYROSCOPE, "Gyroscope", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
         registerSensor(Sensor.TYPE_MAGNETIC_FIELD, "Magnetometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
         registerSensor(Sensor.TYPE_PRESSURE, "Barometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
@@ -72,6 +88,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         sensorManager.unregisterListener(this)
         locationManager.removeUpdates(this)
         lastPublishedLocation = null
+        resetMotionState()
         uploader.stop()
         state.value = state.value.copy(collecting = false)
     }
@@ -118,6 +135,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     override fun onSensorChanged(event: SensorEvent) {
         val label = when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER -> "Accelerometer"
+            Sensor.TYPE_LINEAR_ACCELERATION -> "Linear acceleration"
             Sensor.TYPE_GYROSCOPE -> "Gyroscope"
             Sensor.TYPE_MAGNETIC_FIELD -> "Magnetometer"
             Sensor.TYPE_PRESSURE -> "Barometer"
@@ -130,7 +148,18 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             else -> values.take(3).joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
         }
         readings[label] = SensorReading(label, SensorState.READY, detail, values)
-        uploader.enqueue(CollectedSample(event.timestamp, event.sensor.stringType, values))
+        when (event.sensor.type) {
+            Sensor.TYPE_ROTATION_VECTOR -> updateRotationMatrix(values)
+            Sensor.TYPE_PRESSURE -> updateBarometer(values.firstOrNull())
+        }
+        val relativePosition = when {
+            event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION -> integrateMotion(event.timestamp, values)
+            event.sensor.type == Sensor.TYPE_ACCELEROMETER && !hasLinearAccelerationSensor -> {
+                integrateMotion(event.timestamp, removeGravity(values))
+            }
+            else -> null
+        }
+        uploader.enqueue(CollectedSample(event.timestamp, event.sensor.stringType, values, relativePosition = relativePosition))
         publishSample()
     }
 
@@ -202,4 +231,81 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private fun updateError(message: String) {
         state.value = state.value.copy(error = message)
     }
+
+    private fun resetMotionState() {
+        rotationMatrix.fill(0f)
+        gravity.fill(0f)
+        motionVelocity.fill(0f)
+        motionPosition.fill(0f)
+        hasRotationMatrix = false
+        gravityInitialized = false
+        lastMotionTimestampNs = 0L
+        lastMotionEmitTimestampNs = 0L
+        firstPressureHpa = null
+        barometerRelativeAltitudeM = 0f
+    }
+
+    private fun updateRotationMatrix(values: List<Float>) {
+        if (values.size < 3) return
+        SensorManager.getRotationMatrixFromVector(rotationMatrix, values.toFloatArray())
+        hasRotationMatrix = true
+    }
+
+    private fun removeGravity(values: List<Float>): List<Float> {
+        if (values.size < 3) return values
+        if (!gravityInitialized) {
+            values.take(3).forEachIndexed { index, value -> gravity[index] = value }
+            gravityInitialized = true
+        }
+        values.take(3).forEachIndexed { index, value -> gravity[index] = gravity[index] * 0.9f + value * 0.1f }
+        return values.take(3).mapIndexed { index, value -> value - gravity[index] }
+    }
+
+    private fun updateBarometer(pressureHpa: Float?) {
+        if (pressureHpa == null || !pressureHpa.isFinite() || pressureHpa !in 300f..1_100f) return
+        firstPressureHpa = firstPressureHpa ?: pressureHpa
+        barometerRelativeAltitudeM = 44_330f * (1f - (pressureHpa / (firstPressureHpa ?: pressureHpa)).toDouble().pow(0.190294957)).toFloat()
+    }
+
+    private fun integrateMotion(timestampNs: Long, deviceAcceleration: List<Float>): RelativePositionSample? {
+        if (!hasRotationMatrix || deviceAcceleration.size < 3) return null
+        if (lastMotionTimestampNs == 0L) {
+            lastMotionTimestampNs = timestampNs
+            return null
+        }
+        val elapsedNs = timestampNs - lastMotionTimestampNs
+        lastMotionTimestampNs = timestampNs
+        if (elapsedNs <= 0L || elapsedNs > 250_000_000L) return null
+        val deltaSeconds = (elapsedNs / 1_000_000_000f).coerceIn(0.005f, 0.1f)
+        val deviceX = deviceAcceleration[0]
+        val deviceY = deviceAcceleration[1]
+        val deviceZ = deviceAcceleration[2]
+        val worldAcceleration = floatArrayOf(
+            rotationMatrix[0] * deviceX + rotationMatrix[1] * deviceY + rotationMatrix[2] * deviceZ,
+            rotationMatrix[3] * deviceX + rotationMatrix[4] * deviceY + rotationMatrix[5] * deviceZ,
+            rotationMatrix[6] * deviceX + rotationMatrix[7] * deviceY + rotationMatrix[8] * deviceZ,
+        )
+        val magnitude = vectorMagnitude(worldAcceleration)
+        val noiseFloor = 0.12f
+        val scale = if (magnitude <= noiseFloor) 0f else (magnitude - noiseFloor) / magnitude
+        for (index in 0..2) {
+            motionVelocity[index] += worldAcceleration[index] * scale * deltaSeconds
+            motionVelocity[index] *= if (magnitude <= 0.2f) 0.65f else 0.985f
+            motionVelocity[index] = motionVelocity[index].coerceIn(-15f, 15f)
+            motionPosition[index] += motionVelocity[index] * deltaSeconds
+        }
+        if (timestampNs - lastMotionEmitTimestampNs < 100_000_000L) return null
+        lastMotionEmitTimestampNs = timestampNs
+        val positionMagnitude = vectorMagnitude(motionPosition)
+        val fusedZ = motionPosition[2] * 0.65f + barometerRelativeAltitudeM * 0.35f
+        return RelativePositionSample(
+            xM = motionPosition[0],
+            yM = motionPosition[1],
+            zM = fusedZ,
+            accuracyM = (1.5f + positionMagnitude * 0.08f + if (magnitude <= 0.2f) 0.4f else 0.8f).coerceAtMost(20f),
+        )
+    }
+
+    private fun vectorMagnitude(values: FloatArray): Float =
+        sqrt((values[0] * values[0] + values[1] * values[1] + values[2] * values[2]).toDouble()).toFloat()
 }

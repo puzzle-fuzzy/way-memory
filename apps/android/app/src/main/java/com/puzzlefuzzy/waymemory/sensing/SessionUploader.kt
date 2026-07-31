@@ -28,6 +28,7 @@ data class CollectedSample(
     val values: List<Float> = emptyList(),
     val accuracy: Float? = null,
     val location: LocationSample? = null,
+    val relativePosition: RelativePositionSample? = null,
 )
 
 data class LocationSample(
@@ -35,6 +36,13 @@ data class LocationSample(
     val lng: Double,
     val accuracyM: Float? = null,
     val altitudeM: Double? = null,
+)
+
+data class RelativePositionSample(
+    val xM: Float,
+    val yM: Float,
+    val zM: Float,
+    val accuracyM: Float,
 )
 
 data class SessionSyncState(
@@ -160,6 +168,14 @@ class SessionUploader(
                 put("lng", it.lng)
                 it.accuracyM?.let { value -> put("accuracyM", value) }
                 it.altitudeM?.let { value -> put("altitudeM", value) }
+            })
+        }
+        relativePosition?.let {
+            put("relativePosition", JSONObject().apply {
+                put("xM", it.xM)
+                put("yM", it.yM)
+                put("zM", it.zM)
+                put("accuracyM", it.accuracyM)
             })
         }
     }

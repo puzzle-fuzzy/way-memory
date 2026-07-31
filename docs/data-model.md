@@ -34,6 +34,18 @@
 - `values`
 - `accuracy`
 - `source`
+- `relativePosition`（可选）：传感器融合得到的局部 `xM / yM / zM`，不等同于经纬度
+
+## RelativeMotionPoint
+
+用于 GNSS 不可用或更新稀疏时记录手机相对于采集起点的短时运动：
+
+- `timestampNs`
+- `xM / yM / zM`
+- `accuracyM`
+- `source`: inertial / visual / fused
+
+`RelativeMotionPoint` 只用于实时观测和后续融合，不能直接当作 WGS84 经纬度或最终导航路线。
 
 传感器样本必须使用手机单调时钟进行排序，同时保留系统时间用于展示。
 
