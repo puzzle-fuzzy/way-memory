@@ -12,6 +12,8 @@
     "check:docs": "bun run scripts/check-docs.ts",
     "smoke": "bun run scripts/smoke.ts",
     "dev:api": "bun run services/api/src/index.ts",
-    "dev:web": "bun run apps/web/src/dev-server.ts"
+    "dev:web": "bun --cwd=apps/web run dev",
+    "build:web": "bun --cwd=apps/web run build",
+    "typecheck:web": "bun --cwd=apps/web run typecheck"
   }
 }

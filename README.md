@@ -32,7 +32,7 @@ way-memory 是一个面向盲人用户的个性化路线学习与辅助导航项
 ## 预期技术栈
 
 - Android：Kotlin、Android Sensor Framework、Fused Location、CameraX、ARCore（按设备能力启用）
-- Web：TypeScript、Vue、MapLibre、Three.js（按展示需要启用）
+- Web：Vue 3、Vite、TypeScript、Tailwind CSS，后续按地图需要接入 MapLibre/Three.js
 - Service：Bun、TypeScript、Elysia 或轻量 HTTP/WebSocket 服务
 - 实时传输：WebSocket 起步，后续评估 WebRTC DataChannel
 - 存储：先使用可迁移的数据访问层，避免早期锁定具体数据库

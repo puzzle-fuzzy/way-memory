@@ -1,0 +1,43 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f6f8f4;
+  --color-mist: #f0f4ee;
+  --color-ink: #19352d;
+  --color-muted: #75857d;
+  --color-line: #dce5df;
+  --color-ember: #e05c3b;
+  --color-sage: #3f8b68;
+  --color-amber: #c9923e;
+}
+
+:root { font-family: Manrope, sans-serif; color: #19352d; background: #f6f8f4; font-synthesis: none; }
+body { min-width: 320px; margin: 0; }
+button, a { font: inherit; }
+.section-label { color: #89988f; font-family: "DM Mono", monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+.panel { border: 1px solid #dce5df; border-radius: 16px; background: #fff; box-shadow: 0 14px 35px #2347390b; }
+.nav-link { display: flex; align-items: center; gap: 12px; border-radius: 10px; padding: 13px 12px; color: #789087; font-size: 13px; text-decoration: none; }
+.nav-link span { font-family: "DM Mono", monospace; font-size: 16px; }
+.nav-link-active { background: #dae7dd; color: #19352d; font-weight: 700; }
+.connection-pill { border: 1px solid #dce5df; border-radius: 999px; background: #fff; padding: 10px 14px; color: #75857d; font-size: 11px; white-space: nowrap; }
+.connection-dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 999px; box-shadow: 0 0 0 3px #e1eee2; }
+.status-pill { border-radius: 999px; background: #e5f1e7; padding: 7px 10px; color: #3c795b; font-size: 10px; }
+.metric { display: block; font-size: 24px; letter-spacing: -.06em; }
+.metric-label { display: block; margin-top: 2px; color: #75857d; font-size: 10px; white-space: nowrap; }
+.map-frame { overflow: hidden; border-radius: 12px; }
+.map-node circle { fill: #fff; stroke: #e05c3b; stroke-width: 4; }
+.map-node text { fill: #19352d; font: 500 10px Manrope, sans-serif; text-anchor: middle; }
+.map-node.end circle { stroke: #3f8b68; }
+.current-pos circle:first-child { fill: #e05c3b33; stroke: #e05c3b66; stroke-width: 2; }
+.current-pos circle:last-child { fill: #e05c3b; }
+.legend-dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 999px; }
+.confidence-ring { display: grid; width: 62px; height: 62px; place-items: center; border: 5px solid #dcecdf; border-top-color: #3f8b68; border-radius: 999px; color: #3f8b68; font-size: 18px; font-weight: 800; }
+.live-label { color: #579364; font-family: "DM Mono", monospace; font-size: 9px; }
+.live-label i { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 999px; background: #70a477; box-shadow: 0 0 0 3px #e1eee2; }
+.sensor-card { display: flex; align-items: center; gap: 9px; border: 1px solid #e6ece7; border-radius: 11px; padding: 12px; }
+.activity-row { display: flex; gap: 11px; border-top: 1px solid #edf1ed; padding: 16px 0 2px; margin-top: 13px; }
+.activity-mark { display: grid; width: 30px; height: 30px; flex-shrink: 0; place-items: center; border-radius: 9px; font-family: "DM Mono", monospace; }
+.activity-row strong { display: block; font-size: 11px; }
+.activity-row small { display: block; margin-top: 4px; color: #75857d; font-size: 10px; }
+@media (max-width: 640px) { .metric-label { font-size: 9px; } }
