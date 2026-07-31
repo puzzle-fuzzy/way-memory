@@ -38,6 +38,7 @@ The MVP is intentionally memory-bounded because sessions are currently in memory
 - 128 motion events per session.
 - 1,024 normalized raw samples per session for short replay.
 - 32 latest sensor types per session, with at most 16 values per sensor snapshot.
+- 128 bounded sensor-stat entries per session, retaining counts and first/last device timestamps without retaining every raw value.
 - 500 samples per batch.
 - 512 KiB maximum JSON request/WebSocket message budget.
 

@@ -75,6 +75,11 @@ try {
   const accepted = await acceptedMessage;
   if (accepted.type !== "samples.accepted" || accepted.accepted !== 1) throw new Error("resumed session did not accept samples");
   second.send(JSON.stringify({ type: "session.stop", sessionId }));
+  await Bun.sleep(100);
+  const restored = await (await fetch(`${httpBaseUrl}/api/sessions/${sessionId}`)).json() as { sensorStats?: Array<{ sensorType: string; sampleCount: number; lastSensorAccuracy?: number }> };
+  if (restored.sensorStats?.find((item) => item.sensorType === "test")?.lastSensorAccuracy !== 3) {
+    throw new Error("sensor stats did not preserve sensor accuracy");
+  }
   console.log("Reconnect smoke passed", { sessionId, resumed: true, accepted: accepted.accepted });
 } finally {
   first?.close();

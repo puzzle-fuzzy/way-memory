@@ -67,6 +67,7 @@ const MAX_RELATIVE_TRACK_POINTS = 500;
 const MAX_POSE_TRACK_POINTS = 1_200;
 const MAX_MOTION_EVENTS = 128;
 const MAX_RAW_REPLAY_SAMPLES = 1_024;
+const MAX_SENSOR_STATS = 128;
 const MAX_LIVE_SENSORS = 32;
 const MAX_SENSOR_VALUES = 16;
 const MAX_JSON_BYTES = 512 * 1024;
@@ -117,6 +118,7 @@ const flushDirtySessions = () => {
 
 for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
   // A restart cannot prove that a previously active capture ended cleanly.
+  snapshot.session.sensorStats ??= [];
   snapshot.session.status = "stopped";
   sessions.set(snapshot.session.sessionId, snapshot.session);
   sessionRuntime.set(snapshot.session.sessionId, { rawSamples: snapshot.rawSamples });
@@ -431,6 +433,22 @@ const upsertSensor = (
   receivedAt: string,
   sensorType = normalizeSensorType(sample.sensorType),
 ) => {
+  const stats = session.sensorStats.find((item) => item.sensorType === sensorType);
+  if (stats) {
+    stats.sampleCount += 1;
+    stats.firstDeviceTimestampNs = Math.min(stats.firstDeviceTimestampNs, sample.deviceTimestampNs);
+    stats.lastDeviceTimestampNs = Math.max(stats.lastDeviceTimestampNs, sample.deviceTimestampNs);
+    if (sample.sensorAccuracy !== undefined) stats.lastSensorAccuracy = sample.sensorAccuracy;
+  } else {
+    if (session.sensorStats.length >= MAX_SENSOR_STATS) session.sensorStats.shift();
+    session.sensorStats.push({
+      sensorType,
+      sampleCount: 1,
+      firstDeviceTimestampNs: sample.deviceTimestampNs,
+      lastDeviceTimestampNs: sample.deviceTimestampNs,
+      ...(sample.sensorAccuracy === undefined ? {} : { lastSensorAccuracy: sample.sensorAccuracy }),
+    });
+  }
   const snapshot: LiveSensorSnapshot = {
     sensorType,
     values: sample.values.slice(0, 16),
@@ -581,6 +599,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     motionMode: "unknown",
     closure: { status: "open", confidence: 0, adjusted: false },
     motionEvents: [],
+    sensorStats: [],
     latestSensors: [],
     status: "active",
   };
@@ -693,6 +712,7 @@ const publishSessionDelta = (
     motionMode: session.motionMode,
     closure: session.closure,
     motionEvents: result.motionEvents,
+    sensorStats: session.sensorStats,
     latestSensors: session.latestSensors,
   };
   server.publish("dashboard", JSON.stringify(delta));

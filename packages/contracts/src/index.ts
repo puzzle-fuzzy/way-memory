@@ -145,6 +145,14 @@ export interface LiveSensorSnapshot {
   lastReceivedAt: string;
 }
 
+export interface SensorSampleStats {
+  sensorType: string;
+  sampleCount: number;
+  firstDeviceTimestampNs: number;
+  lastDeviceTimestampNs: number;
+  lastSensorAccuracy?: number;
+}
+
 export interface CreateSessionInput {
   deviceId: string;
   mode: ObservationMode;
@@ -173,6 +181,7 @@ export interface ObservationSession {
   motionMode: MotionMode;
   closure: ClosureState;
   motionEvents: MotionEvent[];
+  sensorStats: SensorSampleStats[];
   latestRelativePosition?: RelativeMotionPoint;
   latestSensors: LiveSensorSnapshot[];
   status: "active" | "stopped";
@@ -199,5 +208,6 @@ export interface SessionDelta {
   motionMode: ObservationSession["motionMode"];
   closure: ObservationSession["closure"];
   motionEvents: MotionEvent[];
+  sensorStats: SensorSampleStats[];
   latestSensors: LiveSensorSnapshot[];
 }

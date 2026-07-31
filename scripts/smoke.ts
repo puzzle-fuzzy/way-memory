@@ -53,7 +53,7 @@ try {
       }));
       const accepted = await waitForMessage(device);
       const updated = await waitForMessage(dashboard);
-      const updatedDelta = updated as { type: string; sampleCount: number; rawSampleCount: number; droppedSampleCount: number; trackPoints: Array<{ deviceTimestampNs?: number; lat: number; lng: number; altitudeM?: number; altitudeSource?: string }>; relativePoints: Array<{ xM: number; yM: number; zM: number }>; posePoints: Array<{ xM: number; yM: number; zM: number; motionMode: string; frame?: string }>; motionEvents: unknown[]; motionMode: string; latestAltitudeM?: number; altitudeSource?: string; latestSensors: unknown[] };
+      const updatedDelta = updated as { type: string; sampleCount: number; rawSampleCount: number; droppedSampleCount: number; trackPoints: Array<{ deviceTimestampNs?: number; lat: number; lng: number; altitudeM?: number; altitudeSource?: string }>; relativePoints: Array<{ xM: number; yM: number; zM: number }>; posePoints: Array<{ xM: number; yM: number; zM: number; motionMode: string; frame?: string }>; motionEvents: unknown[]; motionMode: string; latestAltitudeM?: number; altitudeSource?: string; latestSensors: unknown[]; sensorStats: Array<{ sensorType: string; sampleCount: number; firstDeviceTimestampNs: number; lastDeviceTimestampNs: number; lastSensorAccuracy?: number }> };
       if (
         accepted.type !== "samples.accepted"
         || updatedDelta.type !== "session.delta"
@@ -77,6 +77,8 @@ try {
         || typeof updatedDelta.latestAltitudeM !== "number"
         || updatedDelta.altitudeSource !== "barometer"
         || updatedDelta.latestSensors.length !== 3
+        || updatedDelta.sensorStats.length !== 3
+        || updatedDelta.sensorStats.some((item) => item.sampleCount < 1)
       ) {
         throw new Error("Unexpected realtime session update");
       }

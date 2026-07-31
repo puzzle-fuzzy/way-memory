@@ -67,6 +67,7 @@ export function useRealtimeSession() {
       motionMode: delta.motionMode,
       closure: delta.closure,
       motionEvents: [...current.motionEvents, ...delta.motionEvents].slice(-128),
+      sensorStats: delta.sensorStats,
       latestSensors: delta.latestSensors,
     });
   }
