@@ -39,6 +39,8 @@ const routeStatusLabel = computed(() => {
 });
 
 const track = computed(() => session.value?.track ?? []);
+const totalSampleCount = computed(() => session.value?.sampleCount ?? 0);
+const locationPointCount = computed(() => track.value.length);
 const coordinateBoundsLabel = computed(() => {
   if (!track.value.length) return "等待真实定位点";
   const latitudes = track.value.map((point) => point.lat);
@@ -315,7 +317,7 @@ const activities = computed(() => {
       icon: isCollecting.value ? "●" : "✓",
       tone: isCollecting.value ? "bg-[#eaf4eb] text-sage" : "bg-[#fff0e8] text-ember",
       title: isCollecting.value ? "Android 采集进行中" : "最近一次采集已结束",
-      detail: `${formatTime(current.lastReceivedAt ?? current.startedAt)} · 样本 ${current.sampleCount}`,
+      detail: `${formatTime(current.lastReceivedAt ?? current.startedAt)} · 全部样本 ${current.sampleCount} · 位置点 ${current.track.length}`,
     },
     {
       icon: "⌁",
@@ -362,7 +364,7 @@ const activities = computed(() => {
       <section class="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,.75fr)]">
         <article class="panel p-5 sm:p-7">
           <div class="flex items-start justify-between gap-3"><div><p class="section-label">当前路线</p><h2 class="mt-1 text-xl font-extrabold tracking-[-0.05em]">{{ routeLabel }}</h2></div><span class="status-pill">{{ routeStatusLabel }}</span></div>
-          <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前会话轨迹</span></div><div><strong class="metric">{{ session?.sampleCount ?? 0 }}</strong><span class="metric-label">个实时样本</span></div><div><strong class="metric">{{ confidencePercent === null ? '—' : `${confidencePercent}%` }}</strong><span class="metric-label">位置置信度</span></div></div>
+          <div class="mt-6 flex gap-8 sm:gap-14"><div><strong class="metric">{{ routeDistanceM }}</strong><span class="metric-label">米 · 当前会话轨迹</span></div><div><strong class="metric">{{ locationPointCount }}</strong><span class="metric-label">个真实位置点</span></div><div><strong class="metric">{{ totalSampleCount }}</strong><span class="metric-label">个传感器样本</span></div></div>
           <div class="map-frame mt-6 overflow-hidden">
             <div class="flex items-center justify-between gap-3 border-b border-[#dce5df] bg-[#f7faf7] px-4 py-3"><div><p class="section-label">实时定位点 · X / Y / Z</p><p class="mt-1 text-[11px] text-muted">每个圆点都是服务端收到的真实位置样本</p></div><button class="rounded-full border border-line bg-white px-3 py-1.5 text-[10px] text-muted transition hover:border-ember hover:text-ember" type="button" @click="resetCamera">重置视角</button></div>
              <div ref="pointCanvasHost" class="relative touch-none select-none bg-[#e9f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
@@ -372,8 +374,9 @@ const activities = computed(() => {
              </div>
             <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-sage" />真实定位点</span><span><i class="legend-dot bg-ember" />最新点</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
           </div>
-          <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ track.length }} real-time points · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
+          <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ track.length }} location points · {{ totalSampleCount }} total samples · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
           <div class="mt-2 px-1 text-[10px] text-muted">{{ routeRenderModeLabel }}<span v-if="hasAltitude"> · {{ altitudeSourceLabel }}</span><span v-else> · 当前按经纬度平面路线显示</span></div>
+          <div v-if="session && totalSampleCount > Math.max(locationPointCount * 20, 100)" class="mt-3 rounded-xl border border-[#f1d8bd] bg-[#fff8ee] px-3 py-2 text-[10px] leading-5 text-[#8c6845]">当前收到大量惯性传感器样本，但只有 {{ locationPointCount }} 个经纬度位置点。传感器样本不能直接当作位置点；请在 Android 端授予“精确位置”并打开系统定位。</div>
         </article>
 
         <div class="flex flex-col gap-5">

@@ -103,7 +103,7 @@ private fun SensorScreen() {
                             Button(onClick = {
                                 if (state.collecting) {
                                     collector.stop()
-                                } else if (collector.hasLocationPermission()) {
+                                } else if (collector.hasPreciseLocationPermission()) {
                                     collector.start()
                                 } else {
                                     permissionLauncher.launch(

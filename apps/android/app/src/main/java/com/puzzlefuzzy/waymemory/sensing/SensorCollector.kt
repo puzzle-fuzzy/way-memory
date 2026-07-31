@@ -8,7 +8,6 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.location.Criteria
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -33,10 +32,12 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
     fun availableSensorCount(): Int = sensorManager.getSensorList(Sensor.TYPE_ALL).size
 
-    fun hasLocationPermission(): Boolean = ContextCompat.checkSelfPermission(
+    fun hasPreciseLocationPermission(): Boolean = ContextCompat.checkSelfPermission(
         appContext,
         Manifest.permission.ACCESS_FINE_LOCATION,
-    ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+    ) == PackageManager.PERMISSION_GRANTED
+
+    fun hasLocationPermission(): Boolean = hasPreciseLocationPermission() || ContextCompat.checkSelfPermission(
         appContext,
         Manifest.permission.ACCESS_COARSE_LOCATION,
     ) == PackageManager.PERMISSION_GRANTED
@@ -54,15 +55,15 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         state.value = state.value.copy(
             collecting = true,
             availableSensorCount = availableSensorCount(),
-            locationPermissionGranted = hasLocationPermission(),
+            locationPermissionGranted = hasPreciseLocationPermission(),
             readings = readings.values.toList(),
             error = null,
         )
 
         uploader.start(Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device")
 
-        if (hasLocationPermission()) requestLocationUpdates()
-        else updateError("Location permission is not granted")
+        if (hasPreciseLocationPermission()) requestLocationUpdates()
+        else updateError("请允许精确位置权限，近似位置无法建立可靠行走轨迹")
     }
 
     fun stop() {
@@ -84,22 +85,20 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
     @SuppressLint("MissingPermission")
     private fun requestLocationUpdates() {
-        // Subscribe to one best provider. Subscribing to every enabled provider creates
-        // duplicate GNSS/network points and makes a bent route look disconnected.
-        val criteria = Criteria().apply {
-            accuracy = Criteria.ACCURACY_FINE
-            powerRequirement = Criteria.POWER_HIGH
-            isAltitudeRequired = false
-            isBearingRequired = false
-            isSpeedRequired = false
+        // Prefer GNSS when it is enabled. Coarse-only/network updates can be thousands
+        // of meters wide and are not suitable for a pedestrian route.
+        val enabledProviders = locationManager.getProviders(true)
+        val provider = when {
+            LocationManager.GPS_PROVIDER in enabledProviders -> LocationManager.GPS_PROVIDER
+            LocationManager.NETWORK_PROVIDER in enabledProviders -> LocationManager.NETWORK_PROVIDER
+            else -> null
         }
-        val provider = locationManager.getBestProvider(criteria, true)
         if (provider == null) {
-            updateError("Location provider unavailable")
+            updateError("请打开系统定位服务")
             return
         }
-        runCatching { locationManager.requestLocationUpdates(provider, 1_000L, 0.5f, this) }
-            .onFailure { updateError("Unable to subscribe to location provider") }
+        runCatching { locationManager.requestLocationUpdates(provider, 500L, 0f, this) }
+            .onFailure { updateError("无法订阅精确位置服务") }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
