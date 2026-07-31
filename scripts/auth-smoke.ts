@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { AuthStore } from "../services/api/src/authStore";
 
 const cwd = process.cwd();
 const port = 8860;
@@ -159,6 +160,11 @@ try {
   if (exported.response.status !== 200 || exported.body.format !== "way-memory.session-export.v1" || !exported.body.session || !Array.isArray(exported.body.rawSamples)) throw new Error("session export failed");
   const routeCreated = await json("/api/routes", { method: "POST", headers: { ...authHeaders(dashboardToken), "content-type": "application/json" }, body: JSON.stringify({ name: "owner-scoped route" }) });
   if (routeCreated.response.status !== 201 || !routeCreated.body.routeId) throw new Error("dashboard route creation failed");
+  const otherOwnerStore = new AuthStore(dbPath);
+  const otherOwnerDashboard = await otherOwnerStore.issueAccessToken("other-auth-smoke-owner", "dashboard");
+  const foreignSessionRead = await json(`/api/sessions/${session.sessionId}`, { headers: authHeaders(otherOwnerDashboard.token) });
+  const foreignRouteRead = await json(`/api/routes/${routeCreated.body.routeId}`, { headers: authHeaders(otherOwnerDashboard.token) });
+  if (foreignSessionRead.response.status !== 404 || foreignRouteRead.response.status !== 404) throw new Error("owner isolation failed: another owner can read resources");
   const deviceRouteList = await json("/api/routes", { headers: authHeaders(deviceToken) });
   if (deviceRouteList.response.status !== 401) throw new Error("device credential can list routes");
   const deviceRouteRead = await json(`/api/routes/${routeCreated.body.routeId}`, { headers: authHeaders(deviceToken) });
