@@ -18,6 +18,6 @@ After restarting `way-memory-api.service`, poll `http://127.0.0.1:8787/health` u
 
 Runtime memory protection and coordinate validation are documented in `docs/data-integrity.md`: 20 sessions, 500 location points, 500 legacy relative points, 1,200 Pose points, 128 motion events, 1,024 raw replay samples per session, bounded sensor snapshots, bounded payloads, timestamp ordering, coordinate range checks, duplicate suppression, and short-gap jump rejection.
 
-This MVP entry point is HTTP/WS on the server IP. Add a domain and TLS certificate before production use; the Android base URL can then be changed to the HTTPS domain and will automatically use WSS.
+This MVP entry point is HTTP/WS on the server IP and is not a production privacy boundary. It currently has no user/session authentication, so do not send real user route history to it. Before production use, add the account/device authorization and data lifecycle gates in `docs/security-and-release.md`, then add a domain and TLS certificate; the Android base URL can then be changed to the HTTPS domain and will automatically use WSS.
 
 `/health` is intentionally kept as the loopback service check and is not exposed by the Nginx SPA fallback. Use `/api/health` for a public deployment probe; it is proxied to the same API process.
