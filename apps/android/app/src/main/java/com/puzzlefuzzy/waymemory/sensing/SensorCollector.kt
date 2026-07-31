@@ -58,6 +58,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     val uiState: StateFlow<SensorUiState> = state.asStateFlow()
     val syncState: StateFlow<SessionSyncState> = uploader.syncState
 
+    fun hasResumableCapture(): Boolean = uploader.hasPersistedSession()
+
     fun availableSensorCount(): Int = sensorManager.getSensorList(Sensor.TYPE_ALL).size
 
     fun hasPreciseLocationPermission(): Boolean = ContextCompat.checkSelfPermission(

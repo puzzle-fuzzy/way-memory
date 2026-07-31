@@ -152,6 +152,10 @@ class SessionUploader(
 
     val syncState: StateFlow<SessionSyncState> = state.asStateFlow()
 
+    /** A force-stop can leave this marker behind; an explicit stop removes it. */
+    fun hasPersistedSession(): Boolean = sessionIdFile.isFile
+        && runCatching { sessionIdFile.readText().trim().isNotEmpty() }.getOrDefault(false)
+
     fun start(deviceId: String, sensorInventory: List<SensorInventorySample> = emptyList()) {
         if (running) return
         this.deviceId = deviceId

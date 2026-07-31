@@ -59,7 +59,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        collectorViewModel.collector.onHostResume(this)
+        val collector = collectorViewModel.collector
+        if (!collector.uiState.value.collecting
+            && collector.hasResumableCapture()
+            && collector.hasPreciseLocationPermission()
+        ) {
+            collector.start(this)
+            ContextCompat.startForegroundService(
+                this,
+                Intent(this, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_START),
+            )
+        }
+        collector.onHostResume(this)
     }
 
     override fun onPause() {
