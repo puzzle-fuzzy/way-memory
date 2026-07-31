@@ -1,0 +1,24 @@
+[Unit]
+Description=way-memory authenticated realtime API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=way-memory
+Group=way-memory
+WorkingDirectory=/opt/way-memory/api
+Environment=NODE_ENV=production
+Environment=PORT=8787
+Environment=WAY_MEMORY_ENV=production
+EnvironmentFile=/etc/way-memory/way-memory.env
+ExecStart=/usr/local/bin/bun /opt/way-memory/api/way-memory-api.js
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

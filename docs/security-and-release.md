@@ -53,4 +53,6 @@ The following are required before calling the service production-ready:
 - deletion/export test covering the database snapshot and replay tail;
 - backup restore test with secrets excluded from source control and logs.
 
+The repository includes a production systemd/Nginx template, but no public TLS deployment is claimed until `way-memory.yxswy.com` serves the built web app, `/api/health` over HTTPS, and a WSS ticket flow from a phone network.
+
 Until these gates exist, public smoke tests may use the IP-based HTTP/WS deployment, but real user route data must not be sent there.
