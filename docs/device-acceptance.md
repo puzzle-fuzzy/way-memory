@@ -52,6 +52,20 @@ Invoke-RestMethod "http://101.35.246.159/api/sessions/<SESSION_ID>" | ConvertTo-
 Invoke-RestMethod "http://101.35.246.159/api/sessions/<SESSION_ID>/raw" | ConvertTo-Json -Depth 8
 ```
 
+The machine-readable audit can be run after each capture. It exits with code 0 only when the selected case passes, and can save the exact report used as evidence:
+
+```powershell
+$env:WAY_MEMORY_API_URL = "http://101.35.246.159"
+$env:WAY_MEMORY_SESSION_ID = "<SESSION_ID>"
+bun run acceptance:report --case=baseline --out=artifacts/<SESSION_ID>-baseline.json
+bun run acceptance:report --case=3d --min-axis-m=0.2 --out=artifacts/<SESSION_ID>-3d.json
+bun run acceptance:report --case=loop --out=artifacts/<SESSION_ID>-loop.json
+bun run acceptance:report --case=stairs --out=artifacts/<SESSION_ID>-stairs.json
+bun run acceptance:report --case=elevator --out=artifacts/<SESSION_ID>-elevator.json
+```
+
+The report is an audit of the server's received evidence; it cannot manufacture sensor data or prove a case that was not actually captured.
+
 Record at minimum:
 
 - `sampleCount`, `rawSampleCount`, `droppedSampleCount`;
