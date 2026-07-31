@@ -4,7 +4,11 @@ import { resolve } from "node:path";
 const cwd = process.cwd();
 const dbPath = resolve(cwd, ".data/reconnect-check.sqlite");
 const files = [dbPath, `${dbPath}-shm`, `${dbPath}-wal`];
-const baseUrl = "ws://127.0.0.1:8820/realtime";
+const configuredApiUrl = Bun.env.WAY_MEMORY_API_URL?.replace(/\/$/, "");
+const httpBaseUrl = configuredApiUrl ?? "http://127.0.0.1:8820";
+const baseUrl = configuredApiUrl
+  ? configuredApiUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:") + "/realtime"
+  : "ws://127.0.0.1:8820/realtime";
 
 const waitForOpen = (socket: WebSocket) => new Promise<void>((resolvePromise, reject) => {
   socket.addEventListener("open", () => resolvePromise(), { once: true });
@@ -34,11 +38,13 @@ let api: ReturnType<typeof startApi> | undefined;
 let first: WebSocket | undefined;
 let second: WebSocket | undefined;
 try {
-  await Promise.all(files.map((path) => rm(path, { force: true })));
-  api = startApi();
+  if (!configuredApiUrl) {
+    await Promise.all(files.map((path) => rm(path, { force: true })));
+    api = startApi();
+  }
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
-      if ((await (await fetch("http://127.0.0.1:8820/health")).json() as { ok: boolean }).ok) break;
+      if ((await (await fetch(`${httpBaseUrl}/health`)).json() as { ok: boolean }).ok) break;
     } catch {}
     await Bun.sleep(100);
   }
@@ -75,5 +81,5 @@ try {
   second?.close();
   if (api && !api.killed) api.kill();
   await api?.exited;
-  await Promise.all(files.map((path) => rm(path, { force: true })));
+  if (!configuredApiUrl) await Promise.all(files.map((path) => rm(path, { force: true })));
 }
