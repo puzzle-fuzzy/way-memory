@@ -205,6 +205,7 @@ export interface ObservationSession {
   sampleCount: number;
   rawSampleCount: number;
   droppedSampleCount: number;
+  outOfOrderSampleCount: number;
   latestLocation?: SensorSample["location"];
   latestAltitudeM?: number;
   altitudeSource?: "gnss" | "barometer";
@@ -232,6 +233,7 @@ export interface SessionDelta {
   sampleCount: number;
   rawSampleCount: number;
   droppedSampleCount: number;
+  outOfOrderSampleCount: number;
   latestLocation?: ObservationSession["latestLocation"];
   latestAltitudeM?: number;
   altitudeSource?: ObservationSession["altitudeSource"];

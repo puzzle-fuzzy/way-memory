@@ -93,11 +93,40 @@ try {
       ) {
         throw new Error("Unexpected realtime session update");
       }
+      device.send(JSON.stringify({
+        type: "samples",
+        sessionId: session.sessionId,
+        samples: [{
+          sampleId: "late-pose",
+          deviceTimestampNs: 1,
+          sensorType: "pose",
+          values: [9, 0, 0],
+          relativePosition: { xM: 9, yM: 0, zM: 0, accuracyM: 2 },
+          pose: { deviceTimestampNs: 1, xM: 9, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 2, confidence: 0.7, source: "fused", frame: "local-enu", sourceFlags: ["imu"], motionMode: "walking", stationary: false },
+          motionEvent: { eventId: "late-event", deviceTimestampNs: 1, type: "loop-candidate", confidence: 0.4 },
+        }],
+      }));
+      const lateAccepted = await waitForMessage(device);
+      const lateUpdated = await waitForMessage(dashboard) as { type: string; sampleCount: number; rawSampleCount: number; droppedSampleCount: number; outOfOrderSampleCount: number; posePoints: unknown[]; relativePoints: unknown[]; motionEvents: unknown[]; latestPose?: { deviceTimestampNs: number } };
+      if (
+        lateAccepted.type !== "samples.accepted"
+        || lateUpdated.type !== "session.delta"
+        || lateUpdated.sampleCount !== 9
+        || lateUpdated.rawSampleCount !== 9
+        || lateUpdated.droppedSampleCount !== 2
+        || lateUpdated.outOfOrderSampleCount !== 1
+        || lateUpdated.posePoints.length !== 0
+        || lateUpdated.relativePoints.length !== 0
+        || lateUpdated.motionEvents.length !== 0
+        || lateUpdated.latestPose?.deviceTimestampNs !== 2
+      ) {
+        throw new Error("Cross-batch late route sample was not isolated");
+      }
       const rawReplay = await (await fetch(`http://127.0.0.1:8787/api/sessions/${session.sessionId}/raw`)).json() as { totalSamples: number; retainedSamples: number; maxRetainedSamples: number };
-      if (rawReplay.totalSamples !== 8 || rawReplay.retainedSamples !== 8 || rawReplay.maxRetainedSamples !== 1024) throw new Error("Unexpected raw replay buffer");
+      if (rawReplay.totalSamples !== 9 || rawReplay.retainedSamples !== 9 || rawReplay.maxRetainedSamples !== 1024) throw new Error("Unexpected raw replay buffer");
       dashboard.close();
       device.close();
-      console.log("API and WebSocket smoke passed", { routes: routes.length, points: 4, dropped: 1, altitude: "barometer" });
+      console.log("API and WebSocket smoke passed", { routes: routes.length, points: 4, dropped: 2, late: 1, altitude: "barometer" });
       process.exitCode = 0;
       break;
     } catch (error) {

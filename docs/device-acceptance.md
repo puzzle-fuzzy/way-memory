@@ -71,7 +71,7 @@ The report is an audit of the server's received evidence; it cannot manufacture 
 
 Record at minimum:
 
-- `sampleCount`, `rawSampleCount`, `droppedSampleCount`;
+- `sampleCount`, `rawSampleCount`, `droppedSampleCount`, and `outOfOrderSampleCount`;
 - `poseTrack` count and the min/max of `xM`, `yM`, `zM`;
 - Pose timestamp monotonicity, time span, per-source counts and source age;
 - raw sensor type counts, `sourceFlags`, `frame`, `motionMode`, and `motionEvents`;

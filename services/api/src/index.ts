@@ -96,6 +96,9 @@ type SessionRuntime = {
   rawSamples?: SensorSample[];
   seenSampleIds?: Set<string>;
   seenSampleIdOrder?: string[];
+  lastPoseTimestampNs?: number;
+  lastRelativeTimestampNs?: number;
+  lastMotionEventTimestampNs?: number;
 };
 
 const sessionRuntime = new Map<string, SessionRuntime>();
@@ -115,6 +118,10 @@ const poseTrackDistanceM = (poses: PoseEstimate[]) => {
   for (let index = 1; index < poses.length; index += 1) distanceM += poseDistanceM(poses[index - 1], poses[index]);
   return distanceM;
 };
+
+const sortByDeviceTimestamp = <T extends { deviceTimestampNs?: number }>(points: T[]) => [...points].sort(
+  (left, right) => (left.deviceTimestampNs ?? 0) - (right.deviceTimestampNs ?? 0),
+);
 
 const toClosureAnchor = (pose: PoseEstimate): ClosureAnchor => ({
   deviceTimestampNs: pose.deviceTimestampNs,
@@ -154,20 +161,38 @@ const flushDirtySessions = () => {
 
 for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
   // A restart cannot prove that a previously active capture ended cleanly.
+  snapshot.session.track = sortByDeviceTimestamp(snapshot.session.track ?? []);
+  snapshot.session.relativeTrack = sortByDeviceTimestamp(snapshot.session.relativeTrack ?? []);
+  snapshot.session.poseTrack = sortByDeviceTimestamp(snapshot.session.poseTrack ?? []);
+  if (snapshot.session.correctedPoseTrack) snapshot.session.correctedPoseTrack = sortByDeviceTimestamp(snapshot.session.correctedPoseTrack);
+  snapshot.session.motionEvents = sortByDeviceTimestamp(snapshot.session.motionEvents ?? []);
   snapshot.session.sensorStats ??= [];
   snapshot.session.sensorInventory ??= [];
+  snapshot.session.outOfOrderSampleCount ??= 0;
   snapshot.session.status = "stopped";
   sessions.set(snapshot.session.sessionId, snapshot.session);
   const poses = snapshot.session.poseTrack ?? [];
+  const locations = snapshot.session.track ?? [];
   const anchor = snapshot.session.closure.anchor;
   const sampleIds = snapshot.rawSamples.map((sample) => sample.sampleId).filter((sampleId): sampleId is string => Boolean(sampleId));
   sessionRuntime.set(snapshot.session.sessionId, {
     rawSamples: snapshot.rawSamples,
+    lastLocation: locations.at(-1)?.deviceTimestampNs === undefined || !locations.at(-1)
+      ? undefined
+      : {
+        lat: locations.at(-1)!.lat,
+        lng: locations.at(-1)!.lng,
+        accuracyM: locations.at(-1)!.accuracyM,
+        deviceTimestampNs: locations.at(-1)!.deviceTimestampNs!,
+      },
     startPose: anchor && poses[0] ? anchorToPose(anchor, poses[0]) : poses[0],
     lastPose: poses.at(-1),
     travelledM: snapshot.session.closure.travelledM ?? poseTrackDistanceM(poses),
     seenSampleIds: new Set(sampleIds.slice(-MAX_SEEN_SAMPLE_IDS)),
     seenSampleIdOrder: sampleIds.slice(-MAX_SEEN_SAMPLE_IDS),
+    lastPoseTimestampNs: poses.at(-1)?.deviceTimestampNs,
+    lastRelativeTimestampNs: snapshot.session.relativeTrack.at(-1)?.deviceTimestampNs,
+    lastMotionEventTimestampNs: snapshot.session.motionEvents.at(-1)?.deviceTimestampNs,
   });
 }
 sessionStore.prune(MAX_PERSISTED_SESSIONS);
@@ -556,10 +581,16 @@ const upsertSensor = (
     return;
   }
   const existing = session.latestSensors[existingIndex];
-  session.latestSensors[existingIndex] = {
-    ...snapshot,
-    sampleCount: existing.sampleCount + 1,
-  };
+  session.latestSensors[existingIndex] = sample.deviceTimestampNs > existing.lastDeviceTimestampNs
+    ? {
+      ...snapshot,
+      sampleCount: existing.sampleCount + 1,
+    }
+    : {
+      ...existing,
+      sampleCount: existing.sampleCount + 1,
+      lastReceivedAt: receivedAt,
+    };
 };
 
 const toTrackPoint = (session: ObservationSession, location: NonNullable<SensorSample["location"]>, deviceTimestampNs: number): TrackPoint => {
@@ -706,6 +737,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     sampleCount: 0,
     rawSampleCount: 0,
     droppedSampleCount: 0,
+    outOfOrderSampleCount: 0,
     track: [],
     relativeTrack: [],
     poseTrack: [],
@@ -769,42 +801,71 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   }
   for (const sample of samples) {
     const sensorType = normalizeSensorType(sample.sensorType);
+    let sampleOutOfOrder = false;
     if (sample.pose) {
-      session.poseTrack.push(sample.pose);
-      session.correctedPoseTrack?.push(sample.pose);
-      posePoints.push(sample.pose);
-      session.latestPose = sample.pose;
-      session.motionMode = sample.pose.motionMode;
-      updateClosureState(session, sample.pose);
-      const correction = session.closure.correction;
-      if (correction && session.correctedPoseTrack?.length) {
-        session.correctedPoseTrack[session.correctedPoseTrack.length - 1] = applyPoseLoopCorrection(sample.pose, correction);
+      const previousTimestampNs = runtime.lastPoseTimestampNs;
+      if (previousTimestampNs !== undefined && sample.pose.deviceTimestampNs <= previousTimestampNs) {
+        sampleOutOfOrder = true;
+      } else {
+        runtime.lastPoseTimestampNs = sample.pose.deviceTimestampNs;
+        session.poseTrack.push(sample.pose);
+        session.correctedPoseTrack?.push(sample.pose);
+        posePoints.push(sample.pose);
+        session.latestPose = sample.pose;
+        session.motionMode = sample.pose.motionMode;
+        updateClosureState(session, sample.pose);
+        const correction = session.closure.correction;
+        if (correction && session.correctedPoseTrack?.length) {
+          session.correctedPoseTrack[session.correctedPoseTrack.length - 1] = applyPoseLoopCorrection(sample.pose, correction);
+        }
       }
     }
     if (sample.motionEvent) {
-      session.motionEvents.push(sample.motionEvent);
-      motionEvents.push(sample.motionEvent);
+      const previousTimestampNs = runtime.lastMotionEventTimestampNs;
+      if (previousTimestampNs !== undefined && sample.motionEvent.deviceTimestampNs <= previousTimestampNs) {
+        sampleOutOfOrder = true;
+      } else {
+        runtime.lastMotionEventTimestampNs = sample.motionEvent.deviceTimestampNs;
+        session.motionEvents.push(sample.motionEvent);
+        motionEvents.push(sample.motionEvent);
+      }
     }
     if (sample.relativePosition) {
-      const motionPoint = toRelativeMotionPoint(sample.relativePosition, sample.deviceTimestampNs);
-      session.relativeTrack.push(motionPoint);
-      relativePoints.push(motionPoint);
-      session.latestRelativePosition = motionPoint;
+      const previousTimestampNs = runtime.lastRelativeTimestampNs;
+      if (previousTimestampNs !== undefined && sample.deviceTimestampNs <= previousTimestampNs) {
+        sampleOutOfOrder = true;
+      } else {
+        runtime.lastRelativeTimestampNs = sample.deviceTimestampNs;
+        const motionPoint = toRelativeMotionPoint(sample.relativePosition, sample.deviceTimestampNs);
+        session.relativeTrack.push(motionPoint);
+        relativePoints.push(motionPoint);
+        session.latestRelativePosition = motionPoint;
+      }
     }
     if (sample.location) {
-      if (shouldDropLocation(session, sample.location, sample.deviceTimestampNs)) {
-        session.droppedSampleCount += 1;
-        continue;
+      const previousLocationTimestampNs = runtime.lastLocation?.deviceTimestampNs;
+      if (previousLocationTimestampNs !== undefined && sample.deviceTimestampNs <= previousLocationTimestampNs) {
+        sampleOutOfOrder = true;
       }
-      const point = toTrackPoint(session, sample.location, sample.deviceTimestampNs);
-      session.latestLocation = sample.location;
-      session.track.push(point);
-      trackPoints.push(point);
-      rememberLocation(session, sample.location, sample.deviceTimestampNs);
-      upsertSensor(session, sample, receivedAt, "gnss");
+      if (shouldDropLocation(session, sample.location, sample.deviceTimestampNs)) {
+        if (previousLocationTimestampNs === undefined || sample.deviceTimestampNs > previousLocationTimestampNs) {
+          session.droppedSampleCount += 1;
+        }
+      } else {
+        const point = toTrackPoint(session, sample.location, sample.deviceTimestampNs);
+        session.latestLocation = sample.location;
+        session.track.push(point);
+        trackPoints.push(point);
+        rememberLocation(session, sample.location, sample.deviceTimestampNs);
+        upsertSensor(session, sample, receivedAt, "gnss");
+      }
     } else {
       if (sensorType === "barometer") updateBarometerAltitude(session, sample);
       upsertSensor(session, sample, receivedAt, sensorType);
+    }
+    if (sampleOutOfOrder) {
+      session.outOfOrderSampleCount += 1;
+      session.droppedSampleCount += 1;
     }
   }
   if (session.track.length > MAX_TRACK_POINTS) session.track = session.track.slice(-MAX_TRACK_POINTS);
@@ -840,6 +901,7 @@ const publishSessionDelta = (
     sampleCount: session.sampleCount,
     rawSampleCount: session.rawSampleCount,
     droppedSampleCount: session.droppedSampleCount,
+    outOfOrderSampleCount: session.outOfOrderSampleCount,
     latestLocation: session.latestLocation,
     latestAltitudeM: session.latestAltitudeM,
     altitudeSource: session.altitudeSource,

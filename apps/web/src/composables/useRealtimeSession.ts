@@ -55,6 +55,7 @@ export function useRealtimeSession() {
       sampleCount: delta.sampleCount,
       rawSampleCount: delta.rawSampleCount,
       droppedSampleCount: delta.droppedSampleCount,
+      outOfOrderSampleCount: delta.outOfOrderSampleCount,
       latestLocation: delta.latestLocation ?? current.latestLocation,
       latestAltitudeM: delta.latestAltitudeM ?? current.latestAltitudeM,
       altitudeSource: delta.altitudeSource ?? current.altitudeSource,

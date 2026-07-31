@@ -6,7 +6,7 @@ The live route is built from the `poseTrack` array returned by the API. The web 
 
 - `lat` is latitude in degrees, limited to `-90..90`.
 - `lng` is longitude in degrees, limited to `-180..180`.
-- The server sorts accepted samples by Android's monotonic `deviceTimestampNs` before creating track points.
+- The server sorts each incoming batch by Android's monotonic `deviceTimestampNs`. It also keeps a per-session high-water mark for Pose, relative motion, motion events, and GNSS route points: a later batch cannot append an older route timestamp. Such a sample remains in the bounded raw replay and increments `outOfOrderSampleCount`, but it is excluded from the primary route so the web client cannot render a time-reversed segment.
 - The web projection treats longitude as east/west and latitude as north/south. It uses a local earth-radius projection in meters, so the two fields cannot be accidentally swapped without failing the visible bounds check.
 - Each live `TrackPoint` carries its device timestamp. The dashboard shows point count, segment count, coordinate bounds, and dropped sample count below the visualization.
 - `sampleCount` counts all accepted sensor samples. The `track` length counts only accepted samples that contain a latitude/longitude pair; accelerometer, gyroscope, and rotation-vector samples are not position points.
@@ -17,6 +17,7 @@ The live route is built from the `poseTrack` array returned by the API. The web 
 - The Android uploader persists a bounded app-private offline queue capped at 4,096 samples and 8 MiB. It drops the oldest samples after either hard limit and surfaces the drop count in the capture UI. A batch is removed only after the server replies with `samples.accepted`; a socket or process failure before that reply leaves the batch for replay. The active session ID is persisted too, so a process restart can attempt to resume the same server session. If the server grace window has expired, the client creates a new session and drains the retained samples there. Replayed batches retain their `sampleId`, and the server's bounded dedupe window makes this at-least-once transport duplicate-tolerant rather than silently lossy.
 - `poseTrack` counts unified fused-pose points in local ENU meters. Each Pose includes source flags, accuracy, velocity, motion mode and stationary state. Source flags can include `step-pdr` for the bounded step-aided walking fallback, or `*-stale` when an external stream has stopped contributing fresh evidence.
 - Each Pose may carry a `frame`: `local-enu` for the unified route frame or `arcore-local` for raw session-local visual coordinates. Legacy payloads default to `local-enu`; Android promotes ARCore samples only after horizontal frame alignment.
+- `latestPose`, `latestRelativePosition`, and live sensor snapshots never move backward when a delayed callback arrives. On service restart, the persisted route windows are sorted and their timestamp high-water marks are restored before new samples are accepted.
 - `relativeTrack` counts legacy device-side sensor-fusion motion points. These are local meters from the session origin, not geographic coordinates; the web console uses them only when no unified Pose stream exists.
 
 ## Filtering and 3D data
