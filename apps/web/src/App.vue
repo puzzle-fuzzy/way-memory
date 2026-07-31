@@ -55,7 +55,6 @@ const locationLabel = computed(() => {
 
 const routeLabel = computed(() => {
   if (!session.value) return "等待 Android 会话";
-  if (session.value.routeId === "route-home-metro") return "家 · 地铁站入口";
   return session.value.routeId ? `路线 ${session.value.routeId}` : "未绑定路线";
 });
 

@@ -13,7 +13,7 @@ try {
       const publicHealth = await fetch("http://127.0.0.1:8787/api/health");
       if (!publicHealth.ok || !(await publicHealth.json() as { ok: boolean }).ok) throw new Error("Public health status failed");
       const routes = await (await fetch("http://127.0.0.1:8787/api/routes")).json() as unknown[];
-      if (!health.ok || routes.length !== 1) throw new Error("Unexpected API payload");
+      if (!health.ok || routes.length !== 0) throw new Error("Unexpected API payload");
       const waitForMessage = (socket: WebSocket) => new Promise<Record<string, unknown>>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("WebSocket message timeout")), 2_000);
         socket.addEventListener("message", (event) => {

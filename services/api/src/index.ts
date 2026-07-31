@@ -10,7 +10,6 @@ import type {
   ObservationSession,
   PoseEstimate,
   RelativeMotionPoint,
-  RouteSummary,
   SessionDelta,
   SensorSample,
   SensorInventoryEntry,
@@ -41,28 +40,6 @@ const device: DeviceSnapshot = {
     { type: "camera", label: "视觉采集", status: "ready", frequencyHz: 5 },
     { type: "depth", label: "深度感知", status: "unavailable", note: "设备不支持" },
   ],
-};
-
-const track = [
-  [31.23041, 121.47370], [31.23058, 121.47402], [31.23076, 121.47428],
-  [31.23104, 121.47455], [31.23132, 121.47440], [31.23151, 121.47408],
-  [31.23175, 121.47382], [31.23203, 121.47398], [31.23230, 121.47426],
-].map(([lat, lng], index) => ({
-  lat, lng, accuracyM: index > 5 ? 4.8 : 3.2,
-  confidence: index > 5 ? 0.86 : 0.96,
-  source: index === 4 ? "manual" : "fused",
-} as const));
-
-const route: RouteSummary = {
-  routeId: "route-home-metro",
-  name: "家 · 地铁站入口",
-  status: "verified",
-  distanceM: 486,
-  observations: 4,
-  nodes: 7,
-  confidence: 0.91,
-  updatedAt: "今天 09:42",
-  track,
 };
 
 const sessions = new Map<string, ObservationSession>();
@@ -1087,11 +1064,14 @@ const server = Bun.serve<RealtimeClient>({
     }
     if (url.pathname === "/api/routes") {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
-      return json([route]);
+      // Route persistence/merging is intentionally not implemented by the
+      // capture MVP yet. Never return a fabricated route as if it belonged to
+      // the authenticated owner.
+      return json([]);
     }
-    if (url.pathname === "/api/routes/route-home-metro") {
+    if (url.pathname.startsWith("/api/routes/")) {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
-      return json(route);
+      return json({ error: "route_not_found" }, { status: 404 });
     }
     if (url.pathname === "/api/sessions" && request.method === "GET") {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });

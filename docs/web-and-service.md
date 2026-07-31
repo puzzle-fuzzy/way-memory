@@ -28,6 +28,8 @@ Web 使用 Vue 3 + Vite + TypeScript + Tailwind CSS，开发服务器由 Vite �
 
 ## 第一版 API 方向
 
+路线 CRUD 尚未进入可用实现阶段。`GET /routes` 只返回当前 owner 已持久化的真实路线；在路线存储和多次观测合并完成前，空数组是预期结果，服务端不会提供演示路线或伪造轨迹。
+
 - `POST /devices/pair`
 - `POST /sessions`
 - `POST /observations`
