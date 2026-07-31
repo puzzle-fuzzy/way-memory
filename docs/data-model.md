@@ -15,6 +15,14 @@
 - `observationSummaries`（有界的观测质量和来源摘要）
 - `track`（最多 500 个参考观测 GNSS 点）
 - `poseTrack`（最多 1,200 个参考观测局部 Pose 点）
+- `nodeRecords`（最多 128 个带三维坐标的人工节点）
+
+每条 `RouteObservationSummary` 都包含 `alignment`：
+
+- 首次观测使用 `method=reference`，建立路线地理参考；
+- 后续观测使用 `method=gnss-nearest`，按时间单调的最近 GNSS 参考点尝试对齐；
+- 只有匹配点数至少 2、覆盖率至少 50%、平均残差不超过 25 米时才是 `status=matched`；否则是 `unavailable`，不会修改参考轨迹；
+- 参考路线最多保留 500 个融合后的地理点。不同会话的局部 ENU/AR 坐标仍不直接拼接，后续视觉或人工证据需要单独生成坐标变换。
 
 ## Observation
 
@@ -29,7 +37,7 @@
 - `derivedTrackRef`
 - `qualitySummary`
 
-路线合并不能把不同采集会话的局部 ENU 坐标直接拼接。当前服务端先保存真实观测摘要和第一条参考观测；只有在 GNSS 锚点、视觉回环或人工对齐证据足够时，才允许后续版本生成可发布的统一路线。
+路线合并不能把不同采集会话的局部 ENU 坐标直接拼接。当前服务端先保存真实观测摘要和第一条参考观测；至少三次观测（含两次重复对齐成功）后，才允许将路线标记为 `verified`。这只是 GNSS 地理层的第一道门禁，视觉回环、楼层语义和人工对齐证据仍需要在导航发布前继续审核。
 
 ## SensorSample
 

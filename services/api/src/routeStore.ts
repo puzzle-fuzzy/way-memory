@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { Database } from "bun:sqlite";
-import type { RouteSummary } from "@way-memory/contracts";
+import type { RouteAlignmentSummary, RouteObservationSummary, RouteSummary } from "@way-memory/contracts";
 
 export type StoredRoute = RouteSummary & { ownerId: string };
 
@@ -74,7 +74,20 @@ export class RouteStore {
     return rows.flatMap((row) => {
       try {
         const route = JSON.parse(row.route_json) as StoredRoute;
-        if (!route.routeId || !route.ownerId || !Array.isArray(route.track) || !Array.isArray(route.poseTrack) || !Array.isArray(route.observationSummaries) || !Array.isArray(route.nodeRecords)) return [];
+        if (!route.routeId || !route.ownerId || !Array.isArray(route.track) || !Array.isArray(route.poseTrack) || !Array.isArray(route.observationSummaries)) return [];
+        // Routes written before manual nodes/alignment were introduced remain
+        // readable. Missing fields are migrated in memory and persisted on the
+        // next route mutation instead of silently disappearing after restart.
+        if (!Array.isArray(route.nodeRecords)) route.nodeRecords = [];
+        route.observationSummaries = route.observationSummaries.map((observation, index) => {
+          if (observation.alignment) return observation;
+          const alignment: RouteAlignmentSummary = index === 0
+            ? { method: "reference", status: "reference", matchedPoints: observation.locationPointCount, coverage: observation.locationPointCount ? 1 : 0 }
+            : { method: "gnss-nearest", status: "unavailable", matchedPoints: 0, coverage: 0 };
+          return { ...observation, alignment } as RouteObservationSummary;
+        });
+        route.observations = route.observationSummaries.length;
+        route.nodes = route.nodeRecords.length;
         return [route];
       } catch {
         return [];

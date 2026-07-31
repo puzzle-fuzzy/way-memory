@@ -28,7 +28,7 @@ Web 使用 Vue 3 + Vite + TypeScript + Tailwind CSS，开发服务器由 Vite �
 
 ## 第一版 API 方向
 
-路线注册和观测绑定已进入服务端：`GET /routes`、`POST /routes`、`GET /routes/:id`、`POST /routes/:id/observations`、`DELETE /routes/:id` 均按 owner 隔离并写入 SQLite。每条路线最多保留 50 次观测摘要、500 个地理点和 1,200 个参考 Pose 点；不同会话的局部坐标不会直接首尾拼接。`POST /routes/:id/publish` 在坐标对齐引擎完成前返回 `route_alignment_required`，避免把未对齐数据发布成导航路线。
+路线注册和观测绑定已进入服务端：`GET /routes`、`POST /routes`、`GET /routes/:id`、`POST /routes/:id/observations`、`DELETE /routes/:id` 均按 owner 隔离并写入 SQLite。每条路线最多保留 50 次观测摘要、500 个地理点、1,200 个参考 Pose 点和 128 个人工节点。首条观测建立参考轨迹，后续观测按 GNSS 最近点做有界对齐：匹配至少 2 点、覆盖率至少 50%、平均残差不超过 25 米才计为 `matched`；局部 ENU/AR 坐标不会跨会话直接首尾拼接。`POST /routes/:id/publish` 只有在至少 3 次观测且两次重复对齐均成功时才会返回 `verified`，否则返回 `route_alignment_required`。
 
 - `POST /devices/pair`
 - `POST /sessions`

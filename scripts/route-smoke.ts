@@ -116,11 +116,63 @@ try {
   const publish = await requestJson(`/api/routes/${routeId}/publish`, { method: "POST" });
   if (publish.response.status !== 409 || publish.body.error !== "route_alignment_required") throw new Error("route published without alignment");
 
+  const followUp = async (deviceId: string, prefix: string, points: Array<{ lat: number; lng: number; xM: number }>) => {
+    const followUpDevice = new WebSocket(`${baseUrl.replace("http", "ws")}/realtime?role=device&deviceId=${deviceId}`);
+    await waitForOpen(followUpDevice);
+    followUpDevice.send(JSON.stringify({
+      type: "session.start",
+      deviceId,
+      mode: "learning",
+      routeId,
+      sensors: [{ sensorType: "android.sensor.accelerometer", name: "Route Smoke", registered: true, transportMaxHz: 50 }],
+    }));
+    const followUpStarted = await nextMessage(followUpDevice);
+    if (followUpStarted.type !== "session.started" || typeof followUpStarted.session?.sessionId !== "string") throw new Error(`${deviceId} session did not start`);
+    const followUpSessionId = followUpStarted.session.sessionId as string;
+    followUpDevice.send(JSON.stringify({
+      type: "samples",
+      sessionId: followUpSessionId,
+      samples: points.map((point, index) => ({
+        sampleId: `${prefix}-${index + 1}`,
+        deviceTimestampNs: (index + 1) * 100,
+        sensorType: "location",
+        values: [],
+        location: { lat: point.lat, lng: point.lng, accuracyM: 4 },
+        pose: { deviceTimestampNs: (index + 1) * 100, xM: point.xM, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false },
+      })),
+    }));
+    const followUpAccepted = await nextMessage(followUpDevice);
+    if (followUpAccepted.type !== "samples.accepted") throw new Error(`${deviceId} samples failed: ${JSON.stringify(followUpAccepted)}`);
+    followUpDevice.close();
+    const followUpStopped = await requestJson(`/api/sessions/${followUpSessionId}/stop`, { method: "POST" });
+    if (followUpStopped.response.status !== 200 || followUpStopped.body.status !== "stopped") throw new Error(`${deviceId} session did not stop`);
+    const followUpAttached = await requestJson(`/api/routes/${routeId}/observations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: followUpSessionId }),
+    });
+    if (followUpAttached.response.status !== 200) throw new Error(`${deviceId} observation attach failed: ${JSON.stringify(followUpAttached.body)}`);
+    return followUpAttached.body;
+  };
+
+  const secondObservation = await followUp("route-smoke-device-2", "route-sample-2a", [
+    { lat: 31.230401, lng: 121.470001, xM: 0.1 },
+    { lat: 31.230411, lng: 121.470001, xM: 1.1 },
+  ]);
+  if (secondObservation.observations !== 2 || secondObservation.observationSummaries?.[1]?.alignment?.status !== "matched") throw new Error(`GNSS route alignment failed: ${JSON.stringify(secondObservation.observationSummaries)}`);
+  const thirdObservation = await followUp("route-smoke-device-3", "route-sample-3a", [
+    { lat: 31.230399, lng: 121.469999, xM: -0.1 },
+    { lat: 31.230409, lng: 121.469999, xM: 0.9 },
+  ]);
+  if (thirdObservation.observations !== 3 || thirdObservation.observationSummaries?.[2]?.alignment?.status !== "matched") throw new Error(`second GNSS route alignment failed: ${JSON.stringify(thirdObservation.observationSummaries)}`);
+  const published = await requestJson(`/api/routes/${routeId}/publish`, { method: "POST" });
+  if (published.response.status !== 200 || published.body.status !== "verified") throw new Error(`aligned route did not publish: ${JSON.stringify(published.body)}`);
+
   await stopApi(api);
   api = await startApi();
   const restored = await requestJson(`/api/routes/${routeId}`);
-  if (restored.response.status !== 200 || restored.body.observations !== 1 || restored.body.referenceSessionId !== sessionId || restored.body.nodeRecords?.length !== 1) throw new Error("route did not survive restart");
-  console.log("Route persistence smoke passed", { routeId, sessionId, observations: restored.body.observations, referencePosePoints: restored.body.poseTrack.length, nodes: restored.body.nodeRecords.length, publishBlocked: publish.body.error });
+  if (restored.response.status !== 200 || restored.body.observations !== 3 || restored.body.status !== "verified" || restored.body.referenceSessionId !== sessionId || restored.body.nodeRecords?.length !== 1) throw new Error("route did not survive restart");
+  console.log("Route persistence smoke passed", { routeId, sessionId, observations: restored.body.observations, referencePosePoints: restored.body.poseTrack.length, nodes: restored.body.nodeRecords.length, publishBlocked: publish.body.error, published: restored.body.status });
 } finally {
   await stopApi(api);
   await rm(dbPath, { force: true });

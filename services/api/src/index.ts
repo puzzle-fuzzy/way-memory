@@ -10,6 +10,7 @@ import type {
   ObservationSession,
   PoseEstimate,
   RelativeMotionPoint,
+  RouteAlignmentSummary,
   RouteNode,
   RouteObservationSummary,
   SessionDelta,
@@ -145,7 +146,58 @@ const observationConfidence = (session: ObservationSession) => {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 };
 
-const toObservationSummary = (session: ObservationSession, attachedAt: string): RouteObservationSummary => ({
+type TrackAlignment = {
+  summary: RouteAlignmentSummary;
+  track?: TrackPoint[];
+};
+
+const alignGnssTrack = (reference: TrackPoint[], candidate: TrackPoint[]): TrackAlignment => {
+  const unavailable = (matchedPoints: number, coverage: number, residualM?: number): TrackAlignment => ({
+    summary: { method: "gnss-nearest", status: "unavailable", matchedPoints, coverage, ...(residualM === undefined ? {} : { residualM }) },
+  });
+  if (reference.length < 2 || candidate.length < 2) return unavailable(0, 0);
+  const matches: Array<{ referenceIndex: number; point: TrackPoint; distanceM: number }> = [];
+  let nextReferenceIndex = 0;
+  for (const point of candidate) {
+    let best: { referenceIndex: number; distanceM: number } | undefined;
+    for (let index = nextReferenceIndex; index < reference.length; index += 1) {
+      const distanceM = geographicDistanceM(reference[index], point);
+      if (!best || distanceM < best.distanceM) best = { referenceIndex: index, distanceM };
+    }
+    if (best && best.distanceM <= 25) {
+      matches.push({ referenceIndex: best.referenceIndex, point, distanceM: best.distanceM });
+      nextReferenceIndex = best.referenceIndex;
+    }
+  }
+  const coverage = matches.length / candidate.length;
+  const residualM = matches.length ? matches.reduce((sum, match) => sum + match.distanceM, 0) / matches.length : undefined;
+  const distinctReferencePoints = new Set(matches.map((match) => match.referenceIndex)).size;
+  if (matches.length < 2 || distinctReferencePoints < 2 || coverage < 0.5 || (residualM !== undefined && residualM > 25)) return unavailable(matches.length, coverage, residualM);
+  const buckets = reference.map((point) => [point] as TrackPoint[]);
+  for (const match of matches) buckets[match.referenceIndex].push(match.point);
+  const merged = buckets.map((points) => {
+    if (points.length === 1) return points[0];
+    const latitude = points.reduce((sum, point) => sum + point.lat, 0) / points.length;
+    const longitude = points.reduce((sum, point) => sum + point.lng, 0) / points.length;
+    const accuracyM = points.reduce((sum, point) => sum + point.accuracyM, 0) / points.length;
+    const confidence = points.reduce((sum, point) => sum + point.confidence, 0) / points.length;
+    const altitudes = points.flatMap((point) => typeof point.altitudeM === "number" ? [point.altitudeM] : []);
+    return {
+      ...points[0],
+      lat: latitude,
+      lng: longitude,
+      accuracyM,
+      confidence,
+      ...(altitudes.length ? { altitudeM: altitudes.reduce((sum, value) => sum + value, 0) / altitudes.length } : {}),
+    };
+  });
+  return {
+    summary: { method: "gnss-nearest", status: "matched", matchedPoints: matches.length, coverage, residualM },
+    track: merged,
+  };
+};
+
+const toObservationSummary = (session: ObservationSession, attachedAt: string, alignment: RouteAlignmentSummary): RouteObservationSummary => ({
   sessionId: session.sessionId,
   startedAt: session.startedAt,
   sampleCount: session.sampleCount,
@@ -155,6 +207,7 @@ const toObservationSummary = (session: ObservationSession, attachedAt: string): 
   motionMode: session.motionMode,
   sourceFlags: [...new Set(session.poseTrack.flatMap((pose) => pose.sourceFlags))].slice(0, 32),
   attachedAt,
+  alignment,
 });
 
 const publicRoute = (route: StoredRoute) => {
@@ -186,18 +239,36 @@ const attachObservation = (route: StoredRoute, session: ObservationSession) => {
   if (route.observationSummaries.some((observation) => observation.sessionId === session.sessionId)) return route;
   if (route.observationSummaries.length >= MAX_ROUTE_OBSERVATIONS) throw new Error("route_observation_limit");
   const attachedAt = new Date().toISOString();
-  const observation = toObservationSummary(session, attachedAt);
+  const isReference = !route.referenceSessionId;
+  const alignmentResult: TrackAlignment = isReference
+    ? {
+      summary: {
+        method: "reference",
+        status: "reference",
+        matchedPoints: session.track.length,
+        coverage: session.track.length ? 1 : 0,
+      },
+    }
+    : alignGnssTrack(route.track, session.track);
+  const observation = toObservationSummary(session, attachedAt, alignmentResult.summary);
   route.observationSummaries.push(observation);
   route.observations = route.observationSummaries.length;
-  // A local ENU pose from another capture cannot be appended safely until a
-  // GNSS/visual alignment transform exists. Keep the first real observation as
-  // the reference and preserve later observation summaries for that next step.
-  if (!route.referenceSessionId) {
+  if (isReference) {
     route.referenceSessionId = session.sessionId;
     route.track = session.track.slice(-MAX_ROUTE_TRACK_POINTS);
     route.poseTrack = session.poseTrack.slice(-MAX_ROUTE_POSE_POINTS);
     route.distanceM = route.poseTrack.length > 1 ? poseTrackDistanceM(route.poseTrack) : trackDistanceM(route.track);
     route.confidence = observationConfidence(session);
+  } else {
+    // GNSS alignment only changes the geographic reference track. A later
+    // capture's local ENU/AR pose remains session-scoped until a visual or
+    // heading transform can prove that the two local frames are compatible.
+    const aligned = alignmentResult.track;
+    if (aligned) {
+      route.track = aligned.slice(-MAX_ROUTE_TRACK_POINTS);
+      route.distanceM = route.track.length > 1 ? trackDistanceM(route.track) : route.distanceM;
+      route.confidence = ((route.confidence * (route.observations - 1)) + observationConfidence(session)) / route.observations;
+    }
   }
   route.updatedAt = attachedAt;
   return route;
@@ -1246,7 +1317,18 @@ const server = Bun.serve<RealtimeClient>({
         return json(publicRoute(route), { status: 201 });
       }
       if (action === "publish" && request.method === "POST") {
-        return json({ error: "route_alignment_required" }, { status: 409 });
+        const repeatedObservations = route.observationSummaries.filter((observation) => observation.alignment.method !== "reference");
+        const aligned = route.observations >= 3
+          && Boolean(route.referenceSessionId)
+          && route.track.length > 1
+          && route.poseTrack.length > 1
+          && repeatedObservations.length >= 2
+          && repeatedObservations.every((observation) => observation.alignment.status === "matched");
+        if (!aligned) return json({ error: "route_alignment_required" }, { status: 409 });
+        route.status = "verified";
+        route.updatedAt = new Date().toISOString();
+        routeStore.save(route);
+        return json(publicRoute(route));
       }
       return json({ error: "route_not_found" }, { status: 404 });
     }

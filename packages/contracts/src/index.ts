@@ -77,6 +77,15 @@ export interface RouteObservationSummary {
   motionMode: MotionMode;
   sourceFlags: string[];
   attachedAt: string;
+  alignment: RouteAlignmentSummary;
+}
+
+export interface RouteAlignmentSummary {
+  method: "reference" | "gnss-nearest";
+  status: "reference" | "matched" | "unavailable";
+  matchedPoints: number;
+  coverage: number;
+  residualM?: number;
 }
 
 export type RouteNodeType = "start" | "turn" | "door" | "stairs" | "elevator" | "crossing" | "landmark" | "hazard" | "end";

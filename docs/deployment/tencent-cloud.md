@@ -22,7 +22,7 @@ After restarting `way-memory-api.service`, poll `http://127.0.0.1:8787/health` u
 
 Runtime memory protection and coordinate validation are documented in `docs/data-integrity.md`: 20 sessions, 500 location points, 500 legacy relative points, 1,200 Pose points, 128 motion events, 1,024 raw replay samples per session, bounded sensor snapshots, bounded payloads, timestamp ordering, coordinate range checks, duplicate suppression, and short-gap jump rejection.
 
-The route registry is also bounded: 100 persisted routes, up to 50 observation summaries per route, and only the first aligned reference observation's 500 location/1,200 Pose windows until the coordinate-alignment engine is available.
+The route registry is also bounded: 100 persisted routes, up to 50 observation summaries and 128 manual nodes per route, plus 500 geographic and 1,200 Pose points in the reference window. Repeated observations are eligible for GNSS-nearest alignment only after the server's coverage/residual checks; local ENU/AR frames are not concatenated automatically.
 
 This MVP entry point is HTTP/WS on the server IP and is not a production privacy boundary. The API authorization core is implemented but not enabled on this test deployment; do not send real user route history to it. Before production use, finish the Android Keystore and dashboard enrollment clients, configure `WAY_MEMORY_ENV=production`, `WAY_MEMORY_AUTH_MODE=enforced`, a one-time `WAY_MEMORY_BOOTSTRAP_TOKEN`, and `WAY_MEMORY_PUBLIC_ORIGIN=https://...`, then add the domain/TLS proxy. The production guard refuses to bind if the HTTPS/auth configuration is missing.
 
