@@ -97,6 +97,7 @@ class SessionUploader(
     private var running = false
     private var nextConnectAtMs = 0L
     private var reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
+    private var lastQueueUiPublishMs = 0L
 
     val syncState: StateFlow<SessionSyncState> = state.asStateFlow()
 
@@ -107,6 +108,7 @@ class SessionUploader(
         running = true
         nextConnectAtMs = 0L
         reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
+        lastQueueUiPublishMs = 0L
         state.value = SessionSyncState(lastError = null)
         connectionJob = scope.launch {
             while (isActive && running) {
@@ -125,11 +127,15 @@ class SessionUploader(
             if (queue.pollFirst() == null) break
             dropped += 1
         }
-        state.value = state.value.copy(
-            pendingSamples = queue.size,
-            droppedSamples = state.value.droppedSamples + dropped,
-            lastError = if (dropped > 0) "网络不可用，已丢弃最旧的 $dropped 条原始样本" else state.value.lastError,
-        )
+        val nowMs = System.currentTimeMillis()
+        if (dropped > 0 || nowMs - lastQueueUiPublishMs >= QUEUE_UI_INTERVAL_MS) {
+            lastQueueUiPublishMs = nowMs
+            state.value = state.value.copy(
+                pendingSamples = queue.size,
+                droppedSamples = state.value.droppedSamples + dropped,
+                lastError = if (dropped > 0) "网络不可用，已丢弃最旧的 $dropped 条原始样本" else state.value.lastError,
+            )
+        }
     }
 
     fun stop() {
@@ -320,6 +326,7 @@ class SessionUploader(
         private const val MAX_BATCH = 100
         private const val MAX_PENDING_SAMPLES = 4_096
         private const val FLUSH_INTERVAL_MS = 80L
+        private const val QUEUE_UI_INTERVAL_MS = 250L
         private const val INITIAL_RECONNECT_DELAY_MS = 250L
         private const val MAX_RECONNECT_DELAY_MS = 10_000L
     }

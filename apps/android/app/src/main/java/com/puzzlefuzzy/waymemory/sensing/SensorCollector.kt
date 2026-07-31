@@ -46,6 +46,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private var gravityInitialized = false
     private var lastLinearAccelerationTimestampNs = 0L
     private var angularRateMagnitude = 0f
+    private var totalCollectedSamples = 0L
+    private var lastSensorUiPublishMs = 0L
+    private var lastPoseUiPublishMs = 0L
 
     val uiState: StateFlow<SensorUiState> = state.asStateFlow()
     val syncState: StateFlow<SessionSyncState> = uploader.syncState
@@ -68,6 +71,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         readings.clear()
         registeredSensorKeys.clear()
         lastPublishedLocation = null
+        totalCollectedSamples = 0L
+        lastSensorUiPublishMs = 0L
+        lastPoseUiPublishMs = 0L
         resetMotionState()
         hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
         sensorManager.getSensorList(Sensor.TYPE_ALL).forEach { sensor ->
@@ -78,6 +84,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             collecting = true,
             availableSensorCount = availableSensorCount(),
             locationPermissionGranted = hasPreciseLocationPermission(),
+            sampleCount = 0,
+            lastSampleAtMs = null,
             readings = readings.values.toList(),
             error = null,
         )
@@ -196,6 +204,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun publishPose(update: PoseUpdate) {
+        val nowMs = System.currentTimeMillis()
+        if (update.motionEvent == null && nowMs - lastPoseUiPublishMs < POSE_UI_INTERVAL_MS) return
+        lastPoseUiPublishMs = nowMs
         val pose = update.pose
         state.value = state.value.copy(
             poseText = "x %.2f · y %.2f · z %.2f · ±%.1fm".format(pose.xM, pose.yM, pose.zM, pose.accuracyM),
@@ -239,9 +250,13 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     private fun publishSample() {
+        totalCollectedSamples += 1
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastSensorUiPublishMs < SENSOR_UI_INTERVAL_MS) return
+        lastSensorUiPublishMs = nowMs
         state.value = state.value.copy(
-            sampleCount = state.value.sampleCount + 1,
-            lastSampleAtMs = System.currentTimeMillis(),
+            sampleCount = totalCollectedSamples,
+            lastSampleAtMs = nowMs,
             readings = readings.values.toList(),
         )
     }
@@ -403,4 +418,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         zM = zM,
         accuracyM = accuracyM,
     )
+
+    companion object {
+        private const val SENSOR_UI_INTERVAL_MS = 100L
+        private const val POSE_UI_INTERVAL_MS = 50L
+    }
 }
