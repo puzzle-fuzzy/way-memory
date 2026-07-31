@@ -26,6 +26,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val state = MutableStateFlow(SensorUiState())
     private val readings = linkedMapOf<String, SensorReading>()
     private val uploader = SessionUploader()
+    private var lastPublishedLocation: Location? = null
 
     val uiState: StateFlow<SensorUiState> = state.asStateFlow()
     val syncState: StateFlow<SessionSyncState> = uploader.syncState
@@ -46,6 +47,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         if (state.value.collecting) return
 
         readings.clear()
+        lastPublishedLocation = null
         registerSensor(Sensor.TYPE_ACCELEROMETER, "Accelerometer", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
         registerSensor(Sensor.TYPE_GYROSCOPE, "Gyroscope", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
         registerSensor(Sensor.TYPE_MAGNETIC_FIELD, "Magnetometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
@@ -69,6 +71,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     fun stop() {
         sensorManager.unregisterListener(this)
         locationManager.removeUpdates(this)
+        lastPublishedLocation = null
         uploader.stop()
         state.value = state.value.copy(collecting = false)
     }
@@ -85,20 +88,31 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
     @SuppressLint("MissingPermission")
     private fun requestLocationUpdates() {
-        // Prefer GNSS when it is enabled. Coarse-only/network updates can be thousands
-        // of meters wide and are not suitable for a pedestrian route.
-        val enabledProviders = locationManager.getProviders(true)
-        val provider = when {
-            LocationManager.GPS_PROVIDER in enabledProviders -> LocationManager.GPS_PROVIDER
-            LocationManager.NETWORK_PROVIDER in enabledProviders -> LocationManager.NETWORK_PROVIDER
-            else -> null
-        }
-        if (provider == null) {
+        // Subscribe to both providers. GNSS is preferred by the filtering below, while
+        // network can provide an initial fix when the phone is indoors or GNSS is still
+        // warming up. The server still validates every emitted location sample.
+        val providers = locationManager.getProviders(true)
+            .filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
+        if (providers.isEmpty()) {
             updateError("请打开系统定位服务")
             return
         }
-        runCatching { locationManager.requestLocationUpdates(provider, 500L, 0f, this) }
-            .onFailure { updateError("无法订阅精确位置服务") }
+        var subscribed = 0
+        providers.forEach { provider ->
+            runCatching { locationManager.requestLocationUpdates(provider, 1_000L, 0f, this) }
+                .onSuccess { subscribed += 1 }
+        }
+        if (subscribed == 0) {
+            updateError("无法订阅系统定位服务")
+            return
+        }
+
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        providers.mapNotNull { provider ->
+            runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
+        }.maxByOrNull { it.elapsedRealtimeNanos }
+            ?.takeIf { it.elapsedRealtimeNanos > 0 && nowNs - it.elapsedRealtimeNanos <= 30_000_000_000L }
+            ?.let(::onLocationChanged)
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -131,6 +145,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     override fun onLocationChanged(location: Location) {
+        if (!shouldPublishLocation(location)) return
+        lastPublishedLocation = Location(location)
         val accuracy = if (location.hasAccuracy()) "±%.1fm".format(location.accuracy) else "accuracy unknown"
         state.value = state.value.copy(
             locationText = "%.6f, %.6f · %s".format(location.latitude, location.longitude, accuracy),
@@ -148,6 +164,35 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
                 ),
             ),
         )
+    }
+
+    private fun shouldPublishLocation(location: Location): Boolean {
+        val previous = lastPublishedLocation ?: return true
+        val currentTimestampNs = location.elapsedRealtimeNanos
+        val previousTimestampNs = previous.elapsedRealtimeNanos
+        if (currentTimestampNs > 0 && previousTimestampNs > 0 && currentTimestampNs <= previousTimestampNs) return false
+
+        val elapsedNs = if (currentTimestampNs > 0 && previousTimestampNs > 0) {
+            currentTimestampNs - previousTimestampNs
+        } else {
+            Long.MAX_VALUE
+        }
+        val distance = FloatArray(1)
+        Location.distanceBetween(
+            previous.latitude,
+            previous.longitude,
+            location.latitude,
+            location.longitude,
+            distance,
+        )
+        if (distance[0] <= 0.5f && elapsedNs <= 2_000_000_000L) return false
+
+        val previousAccuracy = previous.accuracy.takeIf { previous.hasAccuracy() } ?: Float.MAX_VALUE
+        val currentAccuracy = location.accuracy.takeIf { location.hasAccuracy() } ?: Float.MAX_VALUE
+        if (previous.provider == LocationManager.GPS_PROVIDER && location.provider != LocationManager.GPS_PROVIDER && currentAccuracy > previousAccuracy * 2 && elapsedNs <= 5_000_000_000L) {
+            return false
+        }
+        return true
     }
 
     override fun onProviderEnabled(provider: String) = Unit
