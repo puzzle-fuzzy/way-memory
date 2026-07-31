@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 import kotlin.math.sqrt
 
 class SensorCollector(context: Context) : SensorEventListener, LocationListener {
@@ -28,7 +29,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val state = MutableStateFlow(SensorUiState())
     private val readings = linkedMapOf<String, SensorReading>()
     private val registeredSensorKeys = mutableSetOf<String>()
-    private val uploader = SessionUploader()
+    private val uploader = SessionUploader(storageDirectory = File(appContext.filesDir, "capture-queue"))
     private val poseFusion = PoseFusionEngine()
     private val visualCollector = ArCorePoseCollector(
         appContext = appContext,

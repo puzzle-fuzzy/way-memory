@@ -19,7 +19,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.ConcurrentLinkedDeque
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 data class CollectedSample(
@@ -85,11 +85,13 @@ data class SessionSyncState(
 
 class SessionUploader(
     private val baseUrl: String = BuildConfig.API_BASE_URL,
+    storageDirectory: File,
 ) : WebSocketListener() {
     private val client = OkHttpClient.Builder().pingInterval(15, TimeUnit.SECONDS).build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val queue = ConcurrentLinkedDeque<CollectedSample>()
-    private val state = MutableStateFlow(SessionSyncState())
+    private val queue = PersistentSampleQueue(storageDirectory)
+    private val sessionIdFile = File(storageDirectory, "active-session.id")
+    private val state = MutableStateFlow(SessionSyncState(pendingSamples = queue.size()))
     private var socket: WebSocket? = null
     private var connectionJob: Job? = null
     private var deviceId: String = "android-device"
@@ -104,12 +106,18 @@ class SessionUploader(
     fun start(deviceId: String) {
         if (running) return
         this.deviceId = deviceId
-        activeSessionId = null
+        activeSessionId = runCatching {
+            sessionIdFile.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+        }.getOrNull()
         running = true
         nextConnectAtMs = 0L
         reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
         lastQueueUiPublishMs = 0L
-        state.value = SessionSyncState(lastError = null)
+        state.value = SessionSyncState(
+            pendingSamples = queue.size(),
+            lastError = null,
+            sessionId = activeSessionId,
+        )
         connectionJob = scope.launch {
             while (isActive && running) {
                 if (socket == null && System.currentTimeMillis() >= nextConnectAtMs) connect()
@@ -121,19 +129,14 @@ class SessionUploader(
 
     fun enqueue(sample: CollectedSample) {
         if (!running) return
-        queue.addLast(sample)
-        var dropped = 0L
-        while (queue.size > MAX_PENDING_SAMPLES) {
-            if (queue.pollFirst() == null) break
-            dropped += 1
-        }
+        val dropped = queue.add(sample).toLong()
         val nowMs = System.currentTimeMillis()
         if (dropped > 0 || nowMs - lastQueueUiPublishMs >= QUEUE_UI_INTERVAL_MS) {
             lastQueueUiPublishMs = nowMs
             state.value = state.value.copy(
-                pendingSamples = queue.size,
+                pendingSamples = queue.size(),
                 droppedSamples = state.value.droppedSamples + dropped,
-                lastError = if (dropped > 0) "网络不可用，已丢弃最旧的 $dropped 条原始样本" else state.value.lastError,
+                lastError = if (dropped > 0) "待上传队列已满，已淘汰最旧的 $dropped 条样本" else state.value.lastError,
             )
         }
     }
@@ -142,24 +145,26 @@ class SessionUploader(
         running = false
         connectionJob?.cancel()
         repeat(10) {
-            if (queue.isEmpty()) return@repeat
+            if (queue.size() == 0) return@repeat
             flush()
         }
         activeSessionId?.let { sessionId ->
             socket?.send(JSONObject().put("type", "session.stop").put("sessionId", sessionId).toString())
         }
-        val unsent = queue.size
-        queue.clear()
         connectionJob = null
         socket?.close(1000, "session stopped")
         socket = null
+        sessionIdFile.delete()
         activeSessionId = null
         state.value = state.value.copy(
             connected = false,
             sessionId = null,
-            pendingSamples = 0,
-            droppedSamples = state.value.droppedSamples + unsent,
-            lastError = if (unsent > 0) "停止采集时仍有 $unsent 条样本未上传" else state.value.lastError,
+            pendingSamples = queue.size(),
+            lastError = if (queue.size() > 0) {
+                "停止采集，仍有 ${queue.size()} 条样本保存在本机，下一次采集将继续上传"
+            } else {
+                state.value.lastError
+            },
         )
     }
 
@@ -200,13 +205,18 @@ class SessionUploader(
             when (message.optString("type")) {
                 "session.started", "session.resumed" -> {
                     activeSessionId = message.getJSONObject("session").getString("sessionId")
+                    sessionIdFile.parentFile?.mkdirs()
+                    activeSessionId?.let(sessionIdFile::writeText)
                     state.value = state.value.copy(sessionId = activeSessionId, lastError = null)
                 }
-                "samples.accepted" -> state.value = state.value.copy(uploadedSamples = message.optLong("sampleCount", state.value.uploadedSamples))
+                "samples.accepted" -> state.value = state.value.copy(
+                    uploadedSamples = message.optLong("sampleCount", state.value.uploadedSamples),
+                )
                 "error" -> {
                     val error = message.optString("error")
                     if (error == "session_resume_failed" && activeSessionId != null && running) {
                         activeSessionId = null
+                        sessionIdFile.delete()
                         state.value = state.value.copy(sessionId = null, lastError = "会话已过期，正在建立新会话")
                         webSocket.send(
                             JSONObject()
@@ -245,86 +255,28 @@ class SessionUploader(
     private fun flush() {
         val sessionId = activeSessionId ?: return
         val currentSocket = socket ?: return
-        if (queue.isEmpty()) return
-
-        val batch = ArrayList<CollectedSample>(MAX_BATCH)
-        repeat(MAX_BATCH) { queue.pollFirst()?.let(batch::add) }
+        val batch = queue.peek(MAX_BATCH)
         if (batch.isEmpty()) return
 
         val payload = JSONObject()
             .put("type", "samples")
             .put("sessionId", sessionId)
-            .put("samples", JSONArray().apply { batch.forEach { put(it.toJson()) } })
-        if (!currentSocket.send(payload.toString())) {
-            batch.asReversed().forEach(queue::addFirst)
-        } else {
+            .put("samples", JSONArray().apply { batch.forEach { put(CollectedSampleCodec.encode(it)) } })
+        if (currentSocket.send(payload.toString())) {
+            // OkHttp accepted the frame. If the process dies before the cursor
+            // advances, the batch is sent again on recovery; duplicate delivery
+            // is safer than losing a route segment.
+            queue.acknowledge(batch.size)
             state.value = state.value.copy(
                 uploadedSamples = state.value.uploadedSamples + batch.size,
-                pendingSamples = queue.size,
+                pendingSamples = queue.size(),
             )
-        }
-    }
-
-    private fun CollectedSample.toJson(): JSONObject = JSONObject().apply {
-        put("deviceTimestampNs", deviceTimestampNs)
-        put("sensorType", sensorType)
-        put("values", JSONArray(values))
-        sensorAccuracy?.let { put("sensorAccuracy", it) }
-        accuracy?.let { put("accuracy", it) }
-        location?.let {
-            put("location", JSONObject().apply {
-                put("lat", it.lat)
-                put("lng", it.lng)
-                it.accuracyM?.let { value -> put("accuracyM", value) }
-                it.altitudeM?.let { value -> put("altitudeM", value) }
-            })
-        }
-        relativePosition?.let {
-            put("relativePosition", JSONObject().apply {
-                put("xM", it.xM)
-                put("yM", it.yM)
-                put("zM", it.zM)
-                put("accuracyM", it.accuracyM)
-            })
-        }
-        pose?.let {
-            put("pose", JSONObject().apply {
-                put("deviceTimestampNs", it.deviceTimestampNs)
-                put("xM", it.xM)
-                put("yM", it.yM)
-                put("zM", it.zM)
-                put("velocityXMps", it.velocityXMps)
-                put("velocityYMps", it.velocityYMps)
-                put("velocityZMps", it.velocityZMps)
-                put("accuracyM", it.accuracyM)
-                it.verticalAccuracyM?.let { value -> put("verticalAccuracyM", value) }
-                put("confidence", it.confidence)
-                put("source", it.source)
-                put("frame", it.frame)
-                put("sourceFlags", JSONArray(it.sourceFlags))
-                put("motionMode", it.motionMode)
-                put("stationary", it.stationary)
-            })
-        }
-        motionEvent?.let {
-            put("motionEvent", JSONObject().apply {
-                put("eventId", it.eventId)
-                put("deviceTimestampNs", it.deviceTimestampNs)
-                put("type", it.type)
-                put("confidence", it.confidence)
-                if (it.details.isNotEmpty()) {
-                    put("details", JSONObject().apply {
-                        it.details.forEach { (key, value) -> value?.let { item -> put(key, item) } }
-                    })
-                }
-            })
         }
     }
 
     companion object {
         private const val TAG = "WayMemorySync"
         private const val MAX_BATCH = 100
-        private const val MAX_PENDING_SAMPLES = 4_096
         private const val FLUSH_INTERVAL_MS = 80L
         private const val QUEUE_UI_INTERVAL_MS = 250L
         private const val INITIAL_RECONNECT_DELAY_MS = 250L

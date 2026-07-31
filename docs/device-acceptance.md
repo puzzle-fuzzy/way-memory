@@ -40,6 +40,7 @@ Run each case as a separate session and record the session ID shown by the API/W
 | Elevator | Ride an elevator with minimal horizontal movement | `elevator-candidate`, `elevator-exit`, and pressure-derived relative height; it is not presented as confirmed floor identity |
 | Orientation/background | Start capture, rotate the screen, lock it briefly, unlock, then stop | The same capture remains active; IMU/GNSS/barometer continue while visual tracking is paused; no second start is required |
 | Network interruption | Disable network for less than two minutes, move briefly, restore network | `session.resumed` reconnects to the same session; pending queue stays bounded; the UI exposes any dropped count |
+| Process recovery | Start capture, force-stop the app, relaunch it before the two-minute server grace window expires | The app resumes the persisted session when possible; retained samples are drained, and any replayed batch is bounded and duplicate-tolerant, never silently lost |
 
 ## Server evidence
 
