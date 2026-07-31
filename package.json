@@ -15,6 +15,7 @@
     "smoke:closure": "bun run scripts/closure-smoke.ts",
     "smoke:replay": "bun run scripts/replay-smoke.ts",
     "smoke:reconnect": "bun run scripts/reconnect-smoke.ts",
+    "android:acceptance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1",
     "replay:session": "bun run scripts/replay-session.ts",
     "dev:api": "bun run services/api/src/index.ts",
     "dev:web": "bun --cwd=apps/web run dev",

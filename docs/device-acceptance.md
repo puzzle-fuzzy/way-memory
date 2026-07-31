@@ -1,0 +1,60 @@
+# Android real-device acceptance
+
+This is the gate between “the code builds” and “the product recorded a real route”. The current Windows workstation has no authorized `adb` device, so this checklist is intentionally not marked passed until a phone produces the evidence below.
+
+## Prepare
+
+1. Connect one Android phone with USB debugging enabled and accept the RSA prompt.
+2. Turn on system location. Grant **precise location**. Camera permission is optional; it is needed only for the ARCore visual correction path.
+3. Install and launch the exact APK from the committed worktree:
+
+```powershell
+cd E:\__Super_Core__\way-memory
+bun run android:acceptance
+```
+
+If more than one device is connected, use:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1 -Serial <serial>
+```
+
+The script only installs and launches the APK. It does not grant permissions silently and does not fabricate route data.
+
+## Capture matrix
+
+Run each case as a separate session and record the session ID shown by the API/WebSocket logs.
+
+| Case | Device action | Required evidence |
+| --- | --- | --- |
+| Sensor inventory | Start capture while holding the phone still, then move and rotate it | The Android screen lists the device-provided sensors; the session has raw samples for known and unknown sensor types; no crash |
+| 3D translation | Move the phone forward/back, left/right, and up/down for at least 30 seconds | `poseTrack` contains changing `xM/yM/zM`; the web canvas shows individual 3D points, not an invented connecting line |
+| Rotation only | Rotate in place without translating | Orientation/visual samples change, but translation is not falsely reported as large movement |
+| Closed loop | Walk a loop and return near the start | Raw start/end remain visible; `closure` is only `closed` when aligned visual loop evidence exists; corrected track is separate from raw track |
+| Stairs | Walk at least one flight with horizontal travel | `stairs-enter`/`stairs-exit` or a `stairs` pose mode and a changing relative `zM` |
+| Elevator | Ride an elevator with minimal horizontal movement | `elevator-candidate`, `elevator-exit`, and pressure-derived relative height; it is not presented as confirmed floor identity |
+| Orientation/background | Start capture, rotate the screen, lock it briefly, unlock, then stop | The same capture remains active; IMU/GNSS/barometer continue while visual tracking is paused; no second start is required |
+| Network interruption | Disable network for less than two minutes, move briefly, restore network | `session.resumed` reconnects to the same session; pending queue stays bounded; the UI exposes any dropped count |
+
+## Server evidence
+
+For a captured session `<SESSION_ID>`:
+
+```powershell
+Invoke-RestMethod "http://101.35.246.159/api/sessions/<SESSION_ID>" | ConvertTo-Json -Depth 8
+Invoke-RestMethod "http://101.35.246.159/api/sessions/<SESSION_ID>/raw" | ConvertTo-Json -Depth 8
+```
+
+Record at minimum:
+
+- `sampleCount`, `rawSampleCount`, `droppedSampleCount`;
+- `poseTrack` count and the min/max of `xM`, `yM`, `zM`;
+- `sourceFlags`, `frame`, `motionMode`, and `motionEvents`;
+- `closure.status`, `closure.adjusted`, and whether `correctedPoseTrack` is present;
+- the web page screenshot showing the same session ID and point count.
+
+## Pass boundary
+
+Builds, local unit tests, public HTTP health, public WebSocket transport, bounded persistence, loop-correction smoke, replay smoke, and reconnect smoke are automated gates. They do not prove phone sensor quality.
+
+Real-device acceptance passes only after the capture matrix produces the fields above. The product must not claim arbitrary centimeter-level positioning: GNSS, inertial integration, barometer, and ARCore each have different failure modes, so route confidence and source flags remain part of the stored evidence.
