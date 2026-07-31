@@ -2,12 +2,19 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { LiveSensorSnapshot, TrackPoint } from "@way-memory/contracts";
 import { useRealtimeSession } from "./composables/useRealtimeSession";
+import { useRoutes } from "./composables/useRoutes";
 
 const { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, followLatest, setAuthToken, enrollDevice } = useRealtimeSession();
+const { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute } = useRoutes();
 const dashboardToken = ref("");
 const newDeviceToken = ref("");
 const enrollmentError = ref("");
 const enrollmentBusy = ref(false);
+const selectedRouteId = ref("");
+const routeName = ref("盲人路线");
+const routeActionError = ref("");
+const routeManagementAvailable = computed(() => !authRequired.value || authenticated.value);
+const selectedRoute = computed(() => routes.value.find((route) => route.routeId === selectedRouteId.value));
 
 async function createDeviceCredential() {
   enrollmentBusy.value = true;
@@ -18,6 +25,36 @@ async function createDeviceCredential() {
     enrollmentError.value = error instanceof Error ? error.message : "设备 enrollment 失败";
   } finally {
     enrollmentBusy.value = false;
+  }
+}
+
+async function createRouteRecord() {
+  routeActionError.value = "";
+  try {
+    const route = await createRoute(routeName.value.trim() || "盲人路线");
+    selectedRouteId.value = route.routeId;
+  } catch (error) {
+    routeActionError.value = error instanceof Error ? error.message : "路线创建失败";
+  }
+}
+
+async function bindCurrentObservation() {
+  if (!selectedRoute.value || !session.value || session.value.status !== "stopped") return;
+  routeActionError.value = "";
+  try {
+    await attachObservation(selectedRoute.value.routeId, session.value.sessionId);
+  } catch (error) {
+    routeActionError.value = error instanceof Error ? error.message : "观测绑定失败";
+  }
+}
+
+async function verifySelectedRoute() {
+  if (!selectedRoute.value) return;
+  routeActionError.value = "";
+  try {
+    await publishRoute(selectedRoute.value.routeId);
+  } catch (error) {
+    routeActionError.value = error instanceof Error ? error.message : "路线尚未满足发布条件";
   }
 }
 
@@ -724,9 +761,18 @@ const scheduleCanvasDraw = () => {
 watch([displayedTrack, cameraYaw, cameraPitch], scheduleCanvasDraw, { flush: "post" });
 
 onMounted(() => {
+  void refreshRoutes();
   canvasResizeObserver = new ResizeObserver(scheduleCanvasDraw);
   if (pointCanvasHost.value) canvasResizeObserver.observe(pointCanvasHost.value);
   scheduleCanvasDraw();
+});
+
+watch(routeManagementAvailable, (available) => {
+  if (available) void refreshRoutes();
+});
+
+watch(routes, (items) => {
+  if (!selectedRouteId.value && items[0]) selectedRouteId.value = items[0].routeId;
 });
 
 onBeforeUnmount(() => {
@@ -790,8 +836,19 @@ const activities = computed(() => {
           <option value="" disabled>历史采集会话</option>
          <option v-for="item in availableSessions" :key="item.sessionId" :value="item.sessionId">{{ sessionHistoryLabel(item) }}</option>
         </select>
+        <template v-if="routeManagementAvailable">
+          <select v-model="selectedRouteId" class="max-w-[260px] rounded-full border border-[#c8ddd0] bg-[#f8fcf8] px-3 py-1.5 outline-none" aria-label="选择路线">
+            <option value="">路线工作区</option>
+            <option v-for="route in routes" :key="route.routeId" :value="route.routeId">{{ route.name }} · {{ route.status }} · {{ route.observations }} 次</option>
+          </select>
+          <input v-model="routeName" class="hidden w-[150px] rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 outline-none md:inline-flex" aria-label="新路线名称" placeholder="新路线名称" @keyup.enter="createRouteRecord" />
+          <button class="rounded-full border border-[#cddbd1] bg-white/80 px-3 py-1.5 text-muted disabled:cursor-not-allowed disabled:opacity-50" type="button" :disabled="routeBusy" @click="createRouteRecord">新建路线</button>
+          <button v-if="selectedRoute && session?.status === 'stopped'" class="rounded-full border border-[#cddbd1] bg-white/80 px-3 py-1.5 text-muted disabled:cursor-not-allowed disabled:opacity-50" type="button" :disabled="routeBusy" @click="bindCurrentObservation">绑定当前记录</button>
+          <button v-if="selectedRoute && selectedRoute.status === 'draft'" class="rounded-full bg-ink px-3 py-1.5 text-paper disabled:cursor-not-allowed disabled:opacity-50" type="button" :disabled="routeBusy" @click="verifySelectedRoute">发布验证</button>
+        </template>
         <button v-if="authenticated" class="rounded-full border border-[#cddbd1] bg-white/80 px-3 py-1.5 text-muted" type="button" :disabled="enrollmentBusy" @click="createDeviceCredential">{{ enrollmentBusy ? "生成中" : "生成设备凭据" }}</button>
       </div>
+      <div v-if="routeManagementAvailable && (routeActionError || routeError)" class="z-10 border-b border-[#ead7bf] bg-[#fff8ee] px-4 py-1.5 text-[10px] text-[#8c6845] sm:px-7">路线工作区：{{ routeActionError || routeError }}</div>
 
       <div v-if="authRequired" class="z-10 flex flex-wrap items-center gap-3 border-b border-[#ead7bf] bg-[#fff8ee] px-4 py-3 text-xs text-[#8c6845] sm:px-7">
         <span class="font-semibold">服务端已开启访问控制，请输入 dashboard token 才能查看轨迹。</span>
