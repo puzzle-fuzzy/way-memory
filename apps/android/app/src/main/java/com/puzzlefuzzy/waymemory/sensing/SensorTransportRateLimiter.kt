@@ -12,6 +12,7 @@ package com.puzzlefuzzy.waymemory.sensing
 internal class SensorTransportRateLimiter {
     private val lastAcceptedTimestampNs = mutableMapOf<String, Long>()
 
+    @Synchronized
     fun shouldTransmit(
         streamKey: String,
         sensorType: String,
@@ -30,6 +31,7 @@ internal class SensorTransportRateLimiter {
         return true
     }
 
+    @Synchronized
     fun reset() = lastAcceptedTimestampNs.clear()
 
     fun maxHz(sensorType: String): Int {

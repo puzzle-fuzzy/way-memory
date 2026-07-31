@@ -59,6 +59,19 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun outOfOrderImuSampleCannotRewindTheFusionClock() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateImu(1_200_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateImu(1_300_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateImu(1_150_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        val afterOutOfOrder = engine.updateImu(1_400_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+
+        assertNotNull(afterOutOfOrder)
+        assertEquals(1_400_000_000L, afterOutOfOrder?.pose?.deviceTimestampNs)
+    }
+
+    @Test
     fun sustainedPressureChangeProducesElevatorCandidate() {
         val engine = PoseFusionEngine()
         var elevatorEvent = false

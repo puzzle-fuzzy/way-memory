@@ -60,6 +60,7 @@ class PoseFusionEngine {
     private var visualAlignmentPositionY = 0f
     private var visualLoopClosureEmitted = false
 
+    @Synchronized
     fun reset() {
         position.fill(0f)
         velocity.fill(0f)
@@ -103,8 +104,10 @@ class PoseFusionEngine {
         visualLoopClosureEmitted = false
     }
 
+    @Synchronized
     fun updatePressure(pressureHpa: Float, timestampNs: Long) {
         if (!pressureHpa.isFinite() || pressureHpa !in 300f..1_100f) return
+        if (timestampNs <= 0L || (lastPressureTimestampNs > 0L && timestampNs <= lastPressureTimestampNs)) return
         val reference = pressureReferenceHpa ?: pressureHpa.also { pressureReferenceHpa = it }
         val rawAltitude = (44_330.0 * (1.0 - (pressureHpa / reference).toDouble().pow(0.190294957))).toFloat()
         val previousAltitude = barometerAltitudeM
@@ -119,6 +122,7 @@ class PoseFusionEngine {
         hasBarometer = true
     }
 
+    @Synchronized
     fun updateGnss(
         latitude: Double,
         longitude: Double,
@@ -127,6 +131,7 @@ class PoseFusionEngine {
         timestampNs: Long,
     ): PoseUpdate? {
         if (!latitude.isFinite() || !longitude.isFinite()) return null
+        if (timestampNs <= 0L || (lastGnssTimestampNs > 0L && timestampNs <= lastGnssTimestampNs)) return null
         if (originLat == null || originLng == null) {
             originLat = latitude
             originLng = longitude
@@ -195,8 +200,10 @@ class PoseFusionEngine {
      * Until that alignment exists, no visual point is promoted to the unified
      * route; this avoids mixing two incompatible coordinate frames.
      */
+    @Synchronized
     fun updateVisual(sample: VisualPoseSample): PoseUpdate? {
         if (!sample.xM.isFinite() || !sample.yM.isFinite() || !sample.zM.isFinite()) return null
+        if (sample.deviceTimestampNs <= 0L || (lastVisualTimestampNs > 0L && sample.deviceTimestampNs <= lastVisualTimestampNs)) return null
         val previousVisualTimestampNs = lastVisualTimestampNs
         lastVisualTimestampNs = sample.deviceTimestampNs
         lastVisualAccuracyM = sample.accuracyM.takeIf { it.isFinite() }?.coerceIn(0.5f, 5f) ?: 1.5f
@@ -266,8 +273,10 @@ class PoseFusionEngine {
         return buildUpdate(sample.deviceTimestampNs, force = true, visualAligned = true)
     }
 
+    @Synchronized
     fun updateImu(timestampNs: Long, worldAcceleration: FloatArray, angularRateMagnitude: Float): PoseUpdate? {
         if (worldAcceleration.size < 3) return null
+        if (timestampNs <= 0L || (lastMotionTimestampNs > 0L && timestampNs <= lastMotionTimestampNs)) return null
         hasImu = true
         if (lastMotionTimestampNs == 0L) {
             lastMotionTimestampNs = timestampNs
