@@ -30,7 +30,7 @@ This MVP entry point is HTTP/WS on the server IP and is not a production privacy
 
 ## Latest test deployment evidence
 
-The latest anonymous test deployment was built from Git commit `c128fd8` and switched only after a remote API/Web SHA-256 comparison. The remote API bundle hash was `feaaf89245a9d65d375a144ad57661f7818c7679aab3d4b2c9b7c1de5335751b`; the web index hash was `5d74ea2e5a8d2085a6820c797aa8d6fbb8dba9c3f57cfa1bf21ba863754a5b3b`.
+The latest anonymous test deployment uses API commit `c128fd8` and Web commit `c60403a`; each switch was made only after a remote SHA-256 comparison. The remote API bundle hash is `feaaf89245a9d65d375a144ad57661f7818c7679aab3d4b2c9b7c1de5335751b`; the current web index hash is `f058ee76d0abb8def81382eaba13673f72a7cfc93c53cd43a6a87458622e5cc4`.
 
 - Backup retained on the host: `/var/backups/way-memory/20260731T163254Z/`;
 - `way-memory-api.service`: active after restart;
