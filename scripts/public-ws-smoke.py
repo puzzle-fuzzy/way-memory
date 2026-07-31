@@ -77,15 +77,15 @@ send_message(device, {
     "deviceId": "public-smoke",
     "mode": "learning",
     "sensors": [
-        {"sensorType": "android.sensor.accelerometer", "name": "Public Smoke Accelerometer", "registered": True},
-        {"sensorType": "android.sensor.protected", "name": "Protected Sensor", "registered": False},
+        {"sensorType": "android.sensor.accelerometer", "name": "Public Smoke Accelerometer", "transportMaxHz": 50, "registered": True},
+        {"sensorType": "android.sensor.protected", "name": "Protected Sensor", "transportMaxHz": 5, "registered": False},
     ],
 })
 started = recv_message(device)
 if started.get("type") != "session.started":
     raise RuntimeError(f"unexpected start: {started}")
 inventory = started.get("session", {}).get("sensorInventory", [])
-if len(inventory) != 2 or inventory[1].get("registered") is not False:
+if len(inventory) != 2 or inventory[0].get("transportMaxHz") != 50 or inventory[1].get("registered") is not False:
     raise RuntimeError(f"unexpected sensor inventory: {inventory}")
 recv_message(dashboard)
 session_id = started["session"]["sessionId"]

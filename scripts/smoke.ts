@@ -38,13 +38,13 @@ try {
         deviceId: "smoke-device",
         mode: "learning",
         sensors: [
-          { sensorType: "android.sensor.accelerometer", name: "Smoke Accelerometer", vendor: "test", version: 1, minDelayUs: 10_000, registered: true },
-          { sensorType: "android.sensor.protected", name: "Protected Sensor", registered: false },
+          { sensorType: "android.sensor.accelerometer", name: "Smoke Accelerometer", vendor: "test", version: 1, minDelayUs: 10_000, transportMaxHz: 50, registered: true },
+          { sensorType: "android.sensor.protected", name: "Protected Sensor", transportMaxHz: 5, registered: false },
         ],
       }));
       const started = await waitForMessage(device);
-      const session = started.session as { sessionId: string; sensorInventory?: Array<{ sensorType: string; registered: boolean }> };
-      if (started.type !== "session.started" || session.sensorInventory?.length !== 2 || session.sensorInventory[1]?.registered !== false) {
+      const session = started.session as { sessionId: string; sensorInventory?: Array<{ sensorType: string; registered: boolean; transportMaxHz?: number }> };
+      if (started.type !== "session.started" || session.sensorInventory?.length !== 2 || session.sensorInventory[0]?.transportMaxHz !== 50 || session.sensorInventory[1]?.registered !== false) {
         throw new Error("sensor inventory was not preserved")
       }
       await waitForMessage(dashboard);

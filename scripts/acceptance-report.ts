@@ -48,7 +48,15 @@ try {
   };
   const registeredSensors = inventory.filter((sensor) => sensor.registered === true).length;
   const hasGyroscopeSample = rawSensorTypes.some((type) => type.includes("gyroscope"));
-  const hasRotationSample = rawSensorTypes.some((type) => type.includes("rotation-vector") || type.includes("game-rotation"));
+  const normalizedRawSensorTypes = rawSensorTypes.map((type) => type.toLowerCase().replaceAll("_", "-"));
+  const hasRotationSample = normalizedRawSensorTypes.some((type) => type.includes("rotation-vector") || type.includes("game-rotation"));
+  const transportBudgetSensors = inventory.filter((sensor) => (
+    sensor.registered === true
+      && typeof sensor.transportMaxHz === "number"
+      && Number.isInteger(sensor.transportMaxHz)
+      && sensor.transportMaxHz >= 1
+      && sensor.transportMaxHz <= 1_000
+  )).length;
   const maximumPoseTranslationSpan = Math.max(axes.xM.span, axes.yM.span, axes.zM.span);
   const sampleIds = rawSamples.map((sample) => sample.sampleId).filter((id): id is string => typeof id === "string" && id.length > 0);
   const duplicateSampleIds = sampleIds.length - new Set(sampleIds).size;
@@ -56,6 +64,7 @@ try {
   const checks = {
     sessionLoaded: session.sessionId === sessionId,
     sensorInventory: inventory.length > 0 && registeredSensors > 0,
+    sensorTransportBudget: transportBudgetSensors === registeredSensors && registeredSensors > 0,
     rawReplayBounded: rawSamples.length > 0 && rawSamples.length <= 1024 && Number(session.rawSampleCount ?? 0) <= 1024,
     poseStream: poses.length > 0,
     threeAxisMovement: axes.xM.span >= minimumAxisM && axes.yM.span >= minimumAxisM && axes.zM.span >= minimumAxisM,
@@ -66,7 +75,7 @@ try {
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
   };
   const caseChecks: Record<string, boolean> = {
-    baseline: checks.sessionLoaded && checks.sensorInventory && checks.rawReplayBounded && checks.poseStream && checks.sampleIdsUniqueInReplay && checks.serverBounds,
+    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.sampleIdsUniqueInReplay && checks.serverBounds,
     "3d": checks.poseStream && checks.threeAxisMovement,
     rotation: checks.rotationSensorEvidence && checks.rotationTranslationBounded,
     loop: checks.closureConsistent && closure.status === "closed" && closure.adjusted === true && corrected.length > 0,
@@ -86,6 +95,7 @@ try {
       correctedPoses: corrected.length,
       inventory: inventory.length,
       registeredSensors,
+      transportBudgetSensors,
       motionEvents: motionEvents.length,
       duplicateSampleIds,
       dropped: session.droppedSampleCount ?? 0,
