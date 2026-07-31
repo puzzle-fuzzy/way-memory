@@ -3,6 +3,7 @@ package com.puzzlefuzzy.waymemory
 import android.Manifest
 import android.app.Application
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.puzzlefuzzy.waymemory.sensing.SensorCollector
@@ -67,25 +69,34 @@ class MainActivity : ComponentActivity() {
 }
 
 class SensorCollectorViewModel(application: Application) : AndroidViewModel(application) {
-    val collector = SensorCollector(application)
-
-    override fun onCleared() {
-        collector.stop()
-        super.onCleared()
-    }
+    val collector = (application as WayMemoryApplication).sensorCollector
 }
 
 @Composable
 private fun SensorScreen(collector: SensorCollector) {
+    val context = LocalContext.current
     val hostActivity = LocalContext.current as? Activity
     val state by collector.uiState.collectAsState()
     val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }
+    fun startCapture() {
+        collector.start(hostActivity)
+        if (collector.hasLocationPermission()) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, CaptureForegroundService::class.java).setAction(CaptureForegroundService.ACTION_START),
+            )
+        }
+    }
+    fun stopCapture() {
+        collector.stop()
+        context.stopService(Intent(context, CaptureForegroundService::class.java))
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
         permissionRequested = true
-        collector.start(hostActivity)
+        startCapture()
     }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -134,15 +145,16 @@ private fun SensorScreen(collector: SensorCollector) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = {
                                 if (state.collecting) {
-                                    collector.stop()
+                                    stopCapture()
                                 } else if (collector.hasPreciseLocationPermission() && collector.hasCameraPermission()) {
-                                    collector.start(hostActivity)
+                                    startCapture()
                                 } else {
                                     permissionLauncher.launch(
                                         arrayOf(
                                             Manifest.permission.ACCESS_FINE_LOCATION,
                                             Manifest.permission.ACCESS_COARSE_LOCATION,
                                             Manifest.permission.CAMERA,
+                                            Manifest.permission.POST_NOTIFICATIONS,
                                         ),
                                     )
                                 }
@@ -155,6 +167,7 @@ private fun SensorScreen(collector: SensorCollector) {
                                             Manifest.permission.ACCESS_FINE_LOCATION,
                                             Manifest.permission.ACCESS_COARSE_LOCATION,
                                             Manifest.permission.CAMERA,
+                                            Manifest.permission.POST_NOTIFICATIONS,
                                         ),
                                     )
                                 }) { Text("重新授权") }
