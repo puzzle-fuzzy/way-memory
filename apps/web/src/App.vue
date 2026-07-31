@@ -750,6 +750,7 @@ const activities = computed(() => {
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-2 text-[10px] text-muted sm:gap-3">
+          <span class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 md:inline-flex">{{ sensorTypeCount }} sensors</span>
           <span class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 sm:inline-flex">{{ displayedPointCount }} points · {{ routeDistanceM }}m</span>
            <span class="rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5">{{ motionModeLabel }}</span>
            <span class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 md:inline-flex">{{ poseFrameLabel }}</span>
