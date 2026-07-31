@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { LiveSensorSnapshot, TrackPoint } from "@way-memory/contracts";
 import { useRealtimeSession } from "./composables/useRealtimeSession";
 
-const { connection, latestSession } = useRealtimeSession();
+const { connection, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, followLatest } = useRealtimeSession();
 
 const connectionLabel = computed(() => ({
   connecting: "连接中",
@@ -18,6 +18,16 @@ const sessionLabel = computed(() => {
   if (!session.value) return "等待 Android 连接";
   return isCollecting.value ? "Android 正在采集" : "最近一次采集已结束";
 });
+
+const sessionHistoryLabel = (item: { status: string; startedAt: string; poseTrack?: unknown[]; sampleCount: number }) => {
+  const time = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(item.startedAt));
+  return `${item.status === "active" ? "LIVE" : "已结束"} · ${time} · ${item.poseTrack?.length ?? 0} Pose · ${item.sampleCount} samples`;
+};
+
+const onSessionChange = (event: Event) => {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value) void selectSession(value);
+};
 
 const locationLabel = computed(() => {
   const location = session.value?.latestLocation;
@@ -743,6 +753,13 @@ const activities = computed(() => {
            <span class="connection-pill"><span :class="['connection-dot', connection === 'connected' ? 'bg-sage' : connection === 'connecting' ? 'bg-amber' : 'bg-ember']" />{{ connectionLabel }}</span>
         </div>
       </header>
+      <div class="z-10 flex items-center justify-end gap-2 border-b border-[#d3e0d7] bg-[#eef5ef] px-4 py-2 text-[10px] text-muted sm:px-7">
+        <button v-if="!followingLive" class="rounded-full border border-ember/30 bg-[#fff8ee] px-3 py-1.5 text-ember" type="button" @click="followLatest">跟随实时</button>
+        <select class="max-w-[320px] rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 outline-none" :value="selectedSessionId ?? ''" aria-label="选择历史采集会话" @change="onSessionChange">
+          <option value="" disabled>历史采集会话</option>
+          <option v-for="item in availableSessions" :key="item.sessionId" :value="item.sessionId">{{ sessionHistoryLabel(item) }}</option>
+        </select>
+      </div>
 
       <div ref="pointCanvasHost" class="relative min-h-0 flex-1 touch-none select-none overflow-hidden bg-[#e8f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
         <canvas ref="pointCanvas" class="point-canvas block h-full w-full" width="620" height="300" role="img" aria-label="可旋转的三维实时运动轨迹" />

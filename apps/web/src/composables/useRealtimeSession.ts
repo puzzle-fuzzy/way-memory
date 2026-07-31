@@ -23,6 +23,9 @@ function realtimeEndpoint() {
 export function useRealtimeSession() {
   const connection = ref<LiveConnection>("connecting");
   const latestSession = shallowRef<ObservationSession | null>(null);
+  const availableSessions = ref<ObservationSession[]>([]);
+  const selectedSessionId = ref<string | null>(null);
+  const followingLive = ref(true);
   let socket: WebSocket | undefined;
   let reconnectTimer: number | undefined;
   let sessionUpdateFrame: number | undefined;
@@ -41,7 +44,7 @@ export function useRealtimeSession() {
   function applySessionDelta(delta: SessionDelta) {
     const current = pendingSession ?? latestSession.value;
     if (!current || current.sessionId !== delta.sessionId) {
-      void refreshSnapshot();
+      if (followingLive.value) void refreshSnapshot();
       return;
     }
     queueSessionUpdate({
@@ -72,10 +75,32 @@ export function useRealtimeSession() {
       const response = await fetch(endpoint("/api/sessions"), { cache: "no-store" });
       if (!response.ok) throw new Error(`API ${response.status}`);
       const sessions = await response.json() as ObservationSession[];
-      queueSessionUpdate(sessions.find((item) => item.status === "active") ?? sessions[0] ?? null);
+      availableSessions.value = sessions;
+      const preferred = followingLive.value
+        ? sessions.find((item) => item.status === "active") ?? sessions[0]
+        : sessions.find((item) => item.sessionId === selectedSessionId.value);
+      if (preferred) queueSessionUpdate(preferred);
     } catch {
       if (connection.value !== "connected") connection.value = "offline";
     }
+  }
+
+  async function selectSession(sessionId: string) {
+    followingLive.value = false;
+    selectedSessionId.value = sessionId;
+    try {
+      const response = await fetch(endpoint(`/api/sessions/${encodeURIComponent(sessionId)}`), { cache: "no-store" });
+      if (!response.ok) throw new Error(`API ${response.status}`);
+      queueSessionUpdate(await response.json() as ObservationSession);
+    } catch {
+      await refreshSnapshot();
+    }
+  }
+
+  function followLatest() {
+    followingLive.value = true;
+    selectedSessionId.value = null;
+    void refreshSnapshot();
   }
 
   function scheduleReconnect() {
@@ -91,7 +116,10 @@ export function useRealtimeSession() {
     socket.addEventListener("message", (event) => {
       try {
         const message = JSON.parse(String(event.data)) as { type?: string; session?: ObservationSession };
-        if (message.type === "session.updated" && message.session) queueSessionUpdate(message.session);
+        if (message.type === "session.updated" && message.session) {
+          availableSessions.value = [message.session, ...availableSessions.value.filter((item) => item.sessionId !== message.session?.sessionId)];
+          if (followingLive.value) queueSessionUpdate(message.session);
+        }
         if (message.type === "session.delta") applySessionDelta(message as SessionDelta);
       } catch {
         // A malformed update should not take down the monitoring console.
@@ -115,5 +143,5 @@ export function useRealtimeSession() {
     socket?.close();
   });
 
-  return { connection, latestSession, refreshSnapshot };
+  return { connection, latestSession, availableSessions, selectedSessionId, followingLive, refreshSnapshot, selectSession, followLatest };
 }
