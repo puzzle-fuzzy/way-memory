@@ -10,6 +10,8 @@ try {
       const response = await fetch("http://127.0.0.1:8787/health");
       if (!response.ok) throw new Error(`Health status ${response.status}`);
       const health = await response.json() as { ok: boolean };
+      const publicHealth = await fetch("http://127.0.0.1:8787/api/health");
+      if (!publicHealth.ok || !(await publicHealth.json() as { ok: boolean }).ok) throw new Error("Public health status failed");
       const routes = await (await fetch("http://127.0.0.1:8787/api/routes")).json() as unknown[];
       if (!health.ok || routes.length !== 1) throw new Error("Unexpected API payload");
       const waitForMessage = (socket: WebSocket) => new Promise<Record<string, unknown>>((resolve, reject) => {

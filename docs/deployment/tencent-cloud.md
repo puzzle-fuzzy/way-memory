@@ -6,6 +6,7 @@ This deployment targets the existing Tencent Cloud host `101.35.246.159` describ
 - Bundled Bun API: `/opt/way-memory/api/way-memory-api.js`
 - API systemd unit: `way-memory-api.service`
 - Nginx entry point: `http://101.35.246.159/`
+- Public health check: `http://101.35.246.159/api/health`
 - WebSocket entry point: `ws://101.35.246.159/realtime?role=dashboard`
 - Android `wayMemoryApiUrl`: `http://101.35.246.159`
 
@@ -16,3 +17,5 @@ The API keeps live sessions in memory for low-latency WebSocket updates and pers
 Runtime memory protection and coordinate validation are documented in `docs/data-integrity.md`: 20 sessions, 500 location points, 500 legacy relative points, 1,200 Pose points, 128 motion events, 1,024 raw replay samples per session, bounded sensor snapshots, bounded payloads, timestamp ordering, coordinate range checks, duplicate suppression, and short-gap jump rejection.
 
 This MVP entry point is HTTP/WS on the server IP. Add a domain and TLS certificate before production use; the Android base URL can then be changed to the HTTPS domain and will automatically use WSS.
+
+`/health` is intentionally kept as the loopback service check and is not exposed by the Nginx SPA fallback. Use `/api/health` for a public deployment probe; it is proxied to the same API process.

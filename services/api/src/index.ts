@@ -690,7 +690,9 @@ const server = Bun.serve<RealtimeClient>({
       return upgraded ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
     }
     if (request.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS" } });
-    if (url.pathname === "/health") return json({ ok: true, service: "way-memory-api", time: new Date().toISOString() });
+    if (url.pathname === "/health" || url.pathname === "/api/health") {
+      return json({ ok: true, service: "way-memory-api", time: new Date().toISOString() });
+    }
     if (url.pathname === "/api/devices") return json([device]);
     if (url.pathname === "/api/routes") return json([route]);
     if (url.pathname === "/api/routes/route-home-metro") return json(route);
