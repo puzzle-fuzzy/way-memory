@@ -113,6 +113,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         publishSample()
     }
 
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
     private fun publishSample() {
         state.value = state.value.copy(
             sampleCount = state.value.sampleCount + 1,

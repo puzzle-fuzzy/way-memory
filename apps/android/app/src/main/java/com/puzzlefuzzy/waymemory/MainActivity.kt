@@ -50,7 +50,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun SensorScreen() {
-    val collector = remember { SensorCollector(LocalContext.current) }
+    val context = LocalContext.current
+    val collector = remember(context) { SensorCollector(context) }
     val state by collector.uiState.collectAsState()
     val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }

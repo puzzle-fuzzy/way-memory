@@ -1,6 +1,7 @@
 package com.puzzlefuzzy.waymemory.sensing
 
 import android.util.Log
+import com.puzzlefuzzy.waymemory.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
