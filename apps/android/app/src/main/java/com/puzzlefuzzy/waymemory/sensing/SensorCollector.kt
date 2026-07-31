@@ -258,7 +258,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             Sensor.TYPE_GAME_ROTATION_VECTOR,
             Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR,
             Sensor.TYPE_ROTATION_VECTOR -> updateRotationMatrix(values)
-            Sensor.TYPE_PRESSURE -> if (fusionReady) updateBarometer(values.firstOrNull())
+            Sensor.TYPE_PRESSURE -> if (fusionReady) updateBarometer(values.firstOrNull(), event.timestamp)
         }
         val poseUpdate = if (!fusionReady) {
             null
@@ -419,13 +419,15 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     override fun onLocationChanged(location: Location) {
         if (!shouldPublishLocation(location)) return
         lastPublishedLocation = Location(location)
+        val timestampNs = location.elapsedRealtimeNanos.takeIf { it > 0L }
+            ?: SystemClock.elapsedRealtimeNanos()
         val poseUpdate = if (fusionReady) {
             poseFusion.updateGnss(
                 latitude = location.latitude,
                 longitude = location.longitude,
                 accuracyM = location.accuracy.takeIf { location.hasAccuracy() },
                 altitudeM = location.altitude.takeIf { location.hasAltitude() },
-                timestampNs = SystemClock.elapsedRealtimeNanos(),
+                timestampNs = timestampNs,
             )
         } else {
             null
@@ -437,7 +439,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         )
         uploader.enqueue(
             CollectedSample(
-                deviceTimestampNs = SystemClock.elapsedRealtimeNanos(),
+                deviceTimestampNs = timestampNs,
                 sensorType = "location",
                 location = LocationSample(
                     lat = location.latitude,
@@ -559,9 +561,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         return values.take(3).mapIndexed { index, value -> value - gravity[index] }
     }
 
-    private fun updateBarometer(pressureHpa: Float?) {
+    private fun updateBarometer(pressureHpa: Float?, timestampNs: Long) {
         if (pressureHpa == null || !pressureHpa.isFinite() || pressureHpa !in 300f..1_100f) return
-        poseFusion.updatePressure(pressureHpa, SystemClock.elapsedRealtimeNanos())
+        poseFusion.updatePressure(pressureHpa, timestampNs)
     }
 
     private fun sensorKey(sensor: Sensor): String = "${sensor.stringType.ifBlank { "type-${sensor.type}" }}:${sensor.id}"
