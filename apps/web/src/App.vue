@@ -35,9 +35,9 @@ const sessionLabel = computed(() => {
   return isCollecting.value ? "Android 正在采集" : "最近一次采集已结束";
 });
 
-const sessionHistoryLabel = (item: { status: string; startedAt: string; poseTrack?: unknown[]; sampleCount: number }) => {
+const sessionHistoryLabel = (item: { status: string; startedAt: string; poseTrack?: unknown[]; posePointCount?: number; sampleCount: number }) => {
   const time = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(item.startedAt));
-  return `${item.status === "active" ? "LIVE" : "已结束"} · ${time} · ${item.poseTrack?.length ?? 0} Pose · ${item.sampleCount} samples`;
+  return `${item.status === "active" ? "LIVE" : "已结束"} · ${time} · ${item.posePointCount ?? item.poseTrack?.length ?? 0} Pose · ${item.sampleCount} samples`;
 };
 
 const onSessionChange = (event: Event) => {

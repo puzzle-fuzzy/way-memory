@@ -1177,6 +1177,46 @@ const requestPrincipal = async (request: Request, role: AuthRole): Promise<AuthP
 
 const sessionBelongsTo = (session: ObservationSession, principal: { ownerId: string }) => session.ownerId === principal.ownerId;
 
+const sessionListView = (session: ObservationSession): ObservationSession => ({
+  ...session,
+  track: [],
+  relativeTrack: [],
+  poseTrack: [],
+  correctedPoseTrack: [],
+  motionEvents: [],
+  sensorInventory: [],
+  sensorStats: [],
+  latestSensors: [],
+  locationPointCount: session.track.length,
+  relativePointCount: session.relativeTrack.length,
+  posePointCount: session.poseTrack.length,
+  correctedPosePointCount: session.correctedPoseTrack?.length ?? session.poseTrack.length,
+});
+
+const sessionIntegrityView = (session: ObservationSession) => ({
+  sessionId: session.sessionId,
+  deviceId: session.deviceId,
+  status: session.status,
+  mode: session.mode,
+  routeId: session.routeId,
+  startedAt: session.startedAt,
+  lastReceivedAt: session.lastReceivedAt,
+  lastSampleAt: session.lastSampleAt,
+  sampleCount: session.sampleCount,
+  rawSampleCount: session.rawSampleCount,
+  droppedSampleCount: session.droppedSampleCount,
+  outOfOrderSampleCount: session.outOfOrderSampleCount,
+  trackPointCount: session.track.length,
+  relativePointCount: session.relativeTrack.length,
+  posePointCount: session.poseTrack.length,
+  correctedPosePointCount: session.correctedPoseTrack?.length ?? session.poseTrack.length,
+  latestLocation: session.latestLocation,
+  latestPose: session.latestPose,
+  latestCorrectedPose: session.correctedPoseTrack?.at(-1),
+  closure: session.closure,
+  motionMode: session.motionMode,
+});
+
 const server = Bun.serve<RealtimeClient>({
   port,
   hostname: "0.0.0.0",
@@ -1334,7 +1374,10 @@ const server = Bun.serve<RealtimeClient>({
     }
     if (url.pathname === "/api/sessions" && request.method === "GET") {
       if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
-      return json([...sessions.values()].filter((session) => sessionBelongsTo(session, dashboard)).sort((left, right) => right.startedAt.localeCompare(left.startedAt)));
+      return json([...sessions.values()]
+        .filter((session) => sessionBelongsTo(session, dashboard))
+        .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+        .map(sessionListView));
     }
     if (url.pathname === "/api/sessions" && request.method === "POST") {
       const devicePrincipal = await requestPrincipal(request, "device");
@@ -1394,7 +1437,11 @@ const server = Bun.serve<RealtimeClient>({
         if (session.status !== "active") return json({ error: "session_stopped" }, { status: 409 });
         return json(acceptSamples(session, samples));
       }
-      if (request.method === "GET") return json(session);
+      if (request.method === "GET") {
+        if (url.searchParams.get("view") === "summary") return json(sessionListView(session));
+        if (url.searchParams.get("view") === "integrity") return json(sessionIntegrityView(session));
+        return json(session);
+      }
     }
     return json({ error: "not_found" }, { status: 404 });
   },

@@ -130,6 +130,11 @@ try {
       }
       const rawReplay = await (await fetch(`http://127.0.0.1:8787/api/sessions/${session.sessionId}/raw`)).json() as { totalSamples: number; retainedSamples: number; maxRetainedSamples: number };
       if (rawReplay.totalSamples !== 9 || rawReplay.retainedSamples !== 9 || rawReplay.maxRetainedSamples !== 1024) throw new Error("Unexpected raw replay buffer");
+      const listedSessions = await (await fetch("http://127.0.0.1:8787/api/sessions")).json() as Array<{ sessionId: string; track: unknown[]; poseTrack: unknown[]; rawSampleCount: number; posePointCount?: number }>;
+      const listed = listedSessions.find((item) => item.sessionId === session.sessionId);
+      if (!listed || listed.track.length !== 0 || listed.poseTrack.length !== 0 || listed.rawSampleCount !== 9 || listed.posePointCount !== 2) throw new Error("Session list was not compact");
+      const integrity = await (await fetch(`http://127.0.0.1:8787/api/sessions/${session.sessionId}?view=integrity`)).json() as { posePointCount: number; latestPose?: { deviceTimestampNs: number } };
+      if (integrity.posePointCount !== 2 || integrity.latestPose?.deviceTimestampNs !== 2) throw new Error("Session integrity view was incomplete");
       dashboard.close();
       device.close();
       console.log("API and WebSocket smoke passed", { routes: routes.length, points: 4, dropped: 2, late: 1, altitude: "barometer" });

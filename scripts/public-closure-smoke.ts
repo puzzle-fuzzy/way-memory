@@ -51,10 +51,11 @@ try {
       body: JSON.stringify({ samples: samples.slice(offset, offset + 500) }),
     });
   }
-  const restored = await request(`/api/sessions/${sessionId}`) as {
+  const restored = await request(`/api/sessions/${sessionId}?view=integrity`) as {
     closure: { status: string; adjusted: boolean; anchor?: { deviceTimestampNs: number }; travelledM?: number; correction?: { startTimestampNs: number } };
-    poseTrack: Array<{ xM: number }>;
-    correctedPoseTrack: Array<{ xM: number }>;
+    posePointCount: number;
+    latestPose?: { xM: number };
+    latestCorrectedPose?: { xM: number };
   };
   if (
     restored.closure.status !== "closed"
@@ -62,13 +63,13 @@ try {
     || restored.closure.anchor?.deviceTimestampNs !== 1
     || (restored.closure.travelledM ?? 0) < 8
     || restored.closure.correction?.startTimestampNs !== 1
-    || restored.poseTrack.length !== 1_200
-    || restored.poseTrack.at(-1)?.xM !== 1
-    || restored.correctedPoseTrack.at(-1)?.xM !== 0
+    || restored.posePointCount !== 1_200
+    || restored.latestPose?.xM !== 1
+    || restored.latestCorrectedPose?.xM !== 0
   ) throw new Error("public long closure assertion failed");
   console.log("Public long closure smoke passed", {
     sessionId,
-    retainedPosePoints: restored.poseTrack.length,
+    retainedPosePoints: restored.posePointCount,
     travelledM: restored.closure.travelledM,
     anchorTimestampNs: restored.closure.anchor?.deviceTimestampNs,
   });

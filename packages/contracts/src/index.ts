@@ -272,6 +272,11 @@ export interface ObservationSession {
   sensorStats: SensorSampleStats[];
   latestRelativePosition?: RelativeMotionPoint;
   latestSensors: LiveSensorSnapshot[];
+  /** Present on the lightweight session list view; full snapshots use array lengths. */
+  locationPointCount?: number;
+  relativePointCount?: number;
+  posePointCount?: number;
+  correctedPosePointCount?: number;
   status: "active" | "stopped";
 }
 

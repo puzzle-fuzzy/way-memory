@@ -20,6 +20,24 @@ function realtimeEndpoint(ticket?: string) {
   return `${protocol}//${window.location.host}/realtime?role=dashboard${ticket ? `&ticket=${encodeURIComponent(ticket)}` : ""}`;
 }
 
+function sessionListView(session: ObservationSession): ObservationSession {
+  return {
+    ...session,
+    track: [],
+    relativeTrack: [],
+    poseTrack: [],
+    correctedPoseTrack: [],
+    motionEvents: [],
+    sensorInventory: [],
+    sensorStats: [],
+    latestSensors: [],
+    locationPointCount: session.track.length,
+    relativePointCount: session.relativeTrack.length,
+    posePointCount: session.poseTrack.length,
+    correctedPosePointCount: session.correctedPoseTrack?.length ?? session.poseTrack.length,
+  };
+}
+
 export function useRealtimeSession() {
   const connection = ref<LiveConnection>("connecting");
   const authRequired = ref(false);
@@ -109,14 +127,27 @@ export function useRealtimeSession() {
         return;
       }
       if (!response.ok) throw new Error(`API ${response.status}`);
-      const sessions = await response.json() as ObservationSession[];
+      const sessions = (await response.json() as ObservationSession[]).map(sessionListView);
       availableSessions.value = sessions;
       const preferred = followingLive.value
         ? sessions.find((item) => item.status === "active") ?? sessions[0]
         : sessions.find((item) => item.sessionId === selectedSessionId.value);
-      if (preferred) queueSessionUpdate(preferred);
+      if (preferred) {
+        queueSessionUpdate(preferred);
+        void loadSessionSnapshot(preferred.sessionId);
+      }
     } catch {
       if (connection.value !== "connected") connection.value = "offline";
+    }
+  }
+
+  async function loadSessionSnapshot(sessionId: string) {
+    try {
+      const response = await fetch(endpoint(`/api/sessions/${encodeURIComponent(sessionId)}`), { cache: "no-store", headers: requestHeaders() });
+      if (!response.ok) return;
+      queueSessionUpdate(await response.json() as ObservationSession);
+    } catch {
+      // The compact session list remains usable while a large snapshot is loading.
     }
   }
 
@@ -167,7 +198,7 @@ export function useRealtimeSession() {
       try {
         const message = JSON.parse(String(event.data)) as { type?: string; session?: ObservationSession };
         if (message.type === "session.updated" && message.session) {
-          availableSessions.value = [message.session, ...availableSessions.value.filter((item) => item.sessionId !== message.session?.sessionId)];
+          availableSessions.value = [sessionListView(message.session), ...availableSessions.value.filter((item) => item.sessionId !== message.session?.sessionId)];
           if (followingLive.value) queueSessionUpdate(message.session);
         }
         if (message.type === "session.delta") applySessionDelta(message as SessionDelta);
