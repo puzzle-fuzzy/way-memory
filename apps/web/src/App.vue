@@ -171,6 +171,9 @@ const pointCanvas = ref<HTMLCanvasElement | null>(null);
 const pointCanvasHost = ref<HTMLElement | null>(null);
 let canvasResizeObserver: ResizeObserver | undefined;
 let canvasDrawFrame: number | undefined;
+let canvasDrawTimer: number | undefined;
+let lastCanvasDrawAt = 0;
+const CANVAS_FRAME_INTERVAL_MS = 1000 / 30;
 
 const beginCameraDrag = (event: PointerEvent) => {
   const target = event.currentTarget as HTMLElement | null;
@@ -203,9 +206,24 @@ type ProjectedWorldPoint = WorldPoint & {
   perspective: number;
 };
 
+type ProjectionSegment = {
+  left: ProjectedWorldPoint;
+  right: ProjectedWorldPoint;
+  depth: number;
+};
+
+type ProjectionAxis = {
+  start: ProjectedWorldPoint;
+  end: ProjectedWorldPoint;
+  color: string;
+  label: string;
+};
+
 type ProjectionScene = {
   points: ProjectedWorldPoint[];
   projectPoint: (point: WorldPoint) => ProjectedWorldPoint;
+  gridSegments: ProjectionSegment[];
+  axes: ProjectionAxis[];
   gridRadiusM: number;
   gridStepM: number;
   axisLengthM: number;
@@ -221,12 +239,23 @@ const chooseGridStep = (radiusM: number) => {
   return 25;
 };
 
+const sceneWorldPoint = (eastM: number, northM: number, altitudeM: number): WorldPoint => ({
+  index: -1,
+  eastM,
+  northM,
+  altitudeM,
+  hasAltitude: true,
+  accuracyM: 0,
+});
+
 const buildProjectionScene = (worldPoints: WorldPoint[]): ProjectionScene => {
   if (!worldPoints.length) {
     const emptyPoint = { index: -1, eastM: 0, northM: 0, altitudeM: 0, hasAltitude: true, accuracyM: 0 };
     return {
       points: [],
       projectPoint: (point) => ({ ...point, x: 310, y: 165, depth: 0, perspective: 1 }),
+      gridSegments: [],
+      axes: [],
       gridRadiusM: 2,
       gridStepM: 0.5,
       axisLengthM: 2.4,
@@ -277,9 +306,34 @@ const buildProjectionScene = (worldPoints: WorldPoint[]): ProjectionScene => {
     };
   };
 
+  const gridSegments: ProjectionSegment[] = [];
+  for (let coordinate = -gridRadiusM; coordinate <= gridRadiusM + gridStepM * 0.5; coordinate += gridStepM) {
+    const xLeft = sceneWorldPoint(coordinate, -gridRadiusM, 0);
+    const xRight = sceneWorldPoint(coordinate, gridRadiusM, 0);
+    const yLeft = sceneWorldPoint(-gridRadiusM, coordinate, 0);
+    const yRight = sceneWorldPoint(gridRadiusM, coordinate, 0);
+    const xLeftProjection = projectPoint(xLeft);
+    const xRightProjection = projectPoint(xRight);
+    const yLeftProjection = projectPoint(yLeft);
+    const yRightProjection = projectPoint(yRight);
+    gridSegments.push(
+      { left: xLeftProjection, right: xRightProjection, depth: (xLeftProjection.depth + xRightProjection.depth) / 2 },
+      { left: yLeftProjection, right: yRightProjection, depth: (yLeftProjection.depth + yRightProjection.depth) / 2 },
+    );
+  }
+  gridSegments.sort((left, right) => left.depth - right.depth);
+  const origin = projectPoint(sceneWorldPoint(0, 0, 0));
+  const axes: ProjectionAxis[] = [
+    { start: origin, end: projectPoint(sceneWorldPoint(axisLengthM, 0, 0)), color: "#e05c3b", label: "X" },
+    { start: origin, end: projectPoint(sceneWorldPoint(0, axisLengthM, 0)), color: "#3f8b68", label: "Y" },
+    { start: origin, end: projectPoint(sceneWorldPoint(0, 0, axisLengthM)), color: "#6384a5", label: "Z" },
+  ];
+
   return {
     points: worldPoints.map(projectPoint),
     projectPoint,
+    gridSegments,
+    axes,
     gridRadiusM,
     gridStepM,
     axisLengthM,
@@ -436,54 +490,23 @@ const drawPointCanvas = () => {
   });
 
   const scene = projectionScene.value;
-  const worldPoint = (eastM: number, northM: number, altitudeM: number): WorldPoint => ({
-    index: -1,
-    eastM,
-    northM,
-    altitudeM,
-    hasAltitude: true,
-    accuracyM: 0,
-  });
-  const drawSegment = (left: WorldPoint, right: WorldPoint, color: string, alpha: number, width: number, dashed = false) => {
-    const startProjection = scene.projectPoint(left);
-    const endProjection = scene.projectPoint(right);
-    const start = toCanvasPoint(startProjection.x, startProjection.y);
-    const end = toCanvasPoint(endProjection.x, endProjection.y);
-    context.save();
-    context.globalAlpha = alpha;
-    context.strokeStyle = color;
-    context.lineWidth = Math.max(0.5, width * canvasScale);
-    context.setLineDash(dashed ? [3 * canvasScale, 5 * canvasScale] : []);
+  context.setLineDash([3 * canvasScale, 5 * canvasScale]);
+  context.strokeStyle = "#b9cec0";
+  context.globalAlpha = 0.34;
+  context.lineWidth = Math.max(0.5, 0.7 * canvasScale);
+  for (const segment of scene.gridSegments) {
+    const start = toCanvasPoint(segment.left.x, segment.left.y);
+    const end = toCanvasPoint(segment.right.x, segment.right.y);
     context.beginPath();
     context.moveTo(start.x, start.y);
     context.lineTo(end.x, end.y);
     context.stroke();
-    context.restore();
-  };
-
-  const gridSegments: Array<{ left: WorldPoint; right: WorldPoint; depth: number }> = [];
-  for (let coordinate = -scene.gridRadiusM; coordinate <= scene.gridRadiusM + scene.gridStepM * 0.5; coordinate += scene.gridStepM) {
-    const xLeft = scene.projectPoint(worldPoint(coordinate, -scene.gridRadiusM, 0));
-    const xRight = scene.projectPoint(worldPoint(coordinate, scene.gridRadiusM, 0));
-    const yLeft = scene.projectPoint(worldPoint(-scene.gridRadiusM, coordinate, 0));
-    const yRight = scene.projectPoint(worldPoint(scene.gridRadiusM, coordinate, 0));
-    gridSegments.push(
-      { left: worldPoint(coordinate, -scene.gridRadiusM, 0), right: worldPoint(coordinate, scene.gridRadiusM, 0), depth: (xLeft.depth + xRight.depth) / 2 },
-      { left: worldPoint(-scene.gridRadiusM, coordinate, 0), right: worldPoint(scene.gridRadiusM, coordinate, 0), depth: (yLeft.depth + yRight.depth) / 2 },
-    );
   }
-  gridSegments.sort((left, right) => left.depth - right.depth);
-  gridSegments.forEach((segment) => drawSegment(segment.left, segment.right, "#b9cec0", 0.34, 0.7, true));
+  context.setLineDash([]);
 
-  const origin = worldPoint(0, 0, 0);
-  const axes = [
-    { end: worldPoint(scene.axisLengthM, 0, 0), color: "#e05c3b", label: "X" },
-    { end: worldPoint(0, scene.axisLengthM, 0), color: "#3f8b68", label: "Y" },
-    { end: worldPoint(0, 0, scene.axisLengthM), color: "#6384a5", label: "Z" },
-  ];
-  const drawAxis = (axis: (typeof axes)[number]) => {
-    const originProjection = scene.projectPoint(origin);
-    const endProjection = scene.projectPoint(axis.end);
+  const drawAxis = (axis: ProjectionAxis) => {
+    const originProjection = axis.start;
+    const endProjection = axis.end;
     const start = toCanvasPoint(originProjection.x, originProjection.y);
     const end = toCanvasPoint(endProjection.x, endProjection.y);
     const direction = Math.atan2(end.y - start.y, end.x - start.x);
@@ -508,7 +531,7 @@ const drawPointCanvas = () => {
     context.fillText(axis.label, end.x, end.y - 8 * canvasScale);
     context.restore();
   };
-  axes.forEach(drawAxis);
+  scene.axes.forEach(drawAxis);
 
   const points = displayedTrack.value;
   if (!points.length) return;
@@ -563,11 +586,17 @@ const drawPointCanvas = () => {
 };
 
 const scheduleCanvasDraw = () => {
-  if (canvasDrawFrame !== undefined) window.cancelAnimationFrame(canvasDrawFrame);
-  canvasDrawFrame = window.requestAnimationFrame(() => {
-    canvasDrawFrame = undefined;
-    drawPointCanvas();
-  });
+  if (canvasDrawFrame !== undefined || canvasDrawTimer !== undefined) return;
+  const elapsed = performance.now() - lastCanvasDrawAt;
+  const delay = Math.max(0, CANVAS_FRAME_INTERVAL_MS - elapsed);
+  canvasDrawTimer = window.setTimeout(() => {
+    canvasDrawTimer = undefined;
+    canvasDrawFrame = window.requestAnimationFrame(() => {
+      canvasDrawFrame = undefined;
+      lastCanvasDrawAt = performance.now();
+      drawPointCanvas();
+    });
+  }, delay);
 };
 
 watch([displayedTrack, cameraYaw, cameraPitch], scheduleCanvasDraw, { flush: "post" });
@@ -580,6 +609,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   canvasResizeObserver?.disconnect();
+  if (canvasDrawTimer !== undefined) window.clearTimeout(canvasDrawTimer);
   if (canvasDrawFrame !== undefined) window.cancelAnimationFrame(canvasDrawFrame);
 });
 
