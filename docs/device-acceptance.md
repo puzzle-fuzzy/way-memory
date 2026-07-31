@@ -71,6 +71,8 @@ The machine-readable audit can be run after each capture. It exits with code 0 o
 ```powershell
 $env:WAY_MEMORY_API_URL = "http://101.35.246.159"
 $env:WAY_MEMORY_SESSION_ID = "<SESSION_ID>"
+# For WAY_MEMORY_AUTH_MODE=enforced, set this only with an HTTPS API URL.
+$env:WAY_MEMORY_DASHBOARD_TOKEN = "<dashboard token>"
 bun run acceptance:report --case=baseline --max-out-of-order=0 --out=artifacts/<SESSION_ID>-baseline.json
 bun run acceptance:report --case=3d --min-axis-m=0.2 --out=artifacts/<SESSION_ID>-3d.json
 bun run acceptance:report --case=rotation --max-translation-m=0.75 --out=artifacts/<SESSION_ID>-rotation.json
@@ -89,7 +91,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/collect-device-evide
 
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/collect-device-evidence.ps1 `
   -SessionId <SESSION_ID> -Case recovery -MaxRecoveryJumpM 1.5
+
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/collect-device-evidence.ps1 `
+  -SessionId <SESSION_ID> -Case visual-recovery -MaxVisualResetJumpM 5
 ```
+
+For an enforced service, export `WAY_MEMORY_DASHBOARD_TOKEN` before running either command. The scripts send it only as an owner-scoped `Authorization` header; they refuse to send it to a non-local HTTP endpoint and never print it.
 
 脚本不会覆盖已有证据目录；重复采集请更换 `-OutputRoot`。报告失败时仍保留 JSON 供诊断，不得把失败报告当作通过证据。
 

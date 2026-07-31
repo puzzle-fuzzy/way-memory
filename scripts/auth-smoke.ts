@@ -102,6 +102,44 @@ try {
   const dashboardStarted = await nextMessage(dashboard);
   if (dashboardStarted.type !== "session.updated") throw new Error("dashboard did not receive owner-scoped session event");
 
+  device.send(JSON.stringify({
+    type: "samples",
+    sessionId: session.sessionId,
+    samples: [{
+      sampleId: "auth-report-sample",
+      deviceTimestampNs: 1,
+      sensorType: "android.sensor.accelerometer",
+      values: [0, 0, 9.81],
+      pose: {
+        deviceTimestampNs: 1,
+        xM: 0,
+        yM: 0,
+        zM: 0,
+        velocityXMps: 0,
+        velocityYMps: 0,
+        velocityZMps: 0,
+        accuracyM: 1,
+        confidence: 0.9,
+        source: "fused",
+        frame: "local-enu",
+        sourceFlags: ["imu"],
+        motionMode: "stationary",
+        stationary: true,
+      },
+    }],
+  }));
+  const reportAccepted = await nextMessage(device);
+  const reportUpdated = await nextMessage(dashboard);
+  if (reportAccepted.type !== "samples.accepted" || reportUpdated.type !== "session.delta") throw new Error("auth report sample was not accepted");
+  const reportProcess = Bun.spawn(["bun", "scripts/acceptance-report.ts", `--session=${session.sessionId}`, "--case=baseline"], {
+    cwd,
+    env: { ...process.env, WAY_MEMORY_API_URL: baseUrl, WAY_MEMORY_SESSION_ID: session.sessionId, WAY_MEMORY_DASHBOARD_TOKEN: dashboardToken },
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  const reportExit = await reportProcess.exited;
+  if (reportExit !== 0) throw new Error(`authenticated acceptance report failed with exit code ${reportExit}`);
+
   const deviceList = await json("/api/sessions", { headers: authHeaders(deviceToken) });
   if (deviceList.response.status !== 401) throw new Error("device credential can list dashboard sessions");
   const dashboardRead = await json(`/api/sessions/${session.sessionId}`, { headers: authHeaders(dashboardToken) });

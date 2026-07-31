@@ -12,6 +12,13 @@ const valueFor = (name: string) => {
 };
 const hasFlag = (name: string) => args.includes(name) || args.some((item) => item === `${name}=true`);
 const apiBase = (Bun.env.WAY_MEMORY_API_URL ?? "http://101.35.246.159").replace(/\/$/, "");
+const dashboardToken = Bun.env.WAY_MEMORY_DASHBOARD_TOKEN?.trim();
+const apiUrl = new URL(apiBase);
+const localHttpHost = apiUrl.protocol === "http:" && ["127.0.0.1", "localhost"].includes(apiUrl.hostname);
+if (dashboardToken && apiUrl.protocol !== "https:" && !localHttpHost) {
+  throw new Error("WAY_MEMORY_DASHBOARD_TOKEN requires an HTTPS WAY_MEMORY_API_URL");
+}
+const requestHeaders = dashboardToken ? { authorization: `Bearer ${dashboardToken}` } : {};
 const sessionId = Bun.env.WAY_MEMORY_SESSION_ID ?? valueFor("--session");
 const acceptanceCase = valueFor("--case") ?? "baseline";
 const minimumAxisM = Number(valueFor("--min-axis-m") ?? "0.2");
@@ -26,8 +33,11 @@ if (!sessionId) {
 }
 
 const getJson = async (path: string) => {
-  const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`${path} -> HTTP ${response.status}`);
+  const response = await fetch(`${apiBase}${path}`, { cache: "no-store", headers: requestHeaders });
+  if (!response.ok) {
+    const suffix = response.status === 401 ? " (set WAY_MEMORY_DASHBOARD_TOKEN for an enforced service)" : "";
+    throw new Error(`${path} -> HTTP ${response.status}${suffix}`);
+  }
   return response.json() as Promise<JsonRecord>;
 };
 
