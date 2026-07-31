@@ -39,6 +39,13 @@ const routeStatusLabel = computed(() => {
 });
 
 const track = computed(() => session.value?.track ?? []);
+const trackSegmentCount = computed(() => Math.max(0, track.value.length - 1));
+const coordinateBoundsLabel = computed(() => {
+  if (!track.value.length) return "等待真实定位点";
+  const latitudes = track.value.map((point) => point.lat);
+  const longitudes = track.value.map((point) => point.lng);
+  return `lat ${Math.min(...latitudes).toFixed(6)}…${Math.max(...latitudes).toFixed(6)} · lng ${Math.min(...longitudes).toFixed(6)}…${Math.max(...longitudes).toFixed(6)}`;
+});
 
 const haversineDistanceM = (left: TrackPoint, right: TrackPoint) => {
   const earthRadiusM = 6371000;
@@ -147,8 +154,8 @@ const projectedTrack = computed(() => {
   const originLatRad = origin.lat * Math.PI / 180;
   const worldPoints = track.value.map((point, index) => ({
     index,
-    eastM: (point.lng - origin.lng) * 111320 * Math.cos(originLatRad),
-    northM: (point.lat - origin.lat) * 110540,
+    eastM: (point.lng - origin.lng) * Math.PI / 180 * 6371000 * Math.cos(originLatRad),
+    northM: (point.lat - origin.lat) * Math.PI / 180 * 6371000,
     altitudeM: point.altitudeM ?? 0,
     hasAltitude: typeof point.altitudeM === "number",
   }));
@@ -243,11 +250,8 @@ const activities = computed(() => {
               <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="可旋转的三维实时路线轨迹">
                 <defs><linearGradient id="route3dGradient" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#e05c3b" /><stop offset="55%" stop-color="#c47b4b" /><stop offset="100%" stop-color="#3f8b68" /></linearGradient><filter id="route3dShadow"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".2" /></filter></defs>
                 <rect width="620" height="300" fill="#e9f0eb" />
-                <path d="M72 246 L310 178 L548 246 L310 288 Z" fill="#dce8df" opacity=".72" />
-                <path d="M72 246 L310 178 M548 246 L310 178 M72 246 L310 288 M548 246 L310 288" fill="none" stroke="#c4d4ca" stroke-width="1" />
-                <path d="M132 229 L310 191 L488 229 M190 246 L310 213 L430 246 M248 263 L310 246 L372 263" fill="none" stroke="#cbd9d0" stroke-width="1" opacity=".8" />
-                <path v-if="projectedTrack.length" :d="projectedGroundPath" fill="none" stroke="#99aa9f" stroke-width="2" stroke-dasharray="4 5" opacity=".72" />
-                <g v-for="point in projectedTrack" :key="`height-${point.index}`"><line v-if="point.hasAltitude" :x1="point.x" :y1="point.groundY" :x2="point.x" :y2="point.y" stroke="#c47b4b" stroke-width="1.5" stroke-dasharray="3 4" opacity=".8" /></g>
+                <g v-if="hasAltitude" opacity=".7"><line x1="310" y1="250" x2="310" y2="74" stroke="#c47b4b" stroke-width="1" stroke-dasharray="3 5" /><text x="320" y="75" fill="#c47b4b" font-size="10">Z altitude reference</text></g>
+                <g v-for="point in projectedTrack" :key="`height-${point.index}`"><line v-if="hasAltitude && point.hasAltitude" :x1="point.x" :y1="point.groundY" :x2="point.x" :y2="point.y" stroke="#c47b4b" stroke-width="1.5" stroke-dasharray="3 4" opacity=".8" /></g>
                 <path v-if="hasTrack" :d="projectedPath" fill="none" stroke="#f8fbf7" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" filter="url(#route3dShadow)" />
                 <path v-if="hasTrack" :d="projectedPath" fill="none" stroke="url(#route3dGradient)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
                 <template v-if="projectedTrack.length">
@@ -262,7 +266,8 @@ const activities = computed(() => {
             </div>
             <div class="flex flex-wrap gap-x-5 gap-y-2 bg-white px-3 py-3 text-[10px] text-muted"><span><i class="legend-dot bg-ember" />三维融合轨迹</span><span><i class="legend-dot bg-[#c47b4b]" />高度投影</span><span><i class="legend-dot bg-sage" />当前手机位置</span><span class="ml-auto">{{ altitudeSourceLabel }}</span></div>
           </div>
-          <div class="map-frame mt-6 hidden">
+          <div class="border-t border-[#e5ebe6] bg-[#fbfdfb] px-3 py-2 font-mono text-[9px] text-muted">{{ track.length }} points · {{ trackSegmentCount }} segments · {{ coordinateBoundsLabel }}<span v-if="session?.droppedSampleCount"> · dropped {{ session.droppedSampleCount }}</span></div>
+          <div class="map-frame mt-6" style="display: none">
             <svg viewBox="0 0 620 300" class="block w-full" role="img" aria-label="实时路线轨迹">
               <defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="#dce4df" stroke-width="1" /></pattern><filter id="shadow"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".16" /></filter></defs>
               <rect width="620" height="300" fill="#edf2ed" /><rect width="620" height="300" fill="url(#grid)" />

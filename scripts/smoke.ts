@@ -42,16 +42,25 @@ try {
           { deviceTimestampNs: 1, sensorType: "accelerometer", values: [0, 0, 9.8] },
           { deviceTimestampNs: 2, sensorType: "android.sensor.pressure", values: [1013.25] },
           { deviceTimestampNs: 3, sensorType: "android.sensor.pressure", values: [1012.5] },
+          { deviceTimestampNs: 7, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4 } },
+          { deviceTimestampNs: 5, sensorType: "location", values: [], location: { lat: 31.2301, lng: 121.4703, accuracyM: 4 } },
           { deviceTimestampNs: 4, sensorType: "location", values: [], location: { lat: 31.23, lng: 121.47, accuracyM: 4 } },
+          { deviceTimestampNs: 6, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.4703, accuracyM: 4 } },
+          { deviceTimestampNs: 8, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4 } },
         ],
       }));
       const accepted = await waitForMessage(device);
       const updated = await waitForMessage(dashboard);
-      const updatedSession = updated.session as { sampleCount: number; track: Array<{ altitudeM?: number; altitudeSource?: string }>; latestSensors: unknown[] };
+      const updatedSession = updated.session as { sampleCount: number; droppedSampleCount: number; track: Array<{ deviceTimestampNs?: number; lat: number; lng: number; altitudeM?: number; altitudeSource?: string }>; latestSensors: unknown[] };
       if (
         accepted.type !== "samples.accepted"
-        || updatedSession.sampleCount !== 4
-        || updatedSession.track.length !== 1
+        || updatedSession.sampleCount !== 8
+        || updatedSession.droppedSampleCount !== 1
+        || updatedSession.track.length !== 4
+        || updatedSession.track[0].deviceTimestampNs !== 4
+        || updatedSession.track[1].lat !== 31.2301
+        || updatedSession.track[2].lng !== 121.4703
+        || updatedSession.track[3].lng !== 121.47
         || typeof updatedSession.track[0].altitudeM !== "number"
         || updatedSession.track[0].altitudeSource !== "barometer"
         || updatedSession.latestSensors.length !== 3
@@ -60,7 +69,7 @@ try {
       }
       dashboard.close();
       device.close();
-      console.log("API and WebSocket smoke passed", { routes: routes.length, samples: 4, altitude: "barometer" });
+      console.log("API and WebSocket smoke passed", { routes: routes.length, points: 4, dropped: 1, altitude: "barometer" });
       process.exitCode = 0;
       break;
     } catch (error) {

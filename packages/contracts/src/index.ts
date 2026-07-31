@@ -19,6 +19,7 @@ export interface SensorCapability {
 }
 
 export interface TrackPoint {
+  deviceTimestampNs?: number;
   lat: number;
   lng: number;
   accuracyM: number;
@@ -90,6 +91,7 @@ export interface ObservationSession {
   lastReceivedAt?: string;
   lastSampleAt?: string;
   sampleCount: number;
+  droppedSampleCount: number;
   latestLocation?: SensorSample["location"];
   latestAltitudeM?: number;
   altitudeSource?: "gnss" | "barometer";

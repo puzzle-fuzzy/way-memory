@@ -8,6 +8,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Criteria
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -44,11 +45,11 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         if (state.value.collecting) return
 
         readings.clear()
-        registerSensor(Sensor.TYPE_ACCELEROMETER, "加速度计", SensorManager.SENSOR_DELAY_GAME, "设备不支持")
-        registerSensor(Sensor.TYPE_GYROSCOPE, "陀螺仪", SensorManager.SENSOR_DELAY_GAME, "设备不支持")
-        registerSensor(Sensor.TYPE_MAGNETIC_FIELD, "磁力计", SensorManager.SENSOR_DELAY_UI, "设备不支持")
-        registerSensor(Sensor.TYPE_PRESSURE, "气压计", SensorManager.SENSOR_DELAY_UI, "设备不支持")
-        registerSensor(Sensor.TYPE_ROTATION_VECTOR, "旋转向量", SensorManager.SENSOR_DELAY_GAME, "设备不支持")
+        registerSensor(Sensor.TYPE_ACCELEROMETER, "Accelerometer", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
+        registerSensor(Sensor.TYPE_GYROSCOPE, "Gyroscope", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
+        registerSensor(Sensor.TYPE_MAGNETIC_FIELD, "Magnetometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
+        registerSensor(Sensor.TYPE_PRESSURE, "Barometer", SensorManager.SENSOR_DELAY_UI, "Sensor unavailable")
+        registerSensor(Sensor.TYPE_ROTATION_VECTOR, "Rotation vector", SensorManager.SENSOR_DELAY_GAME, "Sensor unavailable")
 
         state.value = state.value.copy(
             collecting = true,
@@ -61,7 +62,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         uploader.start(Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device")
 
         if (hasLocationPermission()) requestLocationUpdates()
-        else updateError("已启动传感器采集，但没有位置权限")
+        else updateError("Location permission is not granted")
     }
 
     fun stop() {
@@ -77,30 +78,37 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             readings[label] = SensorReading(label, SensorState.UNAVAILABLE, unavailableDetail)
             return
         }
-        readings[label] = SensorReading(label, SensorState.LIMITED, "等待数据")
+        readings[label] = SensorReading(label, SensorState.LIMITED, "Waiting for data")
         sensorManager.registerListener(this, sensor, delay)
     }
 
     @SuppressLint("MissingPermission")
     private fun requestLocationUpdates() {
-        val providers = locationManager.getProviders(true)
-        if (providers.isEmpty()) {
-            updateError("系统定位服务未开启")
+        // Subscribe to one best provider. Subscribing to every enabled provider creates
+        // duplicate GNSS/network points and makes a bent route look disconnected.
+        val criteria = Criteria().apply {
+            accuracy = Criteria.ACCURACY_FINE
+            powerRequirement = Criteria.POWER_HIGH
+            isAltitudeRequired = false
+            isBearingRequired = false
+            isSpeedRequired = false
+        }
+        val provider = locationManager.getBestProvider(criteria, true)
+        if (provider == null) {
+            updateError("Location provider unavailable")
             return
         }
-        providers.forEach { provider ->
-            runCatching { locationManager.requestLocationUpdates(provider, 1_000L, 1f, this) }
-                .onFailure { updateError("无法订阅 $provider 定位") }
-        }
+        runCatching { locationManager.requestLocationUpdates(provider, 1_000L, 0.5f, this) }
+            .onFailure { updateError("Unable to subscribe to location provider") }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
         val label = when (event.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER -> "加速度计"
-            Sensor.TYPE_GYROSCOPE -> "陀螺仪"
-            Sensor.TYPE_MAGNETIC_FIELD -> "磁力计"
-            Sensor.TYPE_PRESSURE -> "气压计"
-            Sensor.TYPE_ROTATION_VECTOR -> "旋转向量"
+            Sensor.TYPE_ACCELEROMETER -> "Accelerometer"
+            Sensor.TYPE_GYROSCOPE -> "Gyroscope"
+            Sensor.TYPE_MAGNETIC_FIELD -> "Magnetometer"
+            Sensor.TYPE_PRESSURE -> "Barometer"
+            Sensor.TYPE_ROTATION_VECTOR -> "Rotation vector"
             else -> return
         }
         val values = event.values.toList()
@@ -124,7 +132,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     override fun onLocationChanged(location: Location) {
-        val accuracy = if (location.hasAccuracy()) "±%.1fm".format(location.accuracy) else "精度未知"
+        val accuracy = if (location.hasAccuracy()) "±%.1fm".format(location.accuracy) else "accuracy unknown"
         state.value = state.value.copy(
             locationText = "%.6f, %.6f · %s".format(location.latitude, location.longitude, accuracy),
             lastSampleAtMs = System.currentTimeMillis(),
@@ -144,7 +152,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     override fun onProviderEnabled(provider: String) = Unit
-    override fun onProviderDisabled(provider: String) = updateError("定位提供方已关闭：$provider")
+    override fun onProviderDisabled(provider: String) = updateError("Location provider disabled: $provider")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 
     private fun updateError(message: String) {
