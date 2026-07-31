@@ -26,11 +26,15 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val appContext = context.applicationContext
     private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val locationManager = appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    private val state = MutableStateFlow(SensorUiState())
+    private val credentialStore = DeviceCredentialStore(appContext)
+    private val state = MutableStateFlow(SensorUiState(deviceCredentialConfigured = credentialStore.hasToken()))
     private val readings = linkedMapOf<String, SensorReading>()
     private val sensorInventory = mutableListOf<SensorInventorySample>()
     private val registeredSensorKeys = mutableSetOf<String>()
-    private val uploader = SessionUploader(storageDirectory = File(appContext.filesDir, "capture-queue"))
+    private val uploader = SessionUploader(
+        storageDirectory = File(appContext.filesDir, "capture-queue"),
+        credentialStore = credentialStore,
+    )
     private val transportLimiter = SensorTransportRateLimiter()
     private val poseFusion = PoseFusionEngine()
     private val visualCollector = ArCorePoseCollector(
@@ -59,6 +63,22 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     val syncState: StateFlow<SessionSyncState> = uploader.syncState
 
     fun hasResumableCapture(): Boolean = uploader.hasPersistedSession()
+
+    fun deviceCredential(): String? = credentialStore.readToken()
+
+    fun saveDeviceCredential(token: String): Boolean {
+        val saved = credentialStore.saveToken(token)
+        state.value = state.value.copy(
+            deviceCredentialConfigured = credentialStore.hasToken(),
+            error = if (saved) null else "设备凭据为空或长度无效",
+        )
+        return saved
+    }
+
+    fun clearDeviceCredential() {
+        credentialStore.clear()
+        state.value = state.value.copy(deviceCredentialConfigured = false)
+    }
 
     fun availableSensorCount(): Int = sensorManager.getSensorList(Sensor.TYPE_ALL).size
 

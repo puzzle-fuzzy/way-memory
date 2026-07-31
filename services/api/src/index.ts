@@ -16,9 +16,13 @@ import type {
   SensorInventoryEntry,
   TrackPoint,
 } from "@way-memory/contracts";
+import { AuthStore, type AuthPrincipal, type AuthRole } from "./authStore";
 import { SessionStore } from "./sessionStore";
 
 const port = Number(Bun.env.PORT ?? 8787);
+const runtimeEnvironment = Bun.env.WAY_MEMORY_ENV ?? "test";
+if (runtimeEnvironment !== "test" && runtimeEnvironment !== "production") throw new Error("invalid_runtime_environment");
+const allowedOrigin = Bun.env.WAY_MEMORY_ALLOWED_ORIGIN ?? "*";
 
 const device: DeviceSnapshot = {
   deviceId: "demo-pixel-01",
@@ -107,6 +111,14 @@ const sessionRuntime = new Map<string, SessionRuntime>();
 const sessionResumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const MAX_PERSISTED_SESSIONS = 100;
 const sessionStore = new SessionStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
+const authMode = Bun.env.WAY_MEMORY_AUTH_MODE ?? "off";
+if (authMode !== "off" && authMode !== "enforced") throw new Error("invalid_auth_mode");
+if (authMode === "enforced" && !Bun.env.WAY_MEMORY_BOOTSTRAP_TOKEN) throw new Error("production_auth_requires_bootstrap_token");
+if (runtimeEnvironment === "production" && (authMode !== "enforced" || !Bun.env.WAY_MEMORY_PUBLIC_ORIGIN?.startsWith("https://") || !allowedOrigin.startsWith("https://"))) {
+  throw new Error("production_requires_enforced_auth_https_origin_and_cors_origin");
+}
+const authStore = new AuthStore(Bun.env.WAY_MEMORY_DB_PATH ?? ".data/way-memory.sqlite");
+const LOCAL_OWNER_ID = "local-test-owner";
 const dirtySessionIds = new Set<string>();
 
 const poseDistanceM = (left: PoseEstimate, right: PoseEstimate) => Math.sqrt(
@@ -171,6 +183,7 @@ for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
   snapshot.session.sensorStats ??= [];
   snapshot.session.sensorInventory ??= [];
   snapshot.session.outOfOrderSampleCount ??= 0;
+  snapshot.session.ownerId ??= LOCAL_OWNER_ID;
   snapshot.session.status = "stopped";
   sessions.set(snapshot.session.sessionId, snapshot.session);
   const poses = snapshot.session.poseTrack ?? [];
@@ -203,8 +216,10 @@ persistenceTimer.unref?.();
 
 type RealtimeClient = {
   role: "device" | "dashboard";
+  ownerId: string;
   deviceId?: string;
   sessionId?: string;
+  tokenId?: string;
 };
 
 const normalizeCaptureClient = (input: unknown): CaptureClientInfo | undefined => {
@@ -748,7 +763,7 @@ const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => 
   }
 };
 
-const createSession = (input: CreateSessionInput): ObservationSession => {
+const createSession = (input: CreateSessionInput, ownerId = LOCAL_OWNER_ID): ObservationSession => {
   pruneStoppedSessions();
   if (sessions.size >= MAX_SESSIONS) throw new Error("session_limit");
   const deviceId = typeof input.deviceId === "string" ? input.deviceId.trim().slice(0, MAX_DEVICE_ID_LENGTH) : "";
@@ -758,6 +773,7 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
     sessionId: crypto.randomUUID(),
     deviceId,
     mode: input.mode === "navigation" ? "navigation" : "learning",
+    ownerId,
     client: normalizeCaptureClient(input.client),
     routeId,
     startedAt: new Date().toISOString(),
@@ -910,8 +926,10 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   return { accepted: samples.length, dropped: session.droppedSampleCount, session, trackPoints, relativePoints, posePoints, correctedPosePoints, motionEvents };
 };
 
+const dashboardTopic = (ownerId: string) => `dashboard:${ownerId}`;
+
 const publishSession = (server: Bun.Server<RealtimeClient>, session: ObservationSession) => {
-  server.publish("dashboard", JSON.stringify({ type: "session.updated", session }));
+  server.publish(dashboardTopic(session.ownerId), JSON.stringify({ type: "session.updated", session }));
 };
 
 const publishSessionDelta = (
@@ -945,13 +963,37 @@ const publishSessionDelta = (
     sensorStats: session.sensorStats,
     latestSensors: session.latestSensors,
   };
-  server.publish("dashboard", JSON.stringify(delta));
+  server.publish(dashboardTopic(session.ownerId), JSON.stringify(delta));
 };
 
 const json = (data: unknown, init: ResponseInit = {}) => Response.json(data, {
   ...init,
-  headers: { "access-control-allow-origin": "*", ...init.headers },
+  headers: {
+    "access-control-allow-origin": allowedOrigin,
+    "access-control-allow-headers": "authorization, content-type",
+    ...init.headers,
+  },
 });
+
+const localPrincipal = (role: AuthRole): AuthPrincipal => ({
+  tokenId: "local-test-token",
+  ownerId: LOCAL_OWNER_ID,
+  role,
+  kind: "access",
+  expiresAt: new Date(Date.now() + 60_000).toISOString(),
+});
+
+const bearerToken = (request: Request) => {
+  const header = request.headers.get("authorization") ?? "";
+  return header.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : "";
+};
+
+const requestPrincipal = async (request: Request, role: AuthRole): Promise<AuthPrincipal | null> => {
+  if (authMode === "off") return localPrincipal(role);
+  return authStore.authenticate(bearerToken(request), role, "access");
+};
+
+const sessionBelongsTo = (session: ObservationSession, principal: { ownerId: string }) => session.ownerId === principal.ownerId;
 
 const server = Bun.serve<RealtimeClient>({
   port,
@@ -961,30 +1003,84 @@ const server = Bun.serve<RealtimeClient>({
     if (url.pathname === "/realtime") {
       const role = url.searchParams.get("role");
       if (role !== "device" && role !== "dashboard") return new Response("Invalid realtime role", { status: 400 });
+      const principal = authMode === "off"
+        ? localPrincipal(role)
+        : await authStore.authenticate(url.searchParams.get("ticket") ?? "", role, "ws-ticket");
+      if (!principal) return new Response("Unauthorized", { status: 401 });
       const upgraded = server.upgrade(request, {
         data: {
           role,
+          ownerId: principal.ownerId,
+          tokenId: principal.tokenId,
           deviceId: url.searchParams.get("deviceId") ?? undefined,
         },
       });
       return upgraded ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
     }
-    if (request.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS" } });
+    if (request.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, x-way-memory-bootstrap", "access-control-allow-methods": "GET,POST,OPTIONS" } });
     if (url.pathname === "/health" || url.pathname === "/api/health") {
       return json({ ok: true, service: "way-memory-api", time: new Date().toISOString() });
     }
-    if (url.pathname === "/api/devices") return json([device]);
-    if (url.pathname === "/api/routes") return json([route]);
-    if (url.pathname === "/api/routes/route-home-metro") return json(route);
+    if (url.pathname === "/api/auth/bootstrap" && request.method === "POST") {
+      if (authMode !== "enforced") return json({ error: "auth_disabled" }, { status: 404 });
+      const body = await parseJson<{ ownerId?: string }>(request);
+      try {
+        const credentials = await authStore.bootstrap(request.headers.get("x-way-memory-bootstrap") ?? "", body?.ownerId?.trim().slice(0, 128) || undefined);
+        return json(credentials, { status: 201 });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "bootstrap_failed";
+        return json({ error: reason }, { status: reason === "bootstrap_already_used" ? 409 : 401 });
+      }
+    }
+    if (url.pathname === "/api/auth/me" && request.method === "GET") {
+      const principal = authMode === "off" ? localPrincipal("dashboard") : await authStore.authenticate(bearerToken(request));
+      if (!principal) return json({ error: "unauthorized" }, { status: 401 });
+      return json({ ownerId: principal.ownerId, role: principal.role, expiresAt: principal.expiresAt });
+    }
+    if (url.pathname === "/api/auth/ws-ticket" && request.method === "POST") {
+      if (authMode !== "enforced") return json({ error: "auth_disabled" }, { status: 404 });
+      const principal = authMode === "off" ? localPrincipal("dashboard") : await authStore.authenticate(bearerToken(request));
+      if (!principal) return json({ error: "unauthorized" }, { status: 401 });
+      return json(await authStore.issueWebSocketTicket(principal));
+    }
+    if (url.pathname === "/api/auth/rotate" && request.method === "POST") {
+      const token = bearerToken(request);
+      const principal = authMode === "off" ? localPrincipal("dashboard") : await authStore.authenticate(token);
+      if (!principal || authMode === "off") return json({ error: authMode === "off" ? "auth_disabled" : "unauthorized" }, { status: authMode === "off" ? 404 : 401 });
+      return json(await authStore.rotate(token, principal));
+    }
+    if (url.pathname === "/api/auth/revoke" && request.method === "POST") {
+      const token = bearerToken(request);
+      const principal = await authStore.authenticate(token);
+      if (!principal) return json({ error: "unauthorized" }, { status: 401 });
+      await authStore.revoke(token);
+      return json({ revoked: true });
+    }
+    const dashboard = await requestPrincipal(request, "dashboard");
+    if (url.pathname === "/api/devices") {
+      if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
+      return json([device]);
+    }
+    if (url.pathname === "/api/routes") {
+      if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
+      return json([route]);
+    }
+    if (url.pathname === "/api/routes/route-home-metro") {
+      if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
+      return json(route);
+    }
     if (url.pathname === "/api/sessions" && request.method === "GET") {
-      return json([...sessions.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt)));
+      if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
+      return json([...sessions.values()].filter((session) => sessionBelongsTo(session, dashboard)).sort((left, right) => right.startedAt.localeCompare(left.startedAt)));
     }
     if (url.pathname === "/api/sessions" && request.method === "POST") {
+      const devicePrincipal = await requestPrincipal(request, "device");
+      if (!devicePrincipal) return json({ error: "unauthorized" }, { status: 401 });
       const input = await parseJson<CreateSessionInput>(request);
       if (!input || typeof input.deviceId !== "string" || (input.mode !== "learning" && input.mode !== "navigation")) return json({ error: "invalid_session" }, { status: 400 });
       let session: ObservationSession;
       try {
-        session = createSession(input);
+        session = createSession(input, devicePrincipal.ownerId);
       } catch (error) {
         if (error instanceof Error && error.message === "session_limit") return json({ error: "session_limit" }, { status: 429 });
         if (error instanceof Error && error.message === "invalid_session") return json({ error: "invalid_session" }, { status: 400 });
@@ -995,9 +1091,10 @@ const server = Bun.serve<RealtimeClient>({
 
     const rawSessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/raw$/);
     if (rawSessionMatch && request.method === "GET") {
+      if (!dashboard) return json({ error: "unauthorized" }, { status: 401 });
       const sessionId = rawSessionMatch[1];
       const session = getSession(sessionId);
-      if (!session) return json({ error: "session_not_found" }, { status: 404 });
+      if (!session || !sessionBelongsTo(session, dashboard)) return json({ error: "session_not_found" }, { status: 404 });
       const runtime = sessionRuntime.get(sessionId);
       return json({
         sessionId,
@@ -1012,7 +1109,11 @@ const server = Bun.serve<RealtimeClient>({
     if (sessionMatch) {
       const sessionId = sessionMatch[1];
       const session = getSession(sessionId);
-      if (!session) return json({ error: "session_not_found" }, { status: 404 });
+      const actor = url.pathname.endsWith("/samples") || url.pathname.endsWith("/stop")
+        ? await requestPrincipal(request, "device")
+        : dashboard;
+      if (!actor) return json({ error: "unauthorized" }, { status: 401 });
+      if (!session || !sessionBelongsTo(session, actor)) return json({ error: "session_not_found" }, { status: 404 });
       if (url.pathname.endsWith("/stop") && request.method === "POST") {
         session.status = "stopped";
         session.lastReceivedAt = new Date().toISOString();
@@ -1036,7 +1137,7 @@ const server = Bun.serve<RealtimeClient>({
   websocket: {
     idleTimeout: 120,
     open(ws) {
-      if (ws.data.role === "dashboard") ws.subscribe("dashboard");
+      if (ws.data.role === "dashboard") ws.subscribe(dashboardTopic(ws.data.ownerId));
     },
     message(ws, raw) {
       if (String(raw).length > MAX_JSON_BYTES) {
@@ -1060,7 +1161,7 @@ const server = Bun.serve<RealtimeClient>({
             routeId: message.routeId,
             sensors: message.sensors as SensorInventoryEntry[] | undefined,
             client: message.client,
-          });
+          }, ws.data.ownerId);
         } catch (error) {
           ws.send(JSON.stringify({ type: "error", error: error instanceof Error && error.message === "session_limit" ? "session_limit" : "session_start_failed" }));
           return;
@@ -1074,7 +1175,7 @@ const server = Bun.serve<RealtimeClient>({
       if (ws.data.role === "device" && message.type === "session.resume") {
         const session = getSession(message.sessionId ?? "");
         const deviceId = message.deviceId ?? ws.data.deviceId ?? "android-device";
-        if (!session || session.status !== "active" || session.deviceId !== deviceId) {
+        if (!session || session.status !== "active" || session.deviceId !== deviceId || !sessionBelongsTo(session, ws.data)) {
           ws.send(JSON.stringify({ type: "error", error: "session_resume_failed" }));
           return;
         }
@@ -1089,7 +1190,7 @@ const server = Bun.serve<RealtimeClient>({
       if (ws.data.role === "device" && message.type === "samples") {
         const session = getSession(message.sessionId ?? ws.data.sessionId ?? "");
         const samples = message.samples;
-        if (!session || session.status !== "active" || !Array.isArray(samples) || samples.length > 500) {
+        if (!session || session.status !== "active" || !sessionBelongsTo(session, ws.data) || !Array.isArray(samples) || samples.length > 500) {
           ws.send(JSON.stringify({ type: "error", error: "invalid_samples" }));
           return;
         }
@@ -1101,7 +1202,7 @@ const server = Bun.serve<RealtimeClient>({
 
       if (ws.data.role === "device" && message.type === "session.stop") {
         const session = getSession(message.sessionId ?? ws.data.sessionId ?? "");
-        if (session) {
+        if (session && sessionBelongsTo(session, ws.data)) {
           session.status = "stopped";
           session.lastReceivedAt = new Date().toISOString();
           cancelSessionResume(session.sessionId);

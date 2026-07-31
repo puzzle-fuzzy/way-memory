@@ -25,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -90,6 +92,7 @@ private fun SensorScreen(collector: SensorCollector) {
     val state by collector.uiState.collectAsState()
     val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }
+    var deviceToken by remember { mutableStateOf(collector.deviceCredential().orEmpty()) }
     fun startCapture() {
         if (!collector.hasPreciseLocationPermission()) return
         collector.start(hostActivity)
@@ -145,6 +148,23 @@ private fun SensorScreen(collector: SensorCollector) {
                             style = MaterialTheme.typography.bodySmall,
                         )
                         sync.lastError?.let { Text("同步错误：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        Text(
+                            if (state.deviceCredentialConfigured) "设备凭据：已保存到 Android Keystore" else "设备凭据：未配置（测试服务可匿名连接）",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        OutlinedTextField(
+                            value = deviceToken,
+                            onValueChange = { deviceToken = it.take(512) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("生产设备访问凭据") },
+                            placeholder = { Text("粘贴服务端生成的 device token") },
+                            visualTransformation = PasswordVisualTransformation(),
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { collector.saveDeviceCredential(deviceToken) }) { Text("保存到本机") }
+                            if (state.deviceCredentialConfigured) TextButton(onClick = { deviceToken = ""; collector.clearDeviceCredential() }) { Text("清除") }
+                        }
                         Text("Pose: ${state.poseText}", style = MaterialTheme.typography.bodySmall)
                         Text("Motion mode: ${state.motionMode}", style = MaterialTheme.typography.bodySmall)
                         Text(

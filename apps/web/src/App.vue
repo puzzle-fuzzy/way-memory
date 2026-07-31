@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { LiveSensorSnapshot, TrackPoint } from "@way-memory/contracts";
 import { useRealtimeSession } from "./composables/useRealtimeSession";
 
-const { connection, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, followLatest } = useRealtimeSession();
+const { connection, authRequired, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, followLatest, setAuthToken } = useRealtimeSession();
+const dashboardToken = ref("");
 
 const connectionLabel = computed(() => ({
   connecting: "连接中",
@@ -764,8 +765,14 @@ const activities = computed(() => {
         <button v-if="!followingLive" class="rounded-full border border-ember/30 bg-[#fff8ee] px-3 py-1.5 text-ember" type="button" @click="followLatest">跟随实时</button>
         <select class="max-w-[320px] rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 outline-none" :value="selectedSessionId ?? ''" aria-label="选择历史采集会话" @change="onSessionChange">
           <option value="" disabled>历史采集会话</option>
-          <option v-for="item in availableSessions" :key="item.sessionId" :value="item.sessionId">{{ sessionHistoryLabel(item) }}</option>
-        </select>
+         <option v-for="item in availableSessions" :key="item.sessionId" :value="item.sessionId">{{ sessionHistoryLabel(item) }}</option>
+       </select>
+      </div>
+
+      <div v-if="authRequired" class="z-10 flex flex-wrap items-center gap-3 border-b border-[#ead7bf] bg-[#fff8ee] px-4 py-3 text-xs text-[#8c6845] sm:px-7">
+        <span class="font-semibold">服务端已开启访问控制，请输入 dashboard token 才能查看轨迹。</span>
+        <input v-model="dashboardToken" class="min-w-[240px] flex-1 rounded-full border border-[#e3c9a7] bg-white px-3 py-2 font-mono text-[10px] outline-none" type="password" autocomplete="off" placeholder="dashboard token" @keyup.enter="setAuthToken(dashboardToken)" />
+        <button class="rounded-full bg-ink px-4 py-2 text-[10px] text-paper" type="button" @click="setAuthToken(dashboardToken)">安全连接</button>
       </div>
 
       <div ref="pointCanvasHost" class="relative min-h-0 flex-1 touch-none select-none overflow-hidden bg-[#e8f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">

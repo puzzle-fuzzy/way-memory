@@ -20,6 +20,8 @@ The `-PwayMemoryApiUrl` value is important: `10.0.2.2` is only the Android emula
 
 This matrix uses a debug APK, so its current HTTP test endpoint is permitted. A release build refuses an `http://` API URL; production must use an HTTPS domain and WSS.
 
+For an enforced service, provision the owner as described in `docs/authentication.md`, paste only the returned `deviceToken` into the Android app's credential field, and use the returned `dashboardToken` in the web console. The tokens are not part of the APK or web build and must not be recorded in the evidence directory.
+
 If more than one device is connected, use:
 
 ```powershell

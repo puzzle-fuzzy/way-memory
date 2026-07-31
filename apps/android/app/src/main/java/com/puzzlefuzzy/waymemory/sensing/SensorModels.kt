@@ -15,6 +15,7 @@ data class SensorReading(
 
 data class SensorUiState(
     val collecting: Boolean = false,
+    val deviceCredentialConfigured: Boolean = false,
     val locationPermissionGranted: Boolean = false,
     val availableSensorCount: Int = 0,
     val sampleCount: Long = 0,

@@ -150,6 +150,7 @@ private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
 class SessionUploader(
     private val baseUrl: String = BuildConfig.API_BASE_URL,
     storageDirectory: File,
+    private val credentialStore: DeviceCredentialStore? = null,
 ) : WebSocketListener() {
     private val client = OkHttpClient.Builder().pingInterval(15, TimeUnit.SECONDS).build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -256,11 +257,34 @@ class SessionUploader(
 
     private fun connect() {
         if (!running || socket != null) return
-        val websocketUrl = baseUrl
+        val ticket = credentialStore?.readToken()?.let(::requestWebSocketTicket)
+        val ticketQuery = ticket?.let { "&ticket=${android.net.Uri.encode(it)}" } ?: ""
+        val websocketUrl = baseUrl.trimEnd('/')
             .replaceFirst("http://", "ws://")
-            .replaceFirst("https://", "wss://") + "/realtime?role=device&deviceId=$deviceId"
+            .replaceFirst("https://", "wss://") + "/realtime?role=device&deviceId=${android.net.Uri.encode(deviceId)}$ticketQuery"
         socket = client.newWebSocket(Request.Builder().url(websocketUrl).build(), this)
         nextConnectAtMs = System.currentTimeMillis() + reconnectDelayMs
+    }
+
+    private fun requestWebSocketTicket(accessToken: String): String? {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/auth/ws-ticket")
+            .header("Authorization", "Bearer $accessToken")
+            .post(okhttp3.RequestBody.create(null, ByteArray(0)))
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                if (response.code == 404) return@use null
+                if (!response.isSuccessful) {
+                    state.value = state.value.copy(lastError = "设备授权失败：HTTP ${response.code}")
+                    return@use null
+                }
+                response.body?.string()?.let { JSONObject(it).optString("ticket").takeIf(String::isNotBlank) }
+            }
+        }.getOrElse {
+            state.value = state.value.copy(lastError = "无法获取实时授权 ticket")
+            null
+        }
     }
 
     override fun onOpen(webSocket: WebSocket, response: Response) {

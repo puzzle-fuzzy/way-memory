@@ -206,6 +206,7 @@ export interface ObservationSession {
   sessionId: string;
   deviceId: string;
   mode: ObservationMode;
+  ownerId: string;
   client?: CaptureClientInfo;
   routeId?: string;
   startedAt: string;
