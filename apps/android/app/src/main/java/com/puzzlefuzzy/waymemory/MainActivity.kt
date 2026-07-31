@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
 private fun SensorScreen() {
     val collector = remember { SensorCollector(LocalContext.current) }
     val state by collector.uiState.collectAsState()
+    val sync by collector.syncState.collectAsState()
     var permissionRequested by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -91,6 +92,11 @@ private fun SensorScreen() {
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text("位置：${state.locationText}", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "实时同步：${if (sync.connected) "已连接" else "未连接"} · 已上传 ${sync.uploadedSamples} · 待上传 ${sync.pendingSamples}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        sync.lastError?.let { Text("同步错误：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                         Spacer(Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = {

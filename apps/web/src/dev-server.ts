@@ -3,6 +3,7 @@ const root = new URL("../public/", import.meta.url);
 
 const server = Bun.serve({
   port,
+  hostname: "0.0.0.0",
   async fetch(request) {
     const url = new URL(request.url);
     const requested = url.pathname === "/" ? "index.html" : url.pathname.slice(1);

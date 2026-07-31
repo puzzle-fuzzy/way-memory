@@ -12,6 +12,8 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,8 +25,10 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val locationManager = appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private val state = MutableStateFlow(SensorUiState())
     private val readings = linkedMapOf<String, SensorReading>()
+    private val uploader = SessionUploader()
 
     val uiState: StateFlow<SensorUiState> = state.asStateFlow()
+    val syncState: StateFlow<SessionSyncState> = uploader.syncState
 
     fun availableSensorCount(): Int = sensorManager.getSensorList(Sensor.TYPE_ALL).size
 
@@ -54,6 +58,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             error = null,
         )
 
+        uploader.start(Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device")
+
         if (hasLocationPermission()) requestLocationUpdates()
         else updateError("已启动传感器采集，但没有位置权限")
     }
@@ -61,6 +67,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     fun stop() {
         sensorManager.unregisterListener(this)
         locationManager.removeUpdates(this)
+        uploader.stop()
         state.value = state.value.copy(collecting = false)
     }
 
@@ -102,6 +109,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             else -> values.take(3).joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
         }
         readings[label] = SensorReading(label, SensorState.READY, detail, values)
+        uploader.enqueue(CollectedSample(event.timestamp, event.sensor.stringType, values))
         publishSample()
     }
 
@@ -118,6 +126,18 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         state.value = state.value.copy(
             locationText = "%.6f, %.6f · %s".format(location.latitude, location.longitude, accuracy),
             lastSampleAtMs = System.currentTimeMillis(),
+        )
+        uploader.enqueue(
+            CollectedSample(
+                deviceTimestampNs = SystemClock.elapsedRealtimeNanos(),
+                sensorType = "location",
+                location = LocationSample(
+                    lat = location.latitude,
+                    lng = location.longitude,
+                    accuracyM = location.accuracy.takeIf { location.hasAccuracy() },
+                    altitudeM = location.altitude.takeIf { location.hasAltitude() },
+                ),
+            ),
         )
     }
 

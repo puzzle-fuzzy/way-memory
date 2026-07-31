@@ -1,4 +1,10 @@
-import type { DeviceSnapshot, RouteSummary } from "@way-memory/contracts";
+import type {
+  CreateSessionInput,
+  DeviceSnapshot,
+  ObservationSession,
+  RouteSummary,
+  SensorSample,
+} from "@way-memory/contracts";
 
 const port = Number(Bun.env.PORT ?? 8787);
 
@@ -43,21 +49,166 @@ const route: RouteSummary = {
   track,
 };
 
+const sessions = new Map<string, ObservationSession>();
+
+type RealtimeClient = {
+  role: "device" | "dashboard";
+  deviceId?: string;
+  sessionId?: string;
+};
+
+const parseJson = async <T>(request: Request): Promise<T | null> => {
+  try {
+    return await request.json() as T;
+  } catch {
+    return null;
+  }
+};
+
+const getSession = (sessionId: string) => sessions.get(sessionId);
+
+const createSession = (input: CreateSessionInput): ObservationSession => {
+  const session: ObservationSession = {
+    sessionId: crypto.randomUUID(),
+    deviceId: input.deviceId,
+    mode: input.mode,
+    routeId: input.routeId,
+    startedAt: new Date().toISOString(),
+    sampleCount: 0,
+    status: "active",
+  };
+  sessions.set(session.sessionId, session);
+  device.connected = true;
+  device.lastSeen = session.startedAt;
+  return session;
+};
+
+const acceptSamples = (session: ObservationSession, samples: SensorSample[]) => {
+  const lastLocation = [...samples].reverse().find((sample) => sample.location)?.location;
+  session.sampleCount += samples.length;
+  session.lastReceivedAt = new Date().toISOString();
+  if (lastLocation) session.latestLocation = lastLocation;
+  device.lastSeen = session.lastReceivedAt;
+  return { accepted: samples.length, session };
+};
+
+const publishSession = (server: Bun.Server<RealtimeClient>, session: ObservationSession) => {
+  server.publish("dashboard", JSON.stringify({ type: "session.updated", session }));
+};
+
 const json = (data: unknown, init: ResponseInit = {}) => Response.json(data, {
   ...init,
   headers: { "access-control-allow-origin": "*", ...init.headers },
 });
 
-const server = Bun.serve({
+const server = Bun.serve<RealtimeClient>({
   port,
-  fetch(request) {
+  hostname: "0.0.0.0",
+  async fetch(request, server) {
     const url = new URL(request.url);
+    if (url.pathname === "/realtime") {
+      const role = url.searchParams.get("role");
+      if (role !== "device" && role !== "dashboard") return new Response("Invalid realtime role", { status: 400 });
+      const upgraded = server.upgrade(request, {
+        data: {
+          role,
+          deviceId: url.searchParams.get("deviceId") ?? undefined,
+        },
+      });
+      return upgraded ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
+    }
     if (request.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS" } });
     if (url.pathname === "/health") return json({ ok: true, service: "way-memory-api", time: new Date().toISOString() });
     if (url.pathname === "/api/devices") return json([device]);
     if (url.pathname === "/api/routes") return json([route]);
     if (url.pathname === "/api/routes/route-home-metro") return json(route);
+    if (url.pathname === "/api/sessions" && request.method === "GET") return json([...sessions.values()]);
+    if (url.pathname === "/api/sessions" && request.method === "POST") {
+      const input = await parseJson<CreateSessionInput>(request);
+      if (!input?.deviceId || !input.mode) return json({ error: "invalid_session" }, { status: 400 });
+      const session = createSession(input);
+      return json(session, { status: 201 });
+    }
+
+    const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/samples|\/stop)?$/);
+    if (sessionMatch) {
+      const sessionId = sessionMatch[1];
+      const session = getSession(sessionId);
+      if (!session) return json({ error: "session_not_found" }, { status: 404 });
+      if (url.pathname.endsWith("/stop") && request.method === "POST") {
+        session.status = "stopped";
+        session.lastReceivedAt = new Date().toISOString();
+        return json(session);
+      }
+      if (url.pathname.endsWith("/samples") && request.method === "POST") {
+        const body = await parseJson<{ samples?: SensorSample[] }>(request);
+        const samples = body?.samples;
+        if (!Array.isArray(samples) || samples.length > 500) return json({ error: "invalid_samples" }, { status: 400 });
+        return json(acceptSamples(session, samples));
+      }
+      if (request.method === "GET") return json(session);
+    }
     return json({ error: "not_found" }, { status: 404 });
+  },
+  websocket: {
+    idleTimeout: 120,
+    open(ws) {
+      if (ws.data.role === "dashboard") ws.subscribe("dashboard");
+    },
+    message(ws, raw) {
+      let message: { type?: string; deviceId?: string; mode?: CreateSessionInput["mode"]; routeId?: string; sessionId?: string; samples?: SensorSample[] };
+      try {
+        message = JSON.parse(String(raw));
+      } catch {
+        ws.send(JSON.stringify({ type: "error", error: "invalid_json" }));
+        return;
+      }
+
+      if (ws.data.role === "device" && message.type === "session.start") {
+        const session = createSession({
+          deviceId: message.deviceId ?? ws.data.deviceId ?? "android-device",
+          mode: message.mode ?? "learning",
+          routeId: message.routeId,
+        });
+        ws.data.sessionId = session.sessionId;
+        ws.send(JSON.stringify({ type: "session.started", session }));
+        publishSession(server, session);
+        return;
+      }
+
+      if (ws.data.role === "device" && message.type === "samples") {
+        const session = getSession(message.sessionId ?? ws.data.sessionId ?? "");
+        const samples = message.samples;
+        if (!session || !Array.isArray(samples) || samples.length > 500) {
+          ws.send(JSON.stringify({ type: "error", error: "invalid_samples" }));
+          return;
+        }
+        const result = acceptSamples(session, samples);
+        ws.send(JSON.stringify({ type: "samples.accepted", accepted: result.accepted, sampleCount: session.sampleCount }));
+        publishSession(server, session);
+        return;
+      }
+
+      if (ws.data.role === "device" && message.type === "session.stop") {
+        const session = getSession(message.sessionId ?? ws.data.sessionId ?? "");
+        if (session) {
+          session.status = "stopped";
+          session.lastReceivedAt = new Date().toISOString();
+          publishSession(server, session);
+        }
+        return;
+      }
+
+      ws.send(JSON.stringify({ type: "error", error: "unsupported_message" }));
+    },
+    close(ws) {
+      const session = getSession(ws.data.sessionId ?? "");
+      if (session && session.status === "active") {
+        session.status = "stopped";
+        session.lastReceivedAt = new Date().toISOString();
+        publishSession(server, session);
+      }
+    },
   },
 });
 

@@ -48,3 +48,36 @@ export interface RouteSummary {
   updatedAt: string;
   track: TrackPoint[];
 }
+
+export type ObservationMode = "learning" | "navigation";
+
+export interface SensorSample {
+  deviceTimestampNs: number;
+  sensorType: SensorType | "location";
+  values: number[];
+  accuracy?: number;
+  location?: {
+    lat: number;
+    lng: number;
+    accuracyM?: number;
+    altitudeM?: number;
+  };
+}
+
+export interface CreateSessionInput {
+  deviceId: string;
+  mode: ObservationMode;
+  routeId?: string;
+}
+
+export interface ObservationSession {
+  sessionId: string;
+  deviceId: string;
+  mode: ObservationMode;
+  routeId?: string;
+  startedAt: string;
+  lastReceivedAt?: string;
+  sampleCount: number;
+  latestLocation?: SensorSample["location"];
+  status: "active" | "stopped";
+}
