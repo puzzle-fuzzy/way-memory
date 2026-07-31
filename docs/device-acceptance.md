@@ -36,6 +36,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps
 ```
 
 The script only installs and launches the APK. It does not grant permissions silently and does not fabricate route data.
+When `-RequirePhysical` is used, the script also refuses a non-HTTPS API URL so a real phone cannot accidentally upload private routes to the anonymous HTTP test deployment.
 
 ## Capture matrix
 

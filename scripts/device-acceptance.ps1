@@ -15,6 +15,9 @@ $displayApiBaseUrl = if ($ApiBaseUrl.Trim()) {
 } else {
     "http://101.35.246.159"
 }
+if ($RequirePhysical -and -not $displayApiBaseUrl.StartsWith("https://", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Physical sensor acceptance requires an HTTPS API endpoint; refusing to send real route data to the anonymous HTTP test deployment: $displayApiBaseUrl"
+}
 
 $adbCommand = Get-Command adb -ErrorAction SilentlyContinue
 if ($adbCommand) {
