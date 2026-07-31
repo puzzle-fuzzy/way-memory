@@ -94,6 +94,7 @@ type SessionRuntime = {
   lastPoseTimestampNs?: number;
   lastRelativeTimestampNs?: number;
   lastMotionEventTimestampNs?: number;
+  navigationAltitudeOffsetM?: number;
 };
 
 const sessionRuntime = new Map<string, SessionRuntime>();
@@ -137,25 +138,44 @@ const geographicDistanceM = (left: TrackPoint, right: TrackPoint) => {
   return 2 * earthRadiusM * Math.asin(Math.sqrt(a));
 };
 
+const trackSegmentDistanceM = (left: TrackPoint, right: TrackPoint) => {
+  const horizontalM = geographicDistanceM(left, right);
+  const verticalM = typeof left.altitudeM === "number" && typeof right.altitudeM === "number"
+    ? right.altitudeM - left.altitudeM
+    : 0;
+  return Math.hypot(horizontalM, verticalM);
+};
+
 const trackDistanceM = (track: TrackPoint[]) => {
   let distanceM = 0;
-  for (let index = 1; index < track.length; index += 1) distanceM += geographicDistanceM(track[index - 1], track[index]);
+  for (let index = 1; index < track.length; index += 1) distanceM += trackSegmentDistanceM(track[index - 1], track[index]);
   return distanceM;
 };
 
-const navigationStateFor = (route: StoredRoute, location: TrackPoint): NavigationState => {
+const navigationStateFor = (route: StoredRoute, location: TrackPoint, altitudeOffsetM?: number): NavigationState => {
   const updatedAt = new Date().toISOString();
   const track = route.track;
   if (track.length < 2) return { routeId: route.routeId, status: "route-not-ready", updatedAt };
   const earthRadiusM = 6_371_000;
   const origin = track[0];
+  const routeHasAltitude = track.every((point) => typeof point.altitudeM === "number" && Number.isFinite(point.altitudeM));
   const latitudeScale = Math.PI / 180 * earthRadiusM;
   const longitudeScale = latitudeScale * Math.cos(origin.lat * Math.PI / 180);
   const toLocal = (point: TrackPoint) => ({
     x: (point.lng - origin.lng) * longitudeScale,
     y: (point.lat - origin.lat) * latitudeScale,
+    z: routeHasAltitude && typeof point.altitudeM === "number" && typeof origin.altitudeM === "number"
+      ? point.altitudeM - origin.altitudeM
+      : 0,
   });
-  const target = toLocal(location);
+  const targetAltitudeM = routeHasAltitude && typeof location.altitudeM === "number" && typeof altitudeOffsetM === "number"
+    ? location.altitudeM + altitudeOffsetM
+    : undefined;
+  const useVerticalProjection = targetAltitudeM !== undefined;
+  const target = {
+    ...toLocal(location),
+    z: useVerticalProjection && typeof origin.altitudeM === "number" ? targetAltitudeM - origin.altitudeM : 0,
+  };
   let cumulativeM = 0;
   let totalM = 0;
   let bestDistanceM = Number.POSITIVE_INFINITY;
@@ -167,14 +187,20 @@ const navigationStateFor = (route: StoredRoute, location: TrackPoint): Navigatio
     const end = toLocal(track[index]);
     const dx = end.x - start.x;
     const dy = end.y - start.y;
-    const segmentLengthM = Math.hypot(dx, dy);
+    const dz = useVerticalProjection ? end.z - start.z : 0;
+    const segmentLengthM = Math.hypot(dx, dy, dz);
     totalM += segmentLengthM;
     if (segmentLengthM < 0.01) continue;
     const segmentLengthSquared = segmentLengthM ** 2;
-    const t = Math.max(0, Math.min(1, ((target.x - start.x) * dx + (target.y - start.y) * dy) / segmentLengthSquared));
+    const t = Math.max(0, Math.min(1, (
+      (target.x - start.x) * dx
+      + (target.y - start.y) * dy
+      + (target.z - start.z) * dz
+    ) / segmentLengthSquared));
     const nearestX = start.x + dx * t;
     const nearestY = start.y + dy * t;
-    const distanceM = Math.hypot(target.x - nearestX, target.y - nearestY);
+    const nearestZ = start.z + dz * t;
+    const distanceM = Math.hypot(target.x - nearestX, target.y - nearestY, target.z - nearestZ);
     if (distanceM < bestDistanceM) {
       bestDistanceM = distanceM;
       bestProgressM = cumulativeM + segmentLengthM * t;
@@ -207,7 +233,7 @@ const navigationStateFor = (route: StoredRoute, location: TrackPoint): Navigatio
     nearestLat,
     nearestLng,
     ...(nearestAltitudeM === undefined ? {} : { nearestAltitudeM }),
-    ...(typeof location.altitudeM === "number" && nearestAltitudeM !== undefined ? { altitudeDeltaM: location.altitudeM - nearestAltitudeM } : {}),
+    ...(targetAltitudeM !== undefined && nearestAltitudeM !== undefined ? { altitudeDeltaM: targetAltitudeM - nearestAltitudeM } : {}),
     accuracyM,
     updatedAt,
   };
@@ -247,8 +273,22 @@ const alignGnssTrack = (reference: TrackPoint[], candidate: TrackPoint[]): Track
   const residualM = matches.length ? matches.reduce((sum, match) => sum + match.distanceM, 0) / matches.length : undefined;
   const distinctReferencePoints = new Set(matches.map((match) => match.referenceIndex)).size;
   if (matches.length < 2 || distinctReferencePoints < 2 || coverage < 0.5 || (residualM !== undefined && residualM > 25)) return unavailable(matches.length, coverage, residualM);
+  const altitudeOffsets = matches
+    .flatMap((match) => typeof reference[match.referenceIndex].altitudeM === "number" && typeof match.point.altitudeM === "number"
+      ? [reference[match.referenceIndex].altitudeM - match.point.altitudeM]
+      : []);
+  const sortedAltitudeOffsets = [...altitudeOffsets].sort((left, right) => left - right);
+  const altitudeOffset = sortedAltitudeOffsets.length
+    ? sortedAltitudeOffsets[Math.floor(sortedAltitudeOffsets.length / 2)]
+    : undefined;
+  const normalizedMatches = matches.map((match) => ({
+    ...match,
+    point: altitudeOffset === undefined || typeof match.point.altitudeM !== "number"
+      ? match.point
+      : { ...match.point, altitudeM: match.point.altitudeM + altitudeOffset },
+  }));
   const buckets = reference.map((point) => [point] as TrackPoint[]);
-  for (const match of matches) buckets[match.referenceIndex].push(match.point);
+  for (const match of normalizedMatches) buckets[match.referenceIndex].push(match.point);
   const merged = buckets.map((points) => {
     if (points.length === 1) return points[0];
     const latitude = points.reduce((sum, point) => sum + point.lat, 0) / points.length;
@@ -1162,7 +1202,21 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
         session.latestLocation = sample.location;
         session.track.push(point);
         trackPoints.push(point);
-        if (navigationRoute) session.navigation = navigationStateFor(navigationRoute, point);
+        if (navigationRoute) {
+          let navigation = navigationStateFor(navigationRoute, point, runtime.navigationAltitudeOffsetM);
+          if (
+            runtime.navigationAltitudeOffsetM === undefined
+            && typeof point.altitudeM === "number"
+            && typeof navigation.nearestAltitudeM === "number"
+          ) {
+            // Each capture session stores altitude relative to its own first
+            // fix. Anchor the navigation session to the nearest route height
+            // once, then keep the vertical frame stable for elevator/stairs.
+            runtime.navigationAltitudeOffsetM = navigation.nearestAltitudeM - point.altitudeM;
+            navigation = navigationStateFor(navigationRoute, point, runtime.navigationAltitudeOffsetM);
+          }
+          session.navigation = navigation;
+        }
         rememberLocation(session, sample.location, sample.deviceTimestampNs);
         upsertSensor(session, sample, receivedAt, "gnss");
       }

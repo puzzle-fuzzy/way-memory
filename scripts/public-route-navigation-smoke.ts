@@ -22,7 +22,7 @@ const nextMessage = (socket: WebSocket) => new Promise<Record<string, any>>((res
   socket.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("WebSocket message error")); }, { once: true });
 });
 
-const captureObservation = async (deviceId: string, prefix: string, points: Array<{ lat: number; lng: number }>) => {
+const captureObservation = async (deviceId: string, prefix: string, points: Array<{ lat: number; lng: number; altitudeM?: number }>) => {
   const socket = new WebSocket(`${wsBase}/realtime?role=device&deviceId=${encodeURIComponent(deviceId)}`);
   await waitForOpen(socket);
   socket.send(JSON.stringify({ type: "session.start", deviceId, mode: "learning", routeId, sensors: [] }));
@@ -62,8 +62,8 @@ try {
   if (created.response.status !== 201 || typeof created.body.routeId !== "string") throw new Error(`route create failed: ${JSON.stringify(created.body)}`);
   routeId = created.body.routeId;
   const reference = await captureObservation("public-route-observation-1", "public-route-1", [
-    { lat: 31.2304, lng: 121.47 },
-    { lat: 31.23041, lng: 121.47 },
+    { lat: 31.2304, lng: 121.47, altitudeM: 100 },
+    { lat: 31.23041, lng: 121.47, altitudeM: 101 },
   ]);
   if (reference.observations !== 1) throw new Error("reference observation was not attached");
   const second = await captureObservation("public-route-observation-2", "public-route-2", [
@@ -106,7 +106,7 @@ try {
   navigator.send(JSON.stringify({
     type: "samples",
     sessionId: navigationSessionId,
-    samples: [{ sampleId: "public-route-nav-on", deviceTimestampNs: 1_000_000_000, sensorType: "location", values: [], location: { lat: 31.230405, lng: 121.470001, accuracyM: 4 } }],
+    samples: [{ sampleId: "public-route-nav-on", deviceTimestampNs: 1_000_000_000, sensorType: "location", values: [], location: { lat: 31.230405, lng: 121.470001, accuracyM: 4, altitudeM: 100.5 } }],
   }));
   if ((await nextMessage(navigator)).type !== "samples.accepted") throw new Error("navigation on-route sample failed");
   const onRoute = await requestJson(`/api/sessions/${navigationSessionId}?view=integrity`);
@@ -114,14 +114,22 @@ try {
   navigator.send(JSON.stringify({
     type: "samples",
     sessionId: navigationSessionId,
-    samples: [{ sampleId: "public-route-nav-off", deviceTimestampNs: 10_000_000_000, sensorType: "location", values: [], location: { lat: 31.2315, lng: 121.470001, accuracyM: 4 } }],
+    samples: [{ sampleId: "public-route-nav-vertical-near", deviceTimestampNs: 5_000_000_000, sensorType: "location", values: [], location: { lat: 31.230405, lng: 121.470001, accuracyM: 4, altitudeM: 110.5 } }],
+  }));
+  if ((await nextMessage(navigator)).type !== "samples.accepted") throw new Error("navigation vertical sample failed");
+  const vertical = await requestJson(`/api/sessions/${navigationSessionId}?view=integrity`);
+  if (vertical.body.navigation?.status !== "near-route" || (vertical.body.navigation?.altitudeDeltaM ?? 0) <= 5) throw new Error(`3D navigation projection failed: ${JSON.stringify(vertical.body.navigation)}`);
+  navigator.send(JSON.stringify({
+    type: "samples",
+    sessionId: navigationSessionId,
+    samples: [{ sampleId: "public-route-nav-off", deviceTimestampNs: 20_000_000_000, sensorType: "location", values: [], location: { lat: 31.2315, lng: 121.470001, accuracyM: 4 } }],
   }));
   if ((await nextMessage(navigator)).type !== "samples.accepted") throw new Error("navigation off-route sample failed");
   const offRoute = await requestJson(`/api/sessions/${navigationSessionId}?view=integrity`);
   if (offRoute.body.navigation?.status !== "off-route" || (offRoute.body.navigation?.distanceToRouteM ?? 0) <= 25) throw new Error(`off-route projection failed: ${JSON.stringify(offRoute.body.navigation)}`);
   await requestJson(`/api/sessions/${navigationSessionId}/stop`, { method: "POST" });
   navigator.close();
-  console.log("Public route navigation smoke passed", { baseUrl, routeId, observations: 3, published: true, onRoute: onRoute.body.navigation.status, offRoute: offRoute.body.navigation.status });
+  console.log("Public route navigation smoke passed", { baseUrl, routeId, observations: 3, published: true, onRoute: onRoute.body.navigation.status, vertical: vertical.body.navigation.status, offRoute: offRoute.body.navigation.status });
 } finally {
   if (routeId) await requestJson(`/api/routes/${routeId}`, { method: "DELETE" }).catch(() => undefined);
 }

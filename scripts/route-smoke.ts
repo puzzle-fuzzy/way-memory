@@ -85,8 +85,8 @@ try {
     type: "samples",
     sessionId,
     samples: [
-      { sampleId: "route-sample-1", deviceTimestampNs: 100, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4 }, pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
-      { sampleId: "route-sample-2", deviceTimestampNs: 200, sensorType: "location", values: [], location: { lat: 31.23041, lng: 121.47, accuracyM: 4 }, pose: { deviceTimestampNs: 200, xM: 1, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
+      { sampleId: "route-sample-1", deviceTimestampNs: 100, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4, altitudeM: 100 }, pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
+      { sampleId: "route-sample-2", deviceTimestampNs: 200, sensorType: "location", values: [], location: { lat: 31.23041, lng: 121.47, accuracyM: 4, altitudeM: 101 }, pose: { deviceTimestampNs: 200, xM: 1, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
     ],
   }));
   const accepted = await nextMessage(device);
@@ -213,7 +213,7 @@ try {
       deviceTimestampNs: 100,
       sensorType: "location",
       values: [],
-      location: { lat: 31.230405, lng: 121.470001, accuracyM: 4 },
+      location: { lat: 31.230405, lng: 121.470001, accuracyM: 4, altitudeM: 100.5 },
       pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["gnss"], motionMode: "walking", stationary: false },
     }],
   }));
@@ -225,8 +225,23 @@ try {
     type: "samples",
     sessionId: navigationSessionId,
     samples: [{
+      sampleId: "route-navigation-vertical-near",
+      deviceTimestampNs: 5_000_000_000,
+      sensorType: "location",
+      values: [],
+      location: { lat: 31.230405, lng: 121.470001, accuracyM: 4, altitudeM: 110.5 },
+    }],
+  }));
+  const verticalAccepted = await nextMessage(navigator);
+  if (verticalAccepted.type !== "samples.accepted") throw new Error("vertical navigation sample failed");
+  const verticalSession = await requestJson(`/api/sessions/${navigationSessionId}`);
+  if (verticalSession.body.navigation?.status !== "near-route" || (verticalSession.body.navigation?.altitudeDeltaM ?? 0) <= 5) throw new Error(`3D navigation projection failed: ${JSON.stringify(verticalSession.body.navigation)}`);
+  navigator.send(JSON.stringify({
+    type: "samples",
+    sessionId: navigationSessionId,
+    samples: [{
       sampleId: "route-navigation-off-route",
-      deviceTimestampNs: 10_000_000_000,
+      deviceTimestampNs: 20_000_000_000,
       sensorType: "location",
       values: [],
       location: { lat: 31.2315, lng: 121.470001, accuracyM: 4 },
