@@ -51,21 +51,24 @@ try {
       }));
       const accepted = await waitForMessage(device);
       const updated = await waitForMessage(dashboard);
-      const updatedSession = updated.session as { sampleCount: number; droppedSampleCount: number; track: Array<{ deviceTimestampNs?: number; lat: number; lng: number; altitudeM?: number; altitudeSource?: string }>; relativeTrack: Array<{ xM: number; yM: number; zM: number }>; latestSensors: unknown[] };
+      const updatedDelta = updated as { type: string; sampleCount: number; droppedSampleCount: number; trackPoints: Array<{ deviceTimestampNs?: number; lat: number; lng: number; altitudeM?: number; altitudeSource?: string }>; relativePoints: Array<{ xM: number; yM: number; zM: number }>; latestAltitudeM?: number; altitudeSource?: string; latestSensors: unknown[] };
       if (
         accepted.type !== "samples.accepted"
-        || updatedSession.sampleCount !== 8
-        || updatedSession.droppedSampleCount !== 1
-        || updatedSession.track.length !== 4
-        || updatedSession.track[0].deviceTimestampNs !== 4
-        || updatedSession.track[1].lat !== 31.2301
-        || updatedSession.track[2].lng !== 121.4703
-        || updatedSession.track[3].lng !== 121.47
-        || updatedSession.relativeTrack.length !== 2
-        || updatedSession.relativeTrack[1].xM !== 0.2
-        || typeof updatedSession.track[0].altitudeM !== "number"
-        || updatedSession.track[0].altitudeSource !== "barometer"
-        || updatedSession.latestSensors.length !== 3
+        || updatedDelta.type !== "session.delta"
+        || updatedDelta.sampleCount !== 8
+        || updatedDelta.droppedSampleCount !== 1
+        || updatedDelta.trackPoints.length !== 4
+        || updatedDelta.trackPoints[0].deviceTimestampNs !== 4
+        || updatedDelta.trackPoints[1].lat !== 31.2301
+        || updatedDelta.trackPoints[2].lng !== 121.4703
+        || updatedDelta.trackPoints[3].lng !== 121.47
+        || updatedDelta.relativePoints.length !== 2
+        || updatedDelta.relativePoints[1].xM !== 0.2
+        || typeof updatedDelta.trackPoints[0].altitudeM !== "number"
+        || updatedDelta.trackPoints[0].altitudeSource !== "barometer"
+        || typeof updatedDelta.latestAltitudeM !== "number"
+        || updatedDelta.altitudeSource !== "barometer"
+        || updatedDelta.latestSensors.length !== 3
       ) {
         throw new Error("Unexpected realtime session update");
       }

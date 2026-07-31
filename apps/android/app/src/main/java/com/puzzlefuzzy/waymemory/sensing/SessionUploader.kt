@@ -80,7 +80,7 @@ class SessionUploader(
         flushJob = scope.launch {
             while (isActive) {
                 flush()
-                delay(200)
+                delay(FLUSH_INTERVAL_MS)
             }
         }
     }
@@ -183,5 +183,6 @@ class SessionUploader(
     companion object {
         private const val TAG = "WayMemorySync"
         private const val MAX_BATCH = 100
+        private const val FLUSH_INTERVAL_MS = 80L
     }
 }

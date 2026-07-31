@@ -1,4 +1,4 @@
-import type { ObservationSession } from "@way-memory/contracts";
+import type { ObservationSession, SessionDelta } from "@way-memory/contracts";
 import { onMounted, onUnmounted, ref, shallowRef } from "vue";
 import type { LiveConnection } from "../types";
 
@@ -25,17 +25,40 @@ export function useRealtimeSession() {
   const latestSession = shallowRef<ObservationSession | null>(null);
   let socket: WebSocket | undefined;
   let reconnectTimer: number | undefined;
-  let sessionUpdateTimer: number | undefined;
+  let sessionUpdateFrame: number | undefined;
   let pendingSession: ObservationSession | null | undefined;
 
   function queueSessionUpdate(nextSession: ObservationSession | null) {
     pendingSession = nextSession;
-    if (sessionUpdateTimer !== undefined) return;
-    sessionUpdateTimer = window.setTimeout(() => {
+    if (sessionUpdateFrame !== undefined) return;
+    sessionUpdateFrame = window.requestAnimationFrame(() => {
       latestSession.value = pendingSession ?? null;
       pendingSession = undefined;
-      sessionUpdateTimer = undefined;
-    }, 80);
+      sessionUpdateFrame = undefined;
+    });
+  }
+
+  function applySessionDelta(delta: SessionDelta) {
+    const current = pendingSession ?? latestSession.value;
+    if (!current || current.sessionId !== delta.sessionId) {
+      void refreshSnapshot();
+      return;
+    }
+    queueSessionUpdate({
+      ...current,
+      status: delta.status,
+      lastReceivedAt: delta.lastReceivedAt ?? current.lastReceivedAt,
+      lastSampleAt: delta.lastSampleAt ?? current.lastSampleAt,
+      sampleCount: delta.sampleCount,
+      droppedSampleCount: delta.droppedSampleCount,
+      latestLocation: delta.latestLocation ?? current.latestLocation,
+      latestAltitudeM: delta.latestAltitudeM ?? current.latestAltitudeM,
+      altitudeSource: delta.altitudeSource ?? current.altitudeSource,
+      latestRelativePosition: delta.latestRelativePosition ?? current.latestRelativePosition,
+      track: [...current.track, ...delta.trackPoints].slice(-500),
+      relativeTrack: [...current.relativeTrack, ...delta.relativePoints].slice(-500),
+      latestSensors: delta.latestSensors,
+    });
   }
 
   async function refreshSnapshot() {
@@ -63,6 +86,7 @@ export function useRealtimeSession() {
       try {
         const message = JSON.parse(String(event.data)) as { type?: string; session?: ObservationSession };
         if (message.type === "session.updated" && message.session) queueSessionUpdate(message.session);
+        if (message.type === "session.delta") applySessionDelta(message as SessionDelta);
       } catch {
         // A malformed update should not take down the monitoring console.
       }
@@ -81,7 +105,7 @@ export function useRealtimeSession() {
 
   onUnmounted(() => {
     if (reconnectTimer) window.clearTimeout(reconnectTimer);
-    if (sessionUpdateTimer !== undefined) window.clearTimeout(sessionUpdateTimer);
+    if (sessionUpdateFrame !== undefined) window.cancelAnimationFrame(sessionUpdateFrame);
     socket?.close();
   });
 

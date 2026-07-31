@@ -118,3 +118,20 @@ export interface ObservationSession {
   latestSensors: LiveSensorSnapshot[];
   status: "active" | "stopped";
 }
+
+export interface SessionDelta {
+  type: "session.delta";
+  sessionId: string;
+  status: ObservationSession["status"];
+  lastReceivedAt?: string;
+  lastSampleAt?: string;
+  sampleCount: number;
+  droppedSampleCount: number;
+  latestLocation?: ObservationSession["latestLocation"];
+  latestAltitudeM?: number;
+  altitudeSource?: ObservationSession["altitudeSource"];
+  latestRelativePosition?: ObservationSession["latestRelativePosition"];
+  trackPoints: TrackPoint[];
+  relativePoints: RelativeMotionPoint[];
+  latestSensors: LiveSensorSnapshot[];
+}

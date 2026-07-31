@@ -5,6 +5,7 @@ import type {
   ObservationSession,
   RelativeMotionPoint,
   RouteSummary,
+  SessionDelta,
   SensorSample,
   TrackPoint,
 } from "@way-memory/contracts";
@@ -350,6 +351,8 @@ const createSession = (input: CreateSessionInput): ObservationSession => {
 
 const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   const receivedAt = new Date().toISOString();
+  const trackPoints: TrackPoint[] = [];
+  const relativePoints: RelativeMotionPoint[] = [];
   const samples = rawSamples
     .map(normalizeSensorSample)
     .filter((sample): sample is SensorSample => sample !== null)
@@ -365,6 +368,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
     if (sample.relativePosition) {
       const motionPoint = toRelativeMotionPoint(sample.relativePosition, sample.deviceTimestampNs);
       session.relativeTrack.push(motionPoint);
+      relativePoints.push(motionPoint);
       session.latestRelativePosition = motionPoint;
     }
     if (sample.location) {
@@ -375,6 +379,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
       const point = toTrackPoint(session, sample.location, sample.deviceTimestampNs);
       session.latestLocation = sample.location;
       session.track.push(point);
+      trackPoints.push(point);
       rememberLocation(session, sample.location, sample.deviceTimestampNs);
       upsertSensor(session, sample, receivedAt, "gnss");
     } else {
@@ -386,11 +391,35 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   if (session.relativeTrack.length > MAX_RELATIVE_TRACK_POINTS) session.relativeTrack = session.relativeTrack.slice(-MAX_RELATIVE_TRACK_POINTS);
   device.lastSeen = session.lastReceivedAt ?? device.lastSeen;
   device.connected = true;
-  return { accepted: samples.length, dropped: session.droppedSampleCount, session };
+  return { accepted: samples.length, dropped: session.droppedSampleCount, session, trackPoints, relativePoints };
 };
 
 const publishSession = (server: Bun.Server<RealtimeClient>, session: ObservationSession) => {
   server.publish("dashboard", JSON.stringify({ type: "session.updated", session }));
+};
+
+const publishSessionDelta = (
+  server: Bun.Server<RealtimeClient>,
+  result: ReturnType<typeof acceptSamples>,
+) => {
+  const session = result.session;
+  const delta: SessionDelta = {
+    type: "session.delta",
+    sessionId: session.sessionId,
+    status: session.status,
+    lastReceivedAt: session.lastReceivedAt,
+    lastSampleAt: session.lastSampleAt,
+    sampleCount: session.sampleCount,
+    droppedSampleCount: session.droppedSampleCount,
+    latestLocation: session.latestLocation,
+    latestAltitudeM: session.latestAltitudeM,
+    altitudeSource: session.altitudeSource,
+    latestRelativePosition: session.latestRelativePosition,
+    trackPoints: result.trackPoints,
+    relativePoints: result.relativePoints,
+    latestSensors: session.latestSensors,
+  };
+  server.publish("dashboard", JSON.stringify(delta));
 };
 
 const json = (data: unknown, init: ResponseInit = {}) => Response.json(data, {
@@ -505,7 +534,7 @@ const server = Bun.serve<RealtimeClient>({
         }
         const result = acceptSamples(session, samples);
         ws.send(JSON.stringify({ type: "samples.accepted", accepted: result.accepted, sampleCount: session.sampleCount }));
-        publishSession(server, session);
+        publishSessionDelta(server, result);
         return;
       }
 

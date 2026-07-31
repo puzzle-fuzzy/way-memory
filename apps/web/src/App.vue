@@ -173,7 +173,7 @@ let canvasResizeObserver: ResizeObserver | undefined;
 let canvasDrawFrame: number | undefined;
 let canvasDrawTimer: number | undefined;
 let lastCanvasDrawAt = 0;
-const CANVAS_FRAME_INTERVAL_MS = 1000 / 30;
+const CANVAS_FRAME_INTERVAL_MS = 1000 / 60;
 
 const beginCameraDrag = (event: PointerEvent) => {
   const target = event.currentTarget as HTMLElement | null;
