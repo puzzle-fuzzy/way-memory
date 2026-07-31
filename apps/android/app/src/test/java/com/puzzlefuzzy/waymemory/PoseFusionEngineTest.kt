@@ -72,6 +72,69 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun recoveredPoseSeedsTheExistingCoordinateFrame() {
+        val engine = PoseFusionEngine()
+        engine.seedFromPose(
+            com.puzzlefuzzy.waymemory.sensing.PoseEstimateSample(
+                deviceTimestampNs = 10_000_000_000L,
+                xM = 12.5f,
+                yM = -4.25f,
+                zM = 2.75f,
+                velocityXMps = 0.4f,
+                velocityYMps = -0.2f,
+                velocityZMps = 0.1f,
+                accuracyM = 1.2f,
+                confidence = 0.9f,
+                source = "fused",
+                sourceFlags = listOf("imu", "recovered-anchor"),
+                motionMode = "walking",
+                stationary = false,
+            ),
+        )
+
+        val afterRecovery = engine.updateImu(
+            10_200_000_000L,
+            floatArrayOf(0f, 0f, 0f),
+            angularRateMagnitude = 0f,
+        )
+
+        assertNotNull(afterRecovery)
+        assertTrue((afterRecovery?.pose?.xM ?: 0f) > 12f)
+        assertTrue((afterRecovery?.pose?.yM ?: 0f) < -4f)
+        assertTrue((afterRecovery?.pose?.zM ?: 0f) > 2.5f)
+        assertTrue(afterRecovery?.pose?.sourceFlags?.contains("recovered-anchor") == true)
+    }
+
+    @Test
+    fun firstGnssFixDoesNotResetARecoveredRouteToZero() {
+        val engine = PoseFusionEngine()
+        engine.seedFromPose(
+            com.puzzlefuzzy.waymemory.sensing.PoseEstimateSample(
+                deviceTimestampNs = 10_000_000_000L,
+                xM = 12f,
+                yM = 3f,
+                zM = 1f,
+                velocityXMps = 0f,
+                velocityYMps = 0f,
+                velocityZMps = 0f,
+                accuracyM = 1f,
+                confidence = 0.95f,
+                source = "fused",
+                sourceFlags = listOf("imu"),
+                motionMode = "stationary",
+                stationary = true,
+            ),
+        )
+
+        val firstFix = engine.updateGnss(31.230000, 121.470000, 4f, 100.0, 10_500_000_000L)
+
+        assertNotNull(firstFix)
+        assertTrue((firstFix?.pose?.xM ?: 0f) > 10f)
+        assertTrue((firstFix?.pose?.yM ?: 0f) > 2f)
+        assertTrue((firstFix?.pose?.zM ?: 0f) > 0.8f)
+    }
+
+    @Test
     fun pureRotationKeepsTranslationAtTheOrigin() {
         val engine = PoseFusionEngine()
         var timestampNs = 1_000_000_000L

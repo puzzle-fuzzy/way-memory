@@ -31,12 +31,13 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private val readings = linkedMapOf<String, SensorReading>()
     private val sensorInventory = mutableListOf<SensorInventorySample>()
     private val registeredSensorKeys = mutableSetOf<String>()
+    private val poseFusion = PoseFusionEngine()
     private val uploader = SessionUploader(
         storageDirectory = File(appContext.filesDir, "capture-queue"),
         credentialStore = credentialStore,
+        onSessionLifecycle = ::onSessionLifecycle,
     )
     private val transportLimiter = SensorTransportRateLimiter()
-    private val poseFusion = PoseFusionEngine()
     private val visualCollector = ArCorePoseCollector(
         appContext = appContext,
         onPose = ::onVisualPose,
@@ -58,6 +59,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private var totalCollectedSamples = 0L
     private var lastSensorUiPublishMs = 0L
     private var lastPoseUiPublishMs = 0L
+    @Volatile private var fusionReady = true
 
     val uiState: StateFlow<SensorUiState> = state.asStateFlow()
     val syncState: StateFlow<SessionSyncState> = uploader.syncState
@@ -95,6 +97,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     fun start(activity: Activity? = null) {
         if (state.value.collecting) return
 
+        val recoveringSession = uploader.hasPersistedSession()
         readings.clear()
         sensorInventory.clear()
         registeredSensorKeys.clear()
@@ -106,6 +109,10 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         stepDetectorRegistered = false
         lastStepCounter = null
         resetMotionState()
+        // A resumed session must wait for the server's last pose before any
+        // local fused sample is created. Raw samples remain queued during this
+        // short handshake, so no sensor data is lost.
+        fusionReady = !recoveringSession
         hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
         sensorManager.getSensorList(Sensor.TYPE_ALL).forEach { sensor ->
             registerSensor(sensor)
@@ -136,6 +143,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         locationManager.removeUpdates(this)
         lastPublishedLocation = null
         resetMotionState()
+        fusionReady = true
         visualCollector.stop()
         uploader.stop()
         state.value = state.value.copy(collecting = false)
@@ -224,35 +232,39 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             Sensor.TYPE_GAME_ROTATION_VECTOR,
             Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR,
             Sensor.TYPE_ROTATION_VECTOR -> updateRotationMatrix(values)
-            Sensor.TYPE_PRESSURE -> updateBarometer(values.firstOrNull())
+            Sensor.TYPE_PRESSURE -> if (fusionReady) updateBarometer(values.firstOrNull())
         }
-        val poseUpdate = when {
-            event.sensor.type == Sensor.TYPE_STEP_DETECTOR -> {
-                integrateSteps(event.timestamp, 1)
-            }
-            event.sensor.type == Sensor.TYPE_STEP_COUNTER -> {
-                val counter = values.firstOrNull()?.takeIf { it.isFinite() }
-                val previous = lastStepCounter
-                lastStepCounter = counter
-                if (!stepDetectorRegistered && counter != null && previous != null) {
-                    val delta = (counter - previous).toInt().coerceIn(0, MAX_COUNTER_STEP_DELTA)
-                    delta.takeIf { it > 0 }?.let { integrateSteps(event.timestamp, it) }
-                } else {
-                    null
+        val poseUpdate = if (!fusionReady) {
+            null
+        } else {
+            when {
+                event.sensor.type == Sensor.TYPE_STEP_DETECTOR -> {
+                    integrateSteps(event.timestamp, 1)
                 }
-            }
-            event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION -> {
-                lastLinearAccelerationTimestampNs = event.timestamp
-                integrateMotion(event.timestamp, values)
-            }
-            event.sensor.type == Sensor.TYPE_ACCELEROMETER && (
-                !hasLinearAccelerationSensor
-                    || lastLinearAccelerationTimestampNs == 0L
-                    || event.timestamp - lastLinearAccelerationTimestampNs > 300_000_000L
+                event.sensor.type == Sensor.TYPE_STEP_COUNTER -> {
+                    val counter = values.firstOrNull()?.takeIf { it.isFinite() }
+                    val previous = lastStepCounter
+                    lastStepCounter = counter
+                    if (!stepDetectorRegistered && counter != null && previous != null) {
+                        val delta = (counter - previous).toInt().coerceIn(0, MAX_COUNTER_STEP_DELTA)
+                        delta.takeIf { it > 0 }?.let { integrateSteps(event.timestamp, it) }
+                    } else {
+                        null
+                    }
+                }
+                event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION -> {
+                    lastLinearAccelerationTimestampNs = event.timestamp
+                    integrateMotion(event.timestamp, values)
+                }
+                event.sensor.type == Sensor.TYPE_ACCELEROMETER && (
+                    !hasLinearAccelerationSensor
+                        || lastLinearAccelerationTimestampNs == 0L
+                        || event.timestamp - lastLinearAccelerationTimestampNs > 300_000_000L
                 ) -> {
-                integrateMotion(event.timestamp, removeGravity(values))
+                    integrateMotion(event.timestamp, removeGravity(values))
+                }
+                else -> null
             }
-            else -> null
         }
         val rawAccepted = transportLimiter.shouldTransmit(
             streamKey = key,
@@ -320,7 +332,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     private fun onVisualPose(sample: VisualPoseSample) {
-        val poseUpdate = poseFusion.updateVisual(sample)
+        val poseUpdate = if (fusionReady) poseFusion.updateVisual(sample) else null
         val rawAccepted = transportLimiter.shouldTransmit(
             streamKey = VISUAL_TRANSPORT_KEY,
             sensorType = "arcore.visual-pose",
@@ -381,13 +393,17 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     override fun onLocationChanged(location: Location) {
         if (!shouldPublishLocation(location)) return
         lastPublishedLocation = Location(location)
-        val poseUpdate = poseFusion.updateGnss(
-            latitude = location.latitude,
-            longitude = location.longitude,
-            accuracyM = location.accuracy.takeIf { location.hasAccuracy() },
-            altitudeM = location.altitude.takeIf { location.hasAltitude() },
-            timestampNs = SystemClock.elapsedRealtimeNanos(),
-        )
+        val poseUpdate = if (fusionReady) {
+            poseFusion.updateGnss(
+                latitude = location.latitude,
+                longitude = location.longitude,
+                accuracyM = location.accuracy.takeIf { location.hasAccuracy() },
+                altitudeM = location.altitude.takeIf { location.hasAltitude() },
+                timestampNs = SystemClock.elapsedRealtimeNanos(),
+            )
+        } else {
+            null
+        }
         val accuracy = if (location.hasAccuracy()) "±%.1fm".format(location.accuracy) else "accuracy unknown"
         state.value = state.value.copy(
             locationText = "%.6f, %.6f · %s".format(location.latitude, location.longitude, accuracy),
@@ -460,6 +476,16 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         angularRateMagnitude = 0f
         lastStepCounter = null
         poseFusion.reset()
+    }
+
+    private fun onSessionLifecycle(event: SessionLifecycleEvent) {
+        if (event.resumed) {
+            event.latestPose?.let(poseFusion::seedFromPose)
+        }
+        // For a new session there is no durable anchor to apply. For a
+        // resumed session seedFromPose has already completed on this callback
+        // thread before fusionReady becomes visible to sensor callbacks.
+        fusionReady = true
     }
 
     private fun updateRotationMatrix(values: List<Float>) {

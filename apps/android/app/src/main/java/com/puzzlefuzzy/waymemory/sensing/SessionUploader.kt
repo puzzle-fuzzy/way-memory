@@ -85,6 +85,11 @@ data class SessionSyncState(
     val lastError: String? = null,
 )
 
+data class SessionLifecycleEvent(
+    val resumed: Boolean,
+    val latestPose: PoseEstimateSample?,
+)
+
 data class SensorInventorySample(
     val sensorType: String,
     val name: String,
@@ -116,6 +121,60 @@ internal fun buildSessionStartRequest(
     sensorInventory: List<SensorInventorySample>,
     client: CaptureClientSample? = null,
 ): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory, client)
+
+internal fun parseSessionLifecycleEvent(message: JSONObject): SessionLifecycleEvent? {
+    val type = message.optString("type")
+    if (type != "session.started" && type != "session.resumed") return null
+    val session = message.optJSONObject("session") ?: return null
+    return SessionLifecycleEvent(
+        resumed = type == "session.resumed",
+        latestPose = session.optJSONObject("latestPose")?.toPoseEstimateSample(),
+    )
+}
+
+private fun JSONObject.toPoseEstimateSample(): PoseEstimateSample? {
+    val timestampNs = optLong("deviceTimestampNs", 0L)
+    val xM = optDouble("xM", Double.NaN)
+    val yM = optDouble("yM", Double.NaN)
+    val zM = optDouble("zM", Double.NaN)
+    val velocityXMps = optDouble("velocityXMps", Double.NaN)
+    val velocityYMps = optDouble("velocityYMps", Double.NaN)
+    val velocityZMps = optDouble("velocityZMps", Double.NaN)
+    val accuracyM = optDouble("accuracyM", Double.NaN)
+    val confidence = optDouble("confidence", Double.NaN)
+    if (
+        timestampNs <= 0L
+        || !xM.isFinite() || !yM.isFinite() || !zM.isFinite()
+        || !velocityXMps.isFinite() || !velocityYMps.isFinite() || !velocityZMps.isFinite()
+        || !accuracyM.isFinite() || !confidence.isFinite()
+    ) return null
+    val verticalAccuracyM = if (has("verticalAccuracyM") && !isNull("verticalAccuracyM")) {
+        optDouble("verticalAccuracyM", Double.NaN).takeIf(Double::isFinite)?.toFloat()
+    } else {
+        null
+    }
+    val flags = optJSONArray("sourceFlags")?.let { values ->
+        List(values.length()) { index -> values.optString(index).takeIf(String::isNotBlank) }
+            .filterNotNull()
+    } ?: emptyList()
+    return PoseEstimateSample(
+        deviceTimestampNs = timestampNs,
+        xM = xM.toFloat(),
+        yM = yM.toFloat(),
+        zM = zM.toFloat(),
+        velocityXMps = velocityXMps.toFloat(),
+        velocityYMps = velocityYMps.toFloat(),
+        velocityZMps = velocityZMps.toFloat(),
+        accuracyM = accuracyM.toFloat().coerceAtLeast(0f),
+        verticalAccuracyM = verticalAccuracyM,
+        confidence = confidence.toFloat().coerceIn(0f, 1f),
+        source = optString("source", "fused"),
+        frame = optString("frame", "local-enu"),
+        sourceFlags = flags,
+        motionMode = optString("motionMode", "unknown"),
+        stationary = optBoolean("stationary", false),
+    )
+}
 
 private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
     .put("type", "session.start")
@@ -151,6 +210,7 @@ class SessionUploader(
     private val baseUrl: String = BuildConfig.API_BASE_URL,
     storageDirectory: File,
     private val credentialStore: DeviceCredentialStore? = null,
+    private val onSessionLifecycle: ((SessionLifecycleEvent) -> Unit)? = null,
 ) : WebSocketListener() {
     private val client = OkHttpClient.Builder().pingInterval(15, TimeUnit.SECONDS).build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -315,6 +375,7 @@ class SessionUploader(
                     sessionIdFile.parentFile?.mkdirs()
                     activeSessionId?.let(sessionIdFile::writeText)
                     state.value = state.value.copy(sessionId = activeSessionId, lastError = null)
+                    parseSessionLifecycleEvent(message)?.let { onSessionLifecycle?.invoke(it) }
                 }
                 "samples.accepted" -> {
                     if (inFlightSocket === webSocket && inFlightBatchSize > 0) {

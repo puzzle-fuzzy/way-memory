@@ -64,6 +64,8 @@ class PoseFusionEngine {
     private var visualAlignmentPositionX = 0f
     private var visualAlignmentPositionY = 0f
     private var visualLoopClosureEmitted = false
+    private var hasPositionAnchor = false
+    private var hasRecoveredAnchor = false
 
     @Synchronized
     fun reset() {
@@ -112,13 +114,27 @@ class PoseFusionEngine {
         visualAlignmentPositionX = 0f
         visualAlignmentPositionY = 0f
         visualLoopClosureEmitted = false
+        hasPositionAnchor = false
+        hasRecoveredAnchor = false
     }
 
     @Synchronized
     fun updatePressure(pressureHpa: Float, timestampNs: Long) {
         if (!pressureHpa.isFinite() || pressureHpa !in 300f..1_100f) return
         if (timestampNs <= 0L || (lastPressureTimestampNs > 0L && timestampNs <= lastPressureTimestampNs)) return
-        val reference = pressureReferenceHpa ?: pressureHpa.also { pressureReferenceHpa = it }
+        if (pressureReferenceHpa == null) {
+            // The first pressure sample only establishes a local baseline. On
+            // process recovery, the prior pose may already contain a non-zero
+            // height; treating this sample as absolute zero would snap the
+            // recovered route back to the floor.
+            pressureReferenceHpa = pressureHpa
+            barometerAltitudeM = position[2]
+            barometerVerticalSpeedMps = 0f
+            lastPressureTimestampNs = timestampNs
+            hasBarometer = true
+            return
+        }
+        val reference = pressureReferenceHpa ?: return
         val rawAltitude = (44_330.0 * (1.0 - (pressureHpa / reference).toDouble().pow(0.190294957))).toFloat()
         val previousAltitude = barometerAltitudeM
         barometerAltitudeM = if (!hasBarometer) rawAltitude else barometerAltitudeM * 0.86f + rawAltitude * 0.14f
@@ -142,13 +158,17 @@ class PoseFusionEngine {
     ): PoseUpdate? {
         if (!latitude.isFinite() || !longitude.isFinite()) return null
         if (timestampNs <= 0L || (lastGnssTimestampNs > 0L && timestampNs <= lastGnssTimestampNs)) return null
-        if (originLat == null || originLng == null) {
+        val firstGnssReference = originLat == null || originLng == null
+        if (firstGnssReference) {
             originLat = latitude
             originLng = longitude
             originAltitudeM = altitudeM
-            position[0] = 0f
-            position[1] = 0f
-            position[2] = 0f
+            if (!hasPositionAnchor) {
+                position[0] = 0f
+                position[1] = 0f
+                position[2] = 0f
+            }
+            hasPositionAnchor = true
         }
 
         // A first GNSS fix may not contain altitude. If a later fix does, use
@@ -160,9 +180,14 @@ class PoseFusionEngine {
         }
 
         val latitudeRadians = (originLat ?: latitude) * Math.PI / 180.0
-        val targetEast = ((longitude - (originLng ?: longitude)) * Math.PI / 180.0 * 6_371_000.0 * kotlin.math.cos(latitudeRadians)).toFloat()
-        val targetNorth = ((latitude - (originLat ?: latitude)) * Math.PI / 180.0 * 6_371_000.0).toFloat()
+        val targetEast = if (firstGnssReference) position[0] else {
+            ((longitude - (originLng ?: longitude)) * Math.PI / 180.0 * 6_371_000.0 * kotlin.math.cos(latitudeRadians)).toFloat()
+        }
+        val targetNorth = if (firstGnssReference) position[1] else {
+            ((latitude - (originLat ?: latitude)) * Math.PI / 180.0 * 6_371_000.0).toFloat()
+        }
         val targetAltitude = when {
+            firstGnssReference -> position[2]
             altitudeM != null && originAltitudeM != null -> (altitudeM - (originAltitudeM ?: altitudeM)).toFloat()
             hasBarometer -> barometerAltitudeM
             else -> position[2]
@@ -297,6 +322,7 @@ class PoseFusionEngine {
         if (worldAcceleration.size < 3) return null
         if (timestampNs <= 0L || (lastMotionTimestampNs > 0L && timestampNs <= lastMotionTimestampNs)) return null
         hasImu = true
+        hasPositionAnchor = true
         if (lastMotionTimestampNs == 0L) {
             lastMotionTimestampNs = timestampNs
             return null
@@ -362,6 +388,7 @@ class PoseFusionEngine {
             stepTrackY = position[1]
             hasStepTrack = true
         }
+        hasPositionAnchor = true
 
         val stepCountDelta = steps.coerceAtMost(MAX_STEPS_PER_EVENT)
         val distanceM = STEP_LENGTH_M * stepCountDelta
@@ -502,6 +529,7 @@ class PoseFusionEngine {
             if (stepFresh) add("step-pdr") else if (hasStepTrack) add("step-pdr-stale")
             if (visualAligned) add("visual-aligned")
             if (visualLoopClosure) add("loop-closure")
+            if (hasRecoveredAnchor) add("recovered-anchor")
             if (isEmpty()) add("unknown")
         }
         val confidence = (1f - accuracy / 50f).coerceIn(0.05f, 0.98f)
@@ -545,6 +573,36 @@ class PoseFusionEngine {
     private fun ageSeconds(nowTimestampNs: Long, previousTimestampNs: Long): Float =
         if (previousTimestampNs <= 0L || nowTimestampNs < previousTimestampNs) 30f
         else ((nowTimestampNs - previousTimestampNs) / 1_000_000_000f).coerceAtMost(30f)
+
+    /**
+     * Restores the local coordinate frame after the Android process is
+     * recreated. The server returns the last pose in the resumed session;
+     * keeping that pose as the first local state prevents a route reset to
+     * (0, 0, 0). Sensor-specific references are intentionally re-established
+     * by fresh samples because their process-local baselines are not durable.
+     */
+    @Synchronized
+    fun seedFromPose(pose: PoseEstimateSample) {
+        if (
+            pose.deviceTimestampNs <= 0L
+            || !pose.xM.isFinite() || !pose.yM.isFinite() || !pose.zM.isFinite()
+            || !pose.velocityXMps.isFinite() || !pose.velocityYMps.isFinite() || !pose.velocityZMps.isFinite()
+        ) return
+        position[0] = pose.xM
+        position[1] = pose.yM
+        position[2] = pose.zM
+        velocity[0] = pose.velocityXMps
+        velocity[1] = pose.velocityYMps
+        velocity[2] = pose.velocityZMps
+        lastMotionTimestampNs = pose.deviceTimestampNs
+        lastEmitTimestampNs = pose.deviceTimestampNs
+        lastMotionMode = pose.motionMode
+        stationaryFrames = if (pose.stationary) 3 else 0
+        movingFrames = if (pose.stationary) 0 else 1
+        hasImu = pose.sourceFlags.contains("imu")
+        hasPositionAnchor = true
+        hasRecoveredAnchor = true
+    }
 
     companion object {
         private const val GNSS_FRESHNESS_NS = 5_000_000_000L
