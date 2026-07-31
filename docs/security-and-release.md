@@ -57,4 +57,15 @@ The following are required before calling the service production-ready:
 
 The repository includes a production systemd/Nginx template, but no public TLS deployment is claimed until `way-memory.yxswy.com` serves the built web app, `/api/health` over HTTPS, and a WSS ticket flow from a phone network.
 
+After DNS, certificates, Nginx, and the protected API environment are installed, run the strict edge preflight from a machine outside the server:
+
+```powershell
+$env:WAY_MEMORY_PUBLIC_BASE_URL = "https://way-memory.yxswy.com"
+$env:WAY_MEMORY_REQUIRE_AUTH = "1"
+$env:WAY_MEMORY_DASHBOARD_TOKEN = "<short-lived operator environment value>"
+bun run preflight:public-tls
+```
+
+The preflight requires HTTP to redirect to HTTPS, the web entry point and API health endpoint to be reachable over HTTPS, unauthenticated realtime access to return `401`, and—when the token is supplied—the authenticated WSS handshake to succeed. It never prints the bearer token or ticket. This is an edge check; the physical-phone sensor matrix remains a separate gate.
+
 Until these gates exist, public smoke tests may use the IP-based HTTP/WS deployment, but real user route data must not be sent there.

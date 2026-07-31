@@ -21,6 +21,7 @@
     "smoke:public-live": "bun run scripts/public-live-sample-smoke.ts",
     "smoke:public-route": "bun run scripts/public-route-navigation-smoke.ts",
     "smoke:public-closure": "bun run scripts/public-closure-smoke.ts",
+    "preflight:public-tls": "bun run scripts/public-tls-preflight.ts",
     "acceptance:report": "bun scripts/acceptance-report.ts",
     "android:acceptance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1",
     "replay:session": "bun scripts/replay-session.ts",

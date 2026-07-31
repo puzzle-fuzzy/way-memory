@@ -47,3 +47,14 @@ The latest anonymous test deployment uses API commit `3cb2b17` and Web commit `7
 - `/opt/way-memory/data`: approximately 6.8 MB at verification time.
 
 These are test-environment facts, not a production release claim: the public entry point is still IP-based HTTP/WS with `WAY_MEMORY_AUTH_MODE=off`. The HTTPS/authenticated templates below remain uninstalled until DNS, certificates, and protected environment variables are available.
+
+After the production templates are installed, verify the edge before building a release APK:
+
+```powershell
+$env:WAY_MEMORY_PUBLIC_BASE_URL = "https://way-memory.yxswy.com"
+$env:WAY_MEMORY_REQUIRE_AUTH = "1"
+$env:WAY_MEMORY_DASHBOARD_TOKEN = "<operator environment value>"
+bun run preflight:public-tls
+```
+
+The command must pass from outside the Tencent Cloud host. It is intentionally expected to fail against the current IP-based HTTP test deployment.
