@@ -72,10 +72,21 @@ def send_message(sock, message):
 
 dashboard = connect("dashboard")
 device = connect("device")
-send_message(device, {"type": "session.start", "deviceId": "public-smoke", "mode": "learning"})
+send_message(device, {
+    "type": "session.start",
+    "deviceId": "public-smoke",
+    "mode": "learning",
+    "sensors": [
+        {"sensorType": "android.sensor.accelerometer", "name": "Public Smoke Accelerometer", "registered": True},
+        {"sensorType": "android.sensor.protected", "name": "Protected Sensor", "registered": False},
+    ],
+})
 started = recv_message(device)
 if started.get("type") != "session.started":
     raise RuntimeError(f"unexpected start: {started}")
+inventory = started.get("session", {}).get("sensorInventory", [])
+if len(inventory) != 2 or inventory[1].get("registered") is not False:
+    raise RuntimeError(f"unexpected sensor inventory: {inventory}")
 recv_message(dashboard)
 session_id = started["session"]["sessionId"]
 send_message(device, {
@@ -108,6 +119,6 @@ if accepted.get("type") != "samples.accepted" or delta.get("type") != "session.d
     raise RuntimeError(f"unexpected realtime messages: {accepted}, {delta}")
 if len(delta.get("posePoints", [])) != 1 or delta.get("motionMode") != "stationary":
     raise RuntimeError(f"unexpected pose delta: {delta}")
-print("Public Pose WebSocket smoke passed", {"posePoints": 1, "mode": delta["motionMode"], "closure": delta["closure"]["status"]})
+print("Public Pose WebSocket smoke passed", {"posePoints": 1, "inventory": len(inventory), "mode": delta["motionMode"], "closure": delta["closure"]["status"]})
 dashboard.close()
 device.close()
