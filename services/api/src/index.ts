@@ -1,5 +1,6 @@
 import type {
   ClosureState,
+  ClosureAnchor,
   CreateSessionInput,
   DeviceSnapshot,
   LiveSensorSnapshot,
@@ -115,6 +116,23 @@ const poseTrackDistanceM = (poses: PoseEstimate[]) => {
   return distanceM;
 };
 
+const toClosureAnchor = (pose: PoseEstimate): ClosureAnchor => ({
+  deviceTimestampNs: pose.deviceTimestampNs,
+  xM: pose.xM,
+  yM: pose.yM,
+  zM: pose.zM,
+  accuracyM: pose.accuracyM,
+});
+
+const anchorToPose = (anchor: ClosureAnchor, template: PoseEstimate): PoseEstimate => ({
+  ...template,
+  deviceTimestampNs: anchor.deviceTimestampNs,
+  xM: anchor.xM,
+  yM: anchor.yM,
+  zM: anchor.zM,
+  accuracyM: anchor.accuracyM,
+});
+
 const persistSession = (session: ObservationSession) => {
   const runtime = sessionRuntime.get(session.sessionId);
   sessionStore.save(session, runtime?.rawSamples ?? []);
@@ -141,12 +159,13 @@ for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS)) {
   snapshot.session.status = "stopped";
   sessions.set(snapshot.session.sessionId, snapshot.session);
   const poses = snapshot.session.poseTrack ?? [];
+  const anchor = snapshot.session.closure.anchor;
   const sampleIds = snapshot.rawSamples.map((sample) => sample.sampleId).filter((sampleId): sampleId is string => Boolean(sampleId));
   sessionRuntime.set(snapshot.session.sessionId, {
     rawSamples: snapshot.rawSamples,
-    startPose: poses[0],
+    startPose: anchor && poses[0] ? anchorToPose(anchor, poses[0]) : poses[0],
     lastPose: poses.at(-1),
-    travelledM: poseTrackDistanceM(poses),
+    travelledM: snapshot.session.closure.travelledM ?? poseTrackDistanceM(poses),
     seenSampleIds: new Set(sampleIds.slice(-MAX_SEEN_SAMPLE_IDS)),
     seenSampleIdOrder: sampleIds.slice(-MAX_SEEN_SAMPLE_IDS),
   });
@@ -594,11 +613,15 @@ const applyLoopCorrection = (session: ObservationSession) => {
   const start = session.poseTrack[0];
   const end = session.poseTrack.at(-1);
   if (!end) return;
+  const anchor = session.closure.anchor;
+  const startX = anchor?.xM ?? start.xM;
+  const startY = anchor?.yM ?? start.yM;
+  const startZ = anchor?.zM ?? start.zM;
   const correction = {
-    xM: end.xM - start.xM,
-    yM: end.yM - start.yM,
-    zM: end.zM - start.zM,
-    startTimestampNs: start.deviceTimestampNs,
+    xM: end.xM - startX,
+    yM: end.yM - startY,
+    zM: end.zM - startZ,
+    startTimestampNs: anchor?.deviceTimestampNs ?? start.deviceTimestampNs,
     endTimestampNs: end.deviceTimestampNs,
   };
   session.closure = { ...session.closure, correction };
@@ -608,11 +631,20 @@ const applyLoopCorrection = (session: ObservationSession) => {
 const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => {
   const runtime = sessionRuntime.get(session.sessionId) ?? {};
   if (!runtime.startPose) {
+    if (session.closure.anchor) runtime.startPose = anchorToPose(session.closure.anchor, pose);
+  }
+  if (!runtime.startPose) {
     runtime.startPose = pose;
     runtime.lastPose = pose;
     runtime.travelledM = 0;
     sessionRuntime.set(session.sessionId, runtime);
-    session.closure = { status: "open", confidence: 0, adjusted: false };
+    session.closure = {
+      status: "open",
+      confidence: 0,
+      adjusted: false,
+      anchor: toClosureAnchor(pose),
+      travelledM: 0,
+    };
     return;
   }
   if (runtime.lastPose) runtime.travelledM = (runtime.travelledM ?? 0) + poseDistanceM(runtime.lastPose, pose);
@@ -631,6 +663,7 @@ const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => 
       status: "closed",
       gapM,
       adjusted: true,
+      travelledM,
     } satisfies ClosureState;
     return;
   }
@@ -643,6 +676,8 @@ const updateClosureState = (session: ObservationSession, pose: PoseEstimate) => 
     confidence,
     // Never alter raw points until a visual loop-closure source is present.
     adjusted: false,
+    anchor: session.closure.anchor ?? toClosureAnchor(startPose),
+    travelledM,
   } satisfies ClosureState;
   if (session.closure.status === "closed") {
     applyLoopCorrection(session);

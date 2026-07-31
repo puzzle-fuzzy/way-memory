@@ -78,6 +78,44 @@ try {
     throw new Error("loop correction did not survive restart");
   }
   console.log("Closure smoke passed", { rawEndM: afterRestart.poseTrack.at(-1)?.xM, correctedEndM: afterRestart.correctedPoseTrack.at(-1)?.xM, points: afterRestart.correctedPoseTrack.length, restart: true });
+
+  const longSession = await request("/api/sessions", { method: "POST", body: JSON.stringify({ deviceId: "closure-window-check", mode: "learning" }) });
+  const longSamples = Array.from({ length: 1_205 }, (_, index) => {
+    const x = index < 300 ? index / 30 : 1;
+    const timestamp = index + 1;
+    const isReturn = index === 1_204;
+    return {
+      sampleId: `long-${timestamp}`,
+      deviceTimestampNs: timestamp,
+      sensorType: "pose",
+      values: [x, 0, 0],
+      pose: pose(timestamp, isReturn ? 1 : x, ["imu", "visual-aligned", ...(isReturn ? ["loop-closure"] : [])]),
+    };
+  });
+  for (let offset = 0; offset < longSamples.length; offset += 500) {
+    await request(`/api/sessions/${longSession.sessionId}/samples`, {
+      method: "POST",
+      body: JSON.stringify({ samples: longSamples.slice(offset, offset + 500) }),
+    });
+  }
+  const longRestored = await request(`/api/sessions/${longSession.sessionId}`) as {
+    closure: { status: string; adjusted: boolean; anchor?: { deviceTimestampNs: number }; travelledM?: number; correction?: { startTimestampNs: number } };
+    poseTrack: Array<{ xM: number }>;
+    correctedPoseTrack: Array<{ xM: number }>;
+  };
+  if (
+    longRestored.closure.status !== "closed"
+    || !longRestored.closure.adjusted
+    || longRestored.closure.anchor?.deviceTimestampNs !== 1
+    || (longRestored.closure.travelledM ?? 0) < 8
+    || longRestored.closure.correction?.startTimestampNs !== 1
+    || longRestored.poseTrack.length !== 1_200
+    || longRestored.poseTrack.at(-1)?.xM !== 1
+    || longRestored.correctedPoseTrack.at(-1)?.xM !== 0
+  ) {
+    throw new Error("long loop closure did not preserve the session anchor");
+  }
+  console.log("Long closure window smoke passed", { retainedPosePoints: longRestored.poseTrack.length, travelledM: longRestored.closure.travelledM, anchorTimestampNs: longRestored.closure.anchor?.deviceTimestampNs });
 } finally {
   if (child && !child.killed) child.kill();
   await child?.exited;

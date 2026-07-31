@@ -114,11 +114,21 @@ export interface LoopCorrection {
   endTimestampNs: number;
 }
 
+export interface ClosureAnchor {
+  deviceTimestampNs: number;
+  xM: number;
+  yM: number;
+  zM: number;
+  accuracyM: number;
+}
+
 export interface ClosureState {
   status: "open" | "candidate" | "closed";
   gapM?: number;
   confidence: number;
   adjusted: boolean;
+  anchor?: ClosureAnchor;
+  travelledM?: number;
   correction?: LoopCorrection;
 }
 
