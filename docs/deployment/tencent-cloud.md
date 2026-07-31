@@ -30,14 +30,17 @@ This MVP entry point is HTTP/WS on the server IP and is not a production privacy
 
 ## Latest test deployment evidence
 
-The latest anonymous test deployment was built from Git commit `171e11e` and switched only after a remote API SHA-256 comparison. The remote API bundle hash was `eca255e013d8b329c08b3849d3c1d748c037f26bc3964f7dd340f0d0aaefeb8e`; the web index hash was `5865a3d896c8f0b845d41ca20f65c0615570f7ee2d5138c7b225a777a0342834`.
+The latest anonymous test deployment was built from Git commit `51aaa6e` and switched only after a remote API/Web SHA-256 comparison. The remote API bundle hash was `21a8e99b0fc87ef8abbdbea1b01ec154fa5b2ba823f1c87b6b1b9a9c0d50a14d`; the web index hash was `eb463a710e019d5944a68eaec668ec41edab4a7d13d64c24dc7f3b0bad1883a4`.
 
 - Backup retained on the host: `/var/backups/way-memory/20260731T163254Z/`;
 - `way-memory-api.service`: active after restart;
 - public `/`: HTTP 200;
 - public `/api/health`: HTTP 200;
 - public Pose WebSocket smoke: passed;
+- public live sample smoke: passed;
+- public Android queue batch smoke: 100 samples accepted, 0 dropped;
 - public long-closure smoke: passed with 1,200 retained Pose points;
+- compact `GET /api/sessions` history response: approximately 44 KB after the bounded session-list change;
 - `/opt/way-memory/data`: approximately 6.8 MB at verification time.
 
 These are test-environment facts, not a production release claim: the public entry point is still IP-based HTTP/WS with `WAY_MEMORY_AUTH_MODE=off`. The HTTPS/authenticated templates below remain uninstalled until DNS, certificates, and protected environment variables are available.
