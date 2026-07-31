@@ -68,6 +68,14 @@ try {
   const authHeaders = (token: string) => ({ authorization: `Bearer ${token}` });
   const me = await json("/api/auth/me", { headers: authHeaders(dashboardToken) });
   if (me.response.status !== 200 || me.body.role !== "dashboard" || me.body.ownerId !== ownerId) throw new Error("dashboard identity failed");
+  const enrolled = await json("/api/auth/devices", { method: "POST", headers: { ...authHeaders(dashboardToken), "content-type": "application/json" }, body: "{}" });
+  if (enrolled.response.status !== 201 || !enrolled.body.deviceToken || !enrolled.body.tokenId) throw new Error("dashboard device enrollment failed");
+  const enrolledDevice = await json("/api/auth/devices", { headers: authHeaders(dashboardToken) });
+  if (enrolledDevice.response.status !== 200 || !(enrolledDevice.body as any[]).some((item) => item.tokenId === enrolled.body.tokenId && !item.revokedAt)) throw new Error("enrolled device was not listed");
+  const revoked = await json(`/api/auth/devices/${encodeURIComponent(enrolled.body.tokenId)}/revoke`, { method: "POST", headers: authHeaders(dashboardToken) });
+  if (revoked.response.status !== 200) throw new Error("device revoke failed");
+  const revokedDeviceTicket = await json("/api/auth/ws-ticket", { method: "POST", headers: authHeaders(enrolled.body.deviceToken) });
+  if (revokedDeviceTicket.response.status !== 401) throw new Error("revoked device token remained usable");
   const dashboardTicketResponse = await json("/api/auth/ws-ticket", { method: "POST", headers: authHeaders(dashboardToken) });
   const deviceTicketResponse = await json("/api/auth/ws-ticket", { method: "POST", headers: authHeaders(deviceToken) });
   if (dashboardTicketResponse.response.status !== 200 || deviceTicketResponse.response.status !== 200) throw new Error("WebSocket ticket issuance failed");

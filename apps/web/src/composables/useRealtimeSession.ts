@@ -1,5 +1,5 @@
 import type { ObservationSession, SessionDelta } from "@way-memory/contracts";
-import { onMounted, onUnmounted, ref, shallowRef } from "vue";
+import { computed, onMounted, onUnmounted, ref, shallowRef } from "vue";
 import type { LiveConnection } from "../types";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -24,6 +24,7 @@ export function useRealtimeSession() {
   const connection = ref<LiveConnection>("connecting");
   const authRequired = ref(false);
   const authToken = ref(sessionStorage.getItem("way-memory.dashboard-token") ?? "");
+  const authenticated = computed(() => authToken.value.length > 0 && !authRequired.value);
   const latestSession = shallowRef<ObservationSession | null>(null);
   const availableSessions = ref<ObservationSession[]>([]);
   const selectedSessionId = ref<string | null>(null);
@@ -199,11 +200,25 @@ export function useRealtimeSession() {
     setAuthToken("");
   }
 
+  async function enrollDevice() {
+    const response = await fetch(endpoint("/api/auth/devices"), {
+      method: "POST",
+      headers: { ...requestHeaders(), "content-type": "application/json" },
+      body: "{}",
+    });
+    if (response.status === 401) {
+      authRequired.value = true;
+      throw new Error("dashboard authorization expired");
+    }
+    if (!response.ok) throw new Error(`API ${response.status}`);
+    return await response.json() as { ownerId: string; tokenId: string; deviceToken: string; expiresAt: string };
+  }
+
   onUnmounted(() => {
     if (reconnectTimer) window.clearTimeout(reconnectTimer);
     if (sessionUpdateFrame !== undefined) window.cancelAnimationFrame(sessionUpdateFrame);
     socket?.close();
   });
 
-  return { connection, authRequired, latestSession, availableSessions, selectedSessionId, followingLive, refreshSnapshot, selectSession, followLatest, setAuthToken, clearAuthToken };
+  return { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, refreshSnapshot, selectSession, followLatest, setAuthToken, clearAuthToken, enrollDevice };
 }

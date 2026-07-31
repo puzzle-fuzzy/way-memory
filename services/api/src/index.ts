@@ -1043,6 +1043,30 @@ const server = Bun.serve<RealtimeClient>({
       if (!principal) return json({ error: "unauthorized" }, { status: 401 });
       return json(await authStore.issueWebSocketTicket(principal));
     }
+    if (url.pathname === "/api/auth/devices" && (request.method === "GET" || request.method === "POST")) {
+      if (authMode !== "enforced") return json({ error: "auth_disabled" }, { status: 404 });
+      const principal = await authStore.authenticate(bearerToken(request), "dashboard");
+      if (!principal) return json({ error: "unauthorized" }, { status: 401 });
+      if (request.method === "GET") {
+        return json(authStore.listAccessTokens(principal.ownerId).map((token) => ({
+          tokenId: token.token_id,
+          role: token.role,
+          createdAt: new Date(token.created_at).toISOString(),
+          expiresAt: new Date(token.expires_at).toISOString(),
+          revokedAt: token.revoked_at ? new Date(token.revoked_at).toISOString() : undefined,
+        })));
+      }
+      const issued = await authStore.issueAccessToken(principal.ownerId, "device");
+      return json({ ownerId: principal.ownerId, tokenId: issued.tokenId, deviceToken: issued.token, expiresAt: issued.expiresAt }, { status: 201 });
+    }
+    const revokeDeviceMatch = url.pathname.match(/^\/api\/auth\/devices\/([^/]+)\/revoke$/);
+    if (revokeDeviceMatch && request.method === "POST") {
+      if (authMode !== "enforced") return json({ error: "auth_disabled" }, { status: 404 });
+      const principal = await authStore.authenticate(bearerToken(request), "dashboard");
+      if (!principal) return json({ error: "unauthorized" }, { status: 401 });
+      authStore.revokeTokenId(principal.ownerId, revokeDeviceMatch[1]);
+      return json({ revoked: true });
+    }
     if (url.pathname === "/api/auth/rotate" && request.method === "POST") {
       const token = bearerToken(request);
       const principal = authMode === "off" ? localPrincipal("dashboard") : await authStore.authenticate(token);

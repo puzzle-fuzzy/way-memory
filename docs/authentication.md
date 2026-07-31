@@ -36,6 +36,7 @@ The response contains one `deviceToken` and one `dashboardToken`. Store them in 
 
 ## Client handoff
 
+- After dashboard authentication, `POST /api/auth/devices` issues a new one-time device token for the same owner. `GET /api/auth/devices` lists only token metadata, never token plaintext; `POST /api/auth/devices/<tokenId>/revoke` revokes a device without exposing its credential.
 - Paste `deviceToken` into the Android diagnostic credential field. The app encrypts it with Android Keystore and only uses it to obtain a short-lived WebSocket ticket.
 - Paste `dashboardToken` into the web console when the protected-service prompt appears. The web console keeps it in the current browser session and sends it only over HTTPS to obtain a ticket; it is not part of the Vite build output.
 - The device role can start/resume/write its own sessions. The dashboard role can list/read/raw-replay sessions for the same owner but cannot write sensor samples.
