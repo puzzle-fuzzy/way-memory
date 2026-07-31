@@ -37,6 +37,19 @@ class SessionUploaderPayloadTest {
     }
 
     @Test
+    fun navigationSessionStartRetainsRouteBinding() {
+        val request = buildSessionStartRequest(
+            deviceId = "device-navigation",
+            sensorInventory = emptyList(),
+            mode = "navigation",
+            routeId = "route-verified",
+        )
+
+        assertEquals("navigation", request.mode)
+        assertEquals("route-verified", request.routeId)
+    }
+
+    @Test
     fun persistedSessionMarkerOnlyRequestsResumeWhenItContainsAnId() {
         val directory = Files.createTempDirectory("way-memory-resume").toFile()
         try {

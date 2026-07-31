@@ -99,7 +99,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         Manifest.permission.ACCESS_COARSE_LOCATION,
     ) == PackageManager.PERMISSION_GRANTED
 
-    fun start(activity: Activity? = null) {
+    fun start(activity: Activity? = null, mode: String = "learning", routeId: String? = null) {
         if (state.value.collecting) return
 
         val recoveringSession = uploader.hasPersistedSession()
@@ -137,6 +137,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         uploader.start(
             deviceId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device",
             sensorInventory = sensorInventory.toList(),
+            mode = mode,
+            routeId = routeId,
         )
         activity?.let(visualCollector::start)
 

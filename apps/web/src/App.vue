@@ -63,6 +63,14 @@ const routeStatusLabel = computed(() => {
   return isCollecting.value ? "实时采集中" : "已停止";
 });
 
+const navigationLabel = computed(() => {
+  const navigation = session.value?.navigation;
+  if (!navigation) return "";
+  const progress = typeof navigation.progressM === "number" ? `${navigation.progressM.toFixed(1)}m` : "等待定位";
+  const distance = typeof navigation.distanceToRouteM === "number" ? ` · 偏离 ${navigation.distanceToRouteM.toFixed(1)}m` : "";
+  return `导航 ${navigation.status} · ${progress}${distance}`;
+});
+
 const track = computed(() => session.value?.track ?? []);
 const relativeTrack = computed(() => session.value?.relativeTrack ?? []);
 const poseTrack = computed(() => session.value?.poseTrack ?? []);
@@ -772,6 +780,7 @@ const activities = computed(() => {
            <span class="rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5">{{ motionModeLabel }}</span>
            <span class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 md:inline-flex">{{ poseFrameLabel }}</span>
            <span class="rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5">{{ closureLabel }}</span>
+           <span v-if="navigationLabel" class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 lg:inline-flex">{{ navigationLabel }}</span>
            <span class="connection-pill"><span :class="['connection-dot', connection === 'connected' ? 'bg-sage' : connection === 'connecting' ? 'bg-amber' : 'bg-ember']" />{{ connectionLabel }}</span>
         </div>
       </header>

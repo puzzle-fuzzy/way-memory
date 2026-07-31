@@ -7,6 +7,7 @@ import type {
   LiveSensorSnapshot,
   MotionEvent,
   MotionMode,
+  NavigationState,
   ObservationSession,
   PoseEstimate,
   RelativeMotionPoint,
@@ -137,6 +138,76 @@ const trackDistanceM = (track: TrackPoint[]) => {
   let distanceM = 0;
   for (let index = 1; index < track.length; index += 1) distanceM += geographicDistanceM(track[index - 1], track[index]);
   return distanceM;
+};
+
+const navigationStateFor = (route: StoredRoute, location: TrackPoint): NavigationState => {
+  const updatedAt = new Date().toISOString();
+  const track = route.track;
+  if (track.length < 2) return { routeId: route.routeId, status: "route-not-ready", updatedAt };
+  const earthRadiusM = 6_371_000;
+  const origin = track[0];
+  const latitudeScale = Math.PI / 180 * earthRadiusM;
+  const longitudeScale = latitudeScale * Math.cos(origin.lat * Math.PI / 180);
+  const toLocal = (point: TrackPoint) => ({
+    x: (point.lng - origin.lng) * longitudeScale,
+    y: (point.lat - origin.lat) * latitudeScale,
+  });
+  const target = toLocal(location);
+  let cumulativeM = 0;
+  let totalM = 0;
+  let bestDistanceM = Number.POSITIVE_INFINITY;
+  let bestProgressM = 0;
+  let bestIndex = 0;
+  let bestT = 0;
+  for (let index = 1; index < track.length; index += 1) {
+    const start = toLocal(track[index - 1]);
+    const end = toLocal(track[index]);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const segmentLengthM = Math.hypot(dx, dy);
+    totalM += segmentLengthM;
+    if (segmentLengthM < 0.01) continue;
+    const segmentLengthSquared = segmentLengthM ** 2;
+    const t = Math.max(0, Math.min(1, ((target.x - start.x) * dx + (target.y - start.y) * dy) / segmentLengthSquared));
+    const nearestX = start.x + dx * t;
+    const nearestY = start.y + dy * t;
+    const distanceM = Math.hypot(target.x - nearestX, target.y - nearestY);
+    if (distanceM < bestDistanceM) {
+      bestDistanceM = distanceM;
+      bestProgressM = cumulativeM + segmentLengthM * t;
+      bestIndex = index - 1;
+      bestT = t;
+    }
+    cumulativeM += segmentLengthM;
+  }
+  if (!Number.isFinite(bestDistanceM) || totalM < 0.01) return { routeId: route.routeId, status: "route-not-ready", updatedAt };
+  const start = track[bestIndex];
+  const end = track[Math.min(bestIndex + 1, track.length - 1)];
+  const nearestLat = start.lat + (end.lat - start.lat) * bestT;
+  const nearestLng = start.lng + (end.lng - start.lng) * bestT;
+  const nearestAltitudeM = typeof start.altitudeM === "number" && typeof end.altitudeM === "number"
+    ? start.altitudeM + (end.altitudeM - start.altitudeM) * bestT
+    : undefined;
+  const accuracyM = Math.max(0.1, location.accuracyM);
+  const status = bestDistanceM <= Math.max(8, accuracyM * 2)
+    ? "on-route"
+    : bestDistanceM <= 25
+      ? "near-route"
+      : "off-route";
+  return {
+    routeId: route.routeId,
+    status,
+    progressM: Math.min(totalM, bestProgressM),
+    remainingM: Math.max(0, totalM - bestProgressM),
+    distanceToRouteM: bestDistanceM,
+    nearestPointIndex: bestIndex,
+    nearestLat,
+    nearestLng,
+    ...(nearestAltitudeM === undefined ? {} : { nearestAltitudeM }),
+    ...(typeof location.altitudeM === "number" && nearestAltitudeM !== undefined ? { altitudeDeltaM: location.altitudeM - nearestAltitudeM } : {}),
+    accuracyM,
+    updatedAt,
+  };
 };
 
 const observationConfidence = (session: ObservationSession) => {
@@ -950,7 +1021,12 @@ const createSession = (input: CreateSessionInput, ownerId = LOCAL_OWNER_ID): Obs
   const deviceId = typeof input.deviceId === "string" ? input.deviceId.trim().slice(0, MAX_DEVICE_ID_LENGTH) : "";
   if (!deviceId) throw new Error("invalid_session");
   const routeId = typeof input.routeId === "string" ? input.routeId.trim().slice(0, MAX_ROUTE_ID_LENGTH) || undefined : undefined;
-  if (routeId && routes.get(routeId)?.ownerId !== ownerId) throw new Error("invalid_route");
+  const route = routeId ? routes.get(routeId) : undefined;
+  if (routeId && route?.ownerId !== ownerId) throw new Error("invalid_route");
+  if (input.mode === "navigation" && (!routeId || route?.status !== "verified")) throw new Error("invalid_navigation_route");
+  const navigation = input.mode === "navigation" && routeId
+    ? { routeId, status: route.track.length >= 2 ? "no-fix" as const : "route-not-ready" as const, updatedAt: new Date().toISOString() }
+    : undefined;
   const session: ObservationSession = {
     sessionId: crypto.randomUUID(),
     deviceId,
@@ -958,6 +1034,7 @@ const createSession = (input: CreateSessionInput, ownerId = LOCAL_OWNER_ID): Obs
     ownerId,
     client: normalizeCaptureClient(input.client),
     routeId,
+    navigation,
     startedAt: new Date().toISOString(),
     sampleCount: 0,
     rawSampleCount: 0,
@@ -993,6 +1070,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   const motionEvents: MotionEvent[] = [];
   const wasClosureAdjusted = session.closure.adjusted;
   const runtime = sessionRuntime.get(session.sessionId) ?? { rawSamples: [] };
+  const navigationRoute = session.mode === "navigation" && session.routeId ? routes.get(session.routeId) : undefined;
   runtime.seenSampleIds ??= new Set<string>();
   runtime.seenSampleIdOrder ??= [];
   const normalizedSamples = rawSamples
@@ -1081,6 +1159,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
         session.latestLocation = sample.location;
         session.track.push(point);
         trackPoints.push(point);
+        if (navigationRoute) session.navigation = navigationStateFor(navigationRoute, point);
         rememberLocation(session, sample.location, sample.deviceTimestampNs);
         upsertSensor(session, sample, receivedAt, "gnss");
       }
@@ -1144,6 +1223,7 @@ const publishSessionDelta = (
     sensorInventory: session.sensorInventory,
     sensorStats: session.sensorStats,
     latestSensors: session.latestSensors,
+    navigation: session.navigation,
   };
   server.publish(dashboardTopic(session.ownerId), JSON.stringify(delta));
 };
@@ -1215,6 +1295,7 @@ const sessionIntegrityView = (session: ObservationSession) => ({
   latestCorrectedPose: session.correctedPoseTrack?.at(-1),
   closure: session.closure,
   motionMode: session.motionMode,
+  navigation: session.navigation,
 });
 
 const server = Bun.serve<RealtimeClient>({
@@ -1391,6 +1472,7 @@ const server = Bun.serve<RealtimeClient>({
         if (error instanceof Error && error.message === "session_limit") return json({ error: "session_limit" }, { status: 429 });
         if (error instanceof Error && error.message === "invalid_session") return json({ error: "invalid_session" }, { status: 400 });
         if (error instanceof Error && error.message === "invalid_route") return json({ error: "invalid_route" }, { status: 404 });
+        if (error instanceof Error && error.message === "invalid_navigation_route") return json({ error: "invalid_navigation_route" }, { status: 409 });
         throw error;
       }
       return json(session, { status: 201 });
@@ -1475,7 +1557,7 @@ const server = Bun.serve<RealtimeClient>({
           }, ws.data.ownerId);
         } catch (error) {
           const reason = error instanceof Error ? error.message : "session_start_failed";
-          ws.send(JSON.stringify({ type: "error", error: reason === "session_limit" || reason === "invalid_route" ? reason : "session_start_failed" }));
+          ws.send(JSON.stringify({ type: "error", error: reason === "session_limit" || reason === "invalid_route" || reason === "invalid_navigation_route" ? reason : "session_start_failed" }));
           return;
         }
         ws.data.sessionId = session.sessionId;

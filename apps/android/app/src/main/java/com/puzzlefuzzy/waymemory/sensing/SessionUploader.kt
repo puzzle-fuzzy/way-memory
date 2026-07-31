@@ -108,6 +108,8 @@ internal data class SessionStartRequest(
     val deviceId: String,
     val sensorInventory: List<SensorInventorySample>,
     val client: CaptureClientSample? = null,
+    val mode: String = "learning",
+    val routeId: String? = null,
 )
 
 internal data class CaptureClientSample(
@@ -121,7 +123,9 @@ internal fun buildSessionStartRequest(
     deviceId: String,
     sensorInventory: List<SensorInventorySample>,
     client: CaptureClientSample? = null,
-): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory, client)
+    mode: String = "learning",
+    routeId: String? = null,
+): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory, client, mode, routeId)
 
 internal fun buildSamplesMessage(sessionId: String, batch: List<CollectedSample>): JSONObject = JSONObject()
     .put("type", "samples")
@@ -190,8 +194,9 @@ private fun JSONObject.toPoseEstimateSample(): PoseEstimateSample? {
 private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
     .put("type", "session.start")
     .put("deviceId", deviceId)
-    .put("mode", "learning")
+    .put("mode", mode)
     .apply {
+        routeId?.takeIf(String::isNotBlank)?.let { put("routeId", it) }
         client?.let {
             put("client", JSONObject()
                 .put("applicationId", it.applicationId)
@@ -227,11 +232,14 @@ class SessionUploader(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val queue = PersistentSampleQueue(storageDirectory)
     private val sessionIdFile = File(storageDirectory, "active-session.id")
+    private val sessionConfigFile = File(storageDirectory, "active-session.config.json")
     private val state = MutableStateFlow(SessionSyncState(pendingSamples = queue.size()))
     @Volatile private var socket: WebSocket? = null
     private var connectionJob: Job? = null
     private var deviceId: String = "android-device"
     private var sensorInventory: List<SensorInventorySample> = emptyList()
+    private var captureMode: String = "learning"
+    private var captureRouteId: String? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var running = false
     private var nextConnectAtMs = 0L
@@ -246,13 +254,22 @@ class SessionUploader(
     fun hasPersistedSession(): Boolean = sessionIdFile.isFile
         && runCatching { sessionIdFile.readText().trim().isNotEmpty() }.getOrDefault(false)
 
-    fun start(deviceId: String, sensorInventory: List<SensorInventorySample> = emptyList()) {
+    fun start(
+        deviceId: String,
+        sensorInventory: List<SensorInventorySample> = emptyList(),
+        mode: String = "learning",
+        routeId: String? = null,
+    ) {
         if (running) return
         this.deviceId = deviceId
         this.sensorInventory = sensorInventory.take(MAX_SENSOR_INVENTORY)
         activeSessionId = runCatching {
             sessionIdFile.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
         }.getOrNull()
+        val persistedConfig = readSessionConfig()
+        captureMode = persistedConfig?.first ?: mode
+        captureRouteId = persistedConfig?.second ?: routeId
+        persistSessionConfig()
         running = true
         nextConnectAtMs = 0L
         reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
@@ -315,6 +332,7 @@ class SessionUploader(
         inFlightBatchSize = 0
         inFlightSocket = null
         sessionIdFile.delete()
+        sessionConfigFile.delete()
         activeSessionId = null
         state.update { current ->
             current.copy(
@@ -389,6 +407,7 @@ class SessionUploader(
                     activeSessionId = message.getJSONObject("session").getString("sessionId")
                     sessionIdFile.parentFile?.mkdirs()
                     activeSessionId?.let(sessionIdFile::writeText)
+                    persistSessionConfig()
                     state.update { current -> current.copy(sessionId = activeSessionId, lastError = null) }
                     parseSessionLifecycleEvent(message)?.let { onSessionLifecycle?.invoke(it) }
                 }
@@ -410,8 +429,8 @@ class SessionUploader(
                     val error = message.optString("error")
                     if (BuildConfig.DEBUG) Log.w(TAG, "server error=$error")
                     if (error == "session_resume_failed" && activeSessionId != null && running) {
-                        activeSessionId = null
-                        sessionIdFile.delete()
+                    activeSessionId = null
+                    sessionIdFile.delete()
                         state.update { current -> current.copy(sessionId = null, lastError = "会话已过期，正在建立新会话") }
                         webSocket.send(sessionStartMessage().toString())
                     } else {
@@ -473,6 +492,8 @@ class SessionUploader(
     private fun sessionStartMessage(): JSONObject = buildSessionStartRequest(
         deviceId = deviceId,
         sensorInventory = sensorInventory,
+        mode = captureMode,
+        routeId = captureRouteId,
         client = CaptureClientSample(
             applicationId = "com.puzzlefuzzy.waymemory",
             versionName = BuildConfig.VERSION_NAME,
@@ -480,6 +501,26 @@ class SessionUploader(
             apiBaseUrl = baseUrl,
         ),
     ).toJson()
+
+    private fun readSessionConfig(): Pair<String, String?>? = runCatching {
+        if (!sessionConfigFile.isFile) return@runCatching null
+        val json = JSONObject(sessionConfigFile.readText())
+        val mode = json.optString("mode", "learning").takeIf { it == "learning" || it == "navigation" } ?: "learning"
+        val routeId = json.optString("routeId").takeIf(String::isNotBlank)
+        mode to routeId
+    }.getOrNull()
+
+    private fun persistSessionConfig() {
+        runCatching {
+            sessionConfigFile.parentFile?.mkdirs()
+            sessionConfigFile.writeText(
+                JSONObject()
+                    .put("mode", captureMode)
+                    .apply { captureRouteId?.takeIf(String::isNotBlank)?.let { put("routeId", it) } }
+                    .toString(),
+            )
+        }
+    }
 
     companion object {
         private const val TAG = "WayMemorySync"

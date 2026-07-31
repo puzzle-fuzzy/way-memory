@@ -168,6 +168,53 @@ try {
   const published = await requestJson(`/api/routes/${routeId}/publish`, { method: "POST" });
   if (published.response.status !== 200 || published.body.status !== "verified") throw new Error(`aligned route did not publish: ${JSON.stringify(published.body)}`);
 
+  const navigator = new WebSocket(`${baseUrl.replace("http", "ws")}/realtime?role=device&deviceId=route-navigation-device`);
+  await waitForOpen(navigator);
+  navigator.send(JSON.stringify({
+    type: "session.start",
+    deviceId: "route-navigation-device",
+    mode: "navigation",
+    routeId,
+    sensors: [],
+  }));
+  const navigationStarted = await nextMessage(navigator);
+  if (navigationStarted.type !== "session.started" || navigationStarted.session?.navigation?.status !== "no-fix") throw new Error(`navigation session did not start on verified route: ${JSON.stringify(navigationStarted)}`);
+  const navigationSessionId = navigationStarted.session.sessionId as string;
+  navigator.send(JSON.stringify({
+    type: "samples",
+    sessionId: navigationSessionId,
+    samples: [{
+      sampleId: "route-navigation-location",
+      deviceTimestampNs: 100,
+      sensorType: "location",
+      values: [],
+      location: { lat: 31.230405, lng: 121.470001, accuracyM: 4 },
+      pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["gnss"], motionMode: "walking", stationary: false },
+    }],
+  }));
+  const navigationAccepted = await nextMessage(navigator);
+  if (navigationAccepted.type !== "samples.accepted") throw new Error(`navigation sample failed: ${JSON.stringify(navigationAccepted)}`);
+  const navigationSession = await requestJson(`/api/sessions/${navigationSessionId}`);
+  if (navigationSession.response.status !== 200 || navigationSession.body.navigation?.status !== "on-route" || typeof navigationSession.body.navigation?.progressM !== "number" || typeof navigationSession.body.navigation?.remainingM !== "number") throw new Error(`navigation projection failed: ${JSON.stringify(navigationSession.body.navigation)}`);
+  navigator.send(JSON.stringify({
+    type: "samples",
+    sessionId: navigationSessionId,
+    samples: [{
+      sampleId: "route-navigation-off-route",
+      deviceTimestampNs: 10_000_000_000,
+      sensorType: "location",
+      values: [],
+      location: { lat: 31.2315, lng: 121.470001, accuracyM: 4 },
+    }],
+  }));
+  const offRouteAccepted = await nextMessage(navigator);
+  if (offRouteAccepted.type !== "samples.accepted") throw new Error(`off-route sample failed: ${JSON.stringify(offRouteAccepted)}`);
+  const offRouteSession = await requestJson(`/api/sessions/${navigationSessionId}`);
+  if (offRouteSession.body.navigation?.status !== "off-route" || (offRouteSession.body.navigation?.distanceToRouteM ?? 0) <= 25) throw new Error(`off-route projection failed: ${JSON.stringify(offRouteSession.body.navigation)}`);
+  navigator.close();
+  const navigationStopped = await requestJson(`/api/sessions/${navigationSessionId}/stop`, { method: "POST" });
+  if (navigationStopped.response.status !== 200 || navigationStopped.body.status !== "stopped") throw new Error("navigation session did not stop");
+
   await stopApi(api);
   api = await startApi();
   const restored = await requestJson(`/api/routes/${routeId}`);

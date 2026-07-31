@@ -115,6 +115,7 @@ export function useRealtimeSession() {
       sensorInventory: delta.sensorInventory ?? current.sensorInventory,
       sensorStats: delta.sensorStats,
       latestSensors: delta.latestSensors,
+      navigation: delta.navigation ?? current.navigation,
     });
   }
 

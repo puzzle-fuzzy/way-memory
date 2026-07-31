@@ -63,6 +63,17 @@
 
 传感器样本必须使用手机单调时钟进行排序，同时保留系统时间用于展示。
 
+## NavigationState
+
+已发布的 `verified` 路线可以被 `navigation` 会话引用。服务端把最新 GNSS 点投影到参考路线的地理线段，返回：
+
+- `status`: `on-route` / `near-route` / `off-route` / `no-fix` / `route-not-ready`
+- `progressM` / `remainingM`
+- `distanceToRouteM`
+- `nearestPointIndex`、最近路线经纬度和可用的高度差
+
+投影使用局部地球米制坐标和线段最近点，不按数组下标猜测位置；`on-route` 的阈值会同时考虑 GNSS 精度，超过 25 米才进入明确的 `off-route`。这一步只负责地理路线匹配，楼层和电梯语义仍需要气压、视觉与人工节点共同确认。
+
 ## RouteNode
 
 - `nodeId`

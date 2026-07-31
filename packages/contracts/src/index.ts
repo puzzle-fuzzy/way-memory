@@ -104,6 +104,23 @@ export interface RouteNode {
   createdAt: string;
 }
 
+export type NavigationStatus = "on-route" | "near-route" | "off-route" | "no-fix" | "route-not-ready";
+
+export interface NavigationState {
+  routeId: string;
+  status: NavigationStatus;
+  progressM?: number;
+  remainingM?: number;
+  distanceToRouteM?: number;
+  nearestPointIndex?: number;
+  nearestLat?: number;
+  nearestLng?: number;
+  nearestAltitudeM?: number;
+  altitudeDeltaM?: number;
+  accuracyM?: number;
+  updatedAt: string;
+}
+
 export type ObservationMode = "learning" | "navigation";
 
 export type MotionMode =
@@ -250,6 +267,7 @@ export interface ObservationSession {
   ownerId: string;
   client?: CaptureClientInfo;
   routeId?: string;
+  navigation?: NavigationState;
   startedAt: string;
   lastReceivedAt?: string;
   lastSampleAt?: string;
@@ -305,4 +323,5 @@ export interface SessionDelta {
   sensorInventory: SensorInventoryEntry[];
   sensorStats: SensorSampleStats[];
   latestSensors: LiveSensorSnapshot[];
+  navigation?: NavigationState;
 }

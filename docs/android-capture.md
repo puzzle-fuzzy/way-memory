@@ -12,4 +12,6 @@ The service is promoted with the explicit `FOREGROUND_SERVICE_TYPE_LOCATION` typ
 
 The foreground service uses `START_REDELIVER_INTENT`. If Android recreates the service/process after a system kill, the start intent is redelivered and the uploader resumes the durable session marker and offline queue. `onDestroy()` deliberately does not behave like an explicit Stop: only the user's Stop action sends `session.stop` and removes `active-session.id`. This keeps process recovery distinguishable from an intentional end of capture.
 
+The uploader's session-start contract supports both `learning` and `navigation` plus an optional verified `routeId`. The selected mode/route is kept in the app-private `active-session.config.json` beside the session marker, so process recovery does not silently create a learning session for a navigation capture. The current visible screen still starts learning mode by default; route selection UX remains a separate enrollment/navigation workflow.
+
 This is a collection policy, not a promise that Android will provide unrestricted background camera access. A future production release must also complete notification copy, battery-optimization guidance, Android OEM background tests, and explicit user controls for stopping capture.
