@@ -1,0 +1,25 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "way-memory",
+    },
+    "apps/web": {
+      "name": "@way-memory/web",
+    },
+    "packages/contracts": {
+      "name": "@way-memory/contracts",
+    },
+    "services/api": {
+      "name": "@way-memory/api",
+    },
+  },
+  "packages": {
+    "@way-memory/api": ["@way-memory/api@workspace:services/api"],
+
+    "@way-memory/contracts": ["@way-memory/contracts@workspace:packages/contracts"],
+
+    "@way-memory/web": ["@way-memory/web@workspace:apps/web"],
+  }
+}

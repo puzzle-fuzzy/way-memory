@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>way-memory · 路线工作台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">wm</span><span>way-memory</span></div>
+        <div class="side-label">工作台</div>
+        <nav><a class="nav-item active" href="#overview"><span>◉</span>路线总览</a><a class="nav-item" href="#observations"><span>◌</span>行走记录</a><a class="nav-item" href="#annotations"><span>◇</span>人工标注</a><a class="nav-item" href="#devices"><span>⌁</span>设备状态</a></nav>
+        <div class="sidebar-foot"><div class="privacy-dot"></div><div><strong>本地演示模式</strong><small>数据仅用于当前工作台</small></div></div>
+      </aside>
+      <main class="main-content">
+        <header class="topbar"><div><p class="eyebrow">路线学习 · 2026.07.31</p><h1>你好，今天继续理解这条路。</h1></div><button class="sync-button"><span class="pulse"></span>同步正常</button></header>
+        <section class="hero-grid">
+          <div class="route-card panel">
+            <div class="card-head"><div><p class="eyebrow">当前路线</p><h2>家 · 地铁站入口</h2></div><span class="status-pill verified">已验证</span></div>
+            <div class="route-meta"><div><strong>486</strong><span>米 · 约 8 分钟</span></div><div><strong>4</strong><span>次行走记录</span></div><div><strong>91%</strong><span>路线置信度</span></div></div>
+            <div class="map-wrap"><svg viewBox="0 0 620 300" role="img" aria-label="路线轨迹预览"><defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="#dce4df" stroke-width="1"/></pattern><filter id="shadow"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1f3a32" flood-opacity=".16"/></filter></defs><rect width="620" height="300" fill="#edf2ed"/><rect width="620" height="300" fill="url(#grid)"/><path d="M80 230 C138 220 140 180 192 170 S275 196 316 147 S365 83 424 110 S485 164 555 83" fill="none" stroke="#a7b7ae" stroke-width="26" stroke-linecap="round"/><path d="M80 230 C138 220 140 180 192 170 S275 196 316 147 S365 83 424 110 S485 164 555 83" fill="none" stroke="#f8fbf7" stroke-width="18" stroke-linecap="round"/><path d="M80 230 C138 220 140 180 192 170 S275 196 316 147 S365 83 424 110 S485 164 555 83" fill="none" stroke="#e05c3b" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 0" filter="url(#shadow)"/><g class="map-node"><circle cx="80" cy="230" r="9"/><text x="80" y="258">起点</text></g><g class="map-node"><circle cx="316" cy="147" r="9"/><text x="316" y="175">左转 · 视觉地标</text></g><g class="map-node end"><circle cx="555" cy="83" r="9"/><text x="555" y="60">终点</text></g><g class="current-pos"><circle cx="416" cy="106" r="15"/><circle cx="416" cy="106" r="6"/></g></svg><div class="map-legend"><span><i class="legend-route"></i>融合轨迹</span><span><i class="legend-node"></i>人工确认节点</span><span><i class="legend-current"></i>当前手机位置</span></div></div>
+          </div>
+          <div class="side-stack"><div class="panel confidence-card"><div class="card-head"><div><p class="eyebrow">当前判断</p><h3>位置可靠</h3></div><span class="confidence-ring">91</span></div><p class="muted">手机正在接近已记录的左转节点。视觉与运动轨迹一致。</p><div class="confidence-bar"><span></span></div><div class="mini-row"><span>融合定位</span><strong>高置信度</strong></div></div><div class="panel note-card"><div class="note-icon">✦</div><div><p class="eyebrow">路线记忆</p><h3>下一个节点</h3><p class="muted">“前方约 18 米，左侧有一面连续的浅灰色围墙。”</p></div></div></div>
+        </section>
+        <section class="lower-grid"><div class="panel sensor-panel"><div class="card-head"><div><p class="eyebrow">实时遥测</p><h3>设备传感器</h3></div><span class="live-label"><i></i>LIVE</span></div><div class="sensor-grid"><div class="sensor-item"><span class="sensor-icon">⌁</span><div><strong>GNSS</strong><small>精度 3.2m</small></div><b class="good">●</b></div><div class="sensor-item"><span class="sensor-icon">↗</span><div><strong>加速度计</strong><small>50 Hz · 正常</small></div><b class="good">●</b></div><div class="sensor-item"><span class="sensor-icon">⟳</span><div><strong>陀螺仪</strong><small>50 Hz · 正常</small></div><b class="good">●</b></div><div class="sensor-item"><span class="sensor-icon">⌁</span><div><strong>视觉采集</strong><small>5 Hz · 正常</small></div><b class="good">●</b></div><div class="sensor-item"><span class="sensor-icon">◒</span><div><strong>气压计</strong><small>101.2 kPa</small></div><b class="good">●</b></div><div class="sensor-item muted-sensor"><span class="sensor-icon">◌</span><div><strong>深度感知</strong><small>设备不支持</small></div><b>—</b></div></div></div><div class="panel activity-panel"><div class="card-head"><div><p class="eyebrow">最近活动</p><h3>路线观察</h3></div><a href="#all">查看全部 ↗</a></div><div class="activity"><span class="activity-mark orange">↗</span><div><strong>第 4 次观察已完成</strong><small>今天 09:42 · 路线置信度提升至 91%</small></div></div><div class="activity"><span class="activity-mark green">◇</span><div><strong>新增人工标注</strong><small>昨天 18:16 · “左侧围墙”</small></div></div><div class="activity"><span class="activity-mark blue">⌁</span><div><strong>设备已连接</strong><small>昨天 18:02 · Android 手机</small></div></div></div></section>
+        <footer><span>way-memory / P1 可观测闭环</span><span>所有判断都带有来源与置信度</span></footer>
+      </main>
+    </div>
+  </body>
+</html>

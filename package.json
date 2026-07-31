@@ -9,6 +9,9 @@
   ],
   "scripts": {
     "check": "bun run check:docs",
-    "check:docs": "bun run scripts/check-docs.ts"
+    "check:docs": "bun run scripts/check-docs.ts",
+    "smoke": "bun run scripts/smoke.ts",
+    "dev:api": "bun run services/api/src/index.ts",
+    "dev:web": "bun run apps/web/src/dev-server.ts"
   }
 }
