@@ -281,7 +281,7 @@ const buildProjectionScene = (worldPoints: WorldPoint[]): ProjectionScene => {
   const gridStepM = chooseGridStep(gridRadiusM);
   const axisLengthM = gridRadiusM * 1.08;
   const worldExtent = Math.max(eastMax - eastMin, northMax - northMin, (altitudeMaxM - altitudeMinM) * 1.35, 4);
-  const viewScale = 92 / worldExtent;
+  const viewScale = 128 / worldExtent;
   const focalLength = Math.max(8, worldExtent * 2.4);
   const yawCos = Math.cos(cameraYaw.value);
   const yawSin = Math.sin(cameraYaw.value);
@@ -490,10 +490,10 @@ const drawPointCanvas = () => {
   });
 
   const scene = projectionScene.value;
-  context.setLineDash([3 * canvasScale, 5 * canvasScale]);
+  context.setLineDash([2 * canvasScale, 4 * canvasScale]);
   context.strokeStyle = "#b9cec0";
-  context.globalAlpha = 0.34;
-  context.lineWidth = Math.max(0.5, 0.7 * canvasScale);
+  context.globalAlpha = 0.48;
+  context.lineWidth = Math.max(0.5, 0.8 * canvasScale);
   for (const segment of scene.gridSegments) {
     const start = toCanvasPoint(segment.left.x, segment.left.y);
     const end = toCanvasPoint(segment.right.x, segment.right.y);
@@ -541,18 +541,43 @@ const drawPointCanvas = () => {
     .filter((point) => point.index !== currentIndex)
     .sort((left, right) => left.depth - right.depth || left.index - right.index);
   const altitudeRange = Math.max(0.001, scene.altitudeMaxM - scene.altitudeMinM);
+  const worldPoints = displayedWorldTrack.value;
+
+  for (const point of orderedPoints) {
+    const source = worldPoints[point.index];
+    if (!source?.hasAltitude || Math.abs(source.altitudeM) < 0.15 || point.index % 4 !== 0) continue;
+    const groundProjection = scene.projectPoint({ ...source, altitudeM: 0, hasAltitude: true });
+    const pointProjection = point;
+    const start = toCanvasPoint(groundProjection.x, groundProjection.y);
+    const end = toCanvasPoint(pointProjection.x, pointProjection.y);
+    context.save();
+    context.globalAlpha = 0.18;
+    context.strokeStyle = "#6384a5";
+    context.lineWidth = Math.max(0.45, 0.65 * canvasScale);
+    context.setLineDash([2 * canvasScale, 3 * canvasScale]);
+    context.beginPath();
+    context.moveTo(start.x, start.y);
+    context.lineTo(end.x, end.y);
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = "#6384a5";
+    context.beginPath();
+    context.arc(start.x, start.y, Math.max(1, 1.6 * canvasScale), 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  }
 
   for (const point of orderedPoints) {
     const position = toCanvasPoint(point.x, point.y);
     const heightRatio = Math.max(0, Math.min(1, (point.altitudeM - scene.altitudeMinM) / altitudeRange));
-    const radius = Math.max(1.8, Math.min(4.8, 5.8 - point.accuracyM * 0.04) * canvasScale * point.perspective);
+    const radius = Math.max(1.1, Math.min(2.8, 2.6 - point.accuracyM * 0.015) * canvasScale * point.perspective);
     context.beginPath();
     context.arc(position.x, position.y, radius, 0, Math.PI * 2);
     context.globalAlpha = 0.32 + ((point.index + 1) / Math.max(points.length, 1)) * 0.68;
     context.fillStyle = heightRatio > 0.58 ? "#e07a4e" : "#3f8b68";
     context.fill();
     context.globalAlpha = Math.min(1, context.globalAlpha + 0.15);
-    context.lineWidth = Math.max(0.75, 1.5 * canvasScale);
+    context.lineWidth = Math.max(0.45, 0.7 * canvasScale);
     context.strokeStyle = "#ffffff";
     context.stroke();
   }
@@ -560,10 +585,10 @@ const drawPointCanvas = () => {
   const firstPoint = toCanvasPoint(points[0].x, points[0].y);
   context.globalAlpha = 1;
   context.beginPath();
-  context.arc(firstPoint.x, firstPoint.y, Math.max(4, 8 * canvasScale), 0, Math.PI * 2);
+  context.arc(firstPoint.x, firstPoint.y, Math.max(3, 5 * canvasScale), 0, Math.PI * 2);
   context.fillStyle = "#ffffff";
   context.fill();
-  context.lineWidth = Math.max(2, 4 * canvasScale);
+  context.lineWidth = Math.max(1.2, 2 * canvasScale);
   context.strokeStyle = "#e05c3b";
   context.stroke();
   context.fillStyle = "#19352d";
@@ -573,14 +598,14 @@ const drawPointCanvas = () => {
 
   const latestPoint = toCanvasPoint(points[currentIndex].x, points[currentIndex].y);
   context.beginPath();
-  context.arc(latestPoint.x, latestPoint.y, Math.max(9, 15 * canvasScale), 0, Math.PI * 2);
+  context.arc(latestPoint.x, latestPoint.y, Math.max(5, 8 * canvasScale), 0, Math.PI * 2);
   context.fillStyle = "#e05c3b33";
   context.fill();
-  context.lineWidth = Math.max(1, 2 * canvasScale);
+  context.lineWidth = Math.max(0.8, 1.2 * canvasScale);
   context.strokeStyle = "#e05c3b99";
   context.stroke();
   context.beginPath();
-  context.arc(latestPoint.x, latestPoint.y, Math.max(3.5, 6 * canvasScale), 0, Math.PI * 2);
+  context.arc(latestPoint.x, latestPoint.y, Math.max(2, 3.5 * canvasScale), 0, Math.PI * 2);
   context.fillStyle = "#e05c3b";
   context.fill();
 };
@@ -640,7 +665,47 @@ const activities = computed(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-paper text-ink selection:bg-ember/20">
+  <div class="min-h-screen overflow-hidden bg-paper text-ink selection:bg-ember/20">
+    <section class="relative flex min-h-screen flex-col overflow-hidden bg-[#e8f0eb]">
+      <header class="z-10 flex shrink-0 items-center justify-between gap-4 border-b border-[#d3e0d7] bg-[#f5f9f5]/95 px-4 py-3 backdrop-blur sm:px-7">
+        <div class="min-w-0">
+          <div class="flex items-center gap-3">
+            <span class="grid size-8 shrink-0 place-items-center rounded-xl bg-ink font-mono text-xs font-bold text-paper">wm</span>
+            <div class="min-w-0">
+              <p class="truncate text-sm font-extrabold tracking-[-0.04em]">way-memory / 3D route viewer</p>
+              <p class="truncate text-[10px] text-muted">{{ routeLabel }} · {{ visualMode === 'inertial' ? 'sensor relative motion' : 'location track' }}</p>
+            </div>
+          </div>
+        </div>
+        <div class="flex shrink-0 items-center gap-2 text-[10px] text-muted sm:gap-3">
+          <span class="hidden rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 sm:inline-flex">{{ displayedPointCount }} points · {{ routeDistanceM }}m</span>
+          <span class="connection-pill"><span :class="['connection-dot', connection === 'connected' ? 'bg-sage' : connection === 'connecting' ? 'bg-amber' : 'bg-ember']" />{{ connectionLabel }}</span>
+        </div>
+      </header>
+
+      <div ref="pointCanvasHost" class="relative min-h-0 flex-1 touch-none select-none overflow-hidden bg-[#e8f0eb]" @pointerdown="beginCameraDrag" @pointermove="moveCameraDrag" @pointerup="endCameraDrag" @pointercancel="endCameraDrag" @pointerleave="endCameraDrag">
+        <canvas ref="pointCanvas" class="point-canvas block h-full w-full" width="620" height="300" role="img" aria-label="可旋转的三维实时运动轨迹" />
+        <div class="pointer-events-none absolute left-4 top-4 rounded-2xl border border-white/70 bg-white/70 px-3 py-2 text-[10px] leading-5 text-muted shadow-sm backdrop-blur sm:left-7 sm:top-6">
+          <strong class="block text-ink">{{ displayedPointCount }} 个实时点</strong>
+          <span>{{ coordinateBoundsLabel }}</span>
+        </div>
+        <div v-if="!displayedTrack.length" class="pointer-events-none absolute inset-0 grid place-items-center text-sm text-muted">等待 Android 上报轨迹点</div>
+        <div class="pointer-events-none absolute bottom-4 left-4 flex flex-wrap items-center gap-2 text-[10px] text-muted sm:bottom-6 sm:left-7">
+          <span class="rounded-full border border-white/80 bg-white/75 px-3 py-1.5 shadow-sm backdrop-blur">X 左右</span>
+          <span class="rounded-full border border-white/80 bg-white/75 px-3 py-1.5 shadow-sm backdrop-blur">Y 前后</span>
+          <span class="rounded-full border border-white/80 bg-white/75 px-3 py-1.5 shadow-sm backdrop-blur">Z 上下</span>
+          <span class="rounded-full border border-white/80 bg-white/75 px-3 py-1.5 shadow-sm backdrop-blur">{{ altitudeSourceLabel }}</span>
+        </div>
+        <button class="absolute right-4 top-4 rounded-full border border-[#cddbd1] bg-white/85 px-3 py-2 text-[10px] text-muted shadow-sm backdrop-blur transition hover:border-ember hover:text-ember sm:right-7 sm:top-6" type="button" @click="resetCamera">重置视角</button>
+      </div>
+
+      <footer class="z-10 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#d3e0d7] bg-[#f5f9f5]/95 px-4 py-2 text-[10px] text-muted backdrop-blur sm:px-7">
+        <span>拖动旋转视角 · 每个点对应一个服务端样本 · {{ totalSampleCount }} samples</span>
+        <span class="font-mono">{{ coordinateBoundsLabel }}</span>
+      </footer>
+    </section>
+
+    <!--
     <aside class="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-line bg-mist px-5 py-7 lg:flex">
       <div class="mb-16 flex items-center gap-3 px-2">
         <span class="grid size-8 place-items-center rounded-xl bg-ink font-mono text-xs font-bold text-paper">wm</span>
@@ -696,5 +761,6 @@ const activities = computed(() => {
       </section>
       <footer class="mt-8 flex flex-col justify-between gap-2 px-1 font-mono text-[9px] text-[#9aa79f] sm:flex-row"><span>way-memory / LAN realtime console</span><span>页面数据来自 API 与 WebSocket，不使用演示轨迹</span></footer>
     </main>
+    -->
   </div>
 </template>
