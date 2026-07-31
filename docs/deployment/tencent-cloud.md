@@ -30,9 +30,9 @@ This MVP entry point is HTTP/WS on the server IP and is not a production privacy
 
 ## Latest test deployment evidence
 
-The latest anonymous test deployment uses API commit `c128fd8` and Web commit `c60403a`; each switch was made only after a remote SHA-256 comparison. The remote API bundle hash is `feaaf89245a9d65d375a144ad57661f7818c7679aab3d4b2c9b7c1de5335751b`; the current web index hash is `f058ee76d0abb8def81382eaba13673f72a7cfc93c53cd43a6a87458622e5cc4`.
+The latest anonymous test deployment uses API/Web commit `7d574fe`; each switch was made only after a remote SHA-256 comparison. The remote API bundle hash is `7d32005af6436857c5a54ceabd621b773995c5ed9a511dcbc2f26217dc755599`; the current web index hash is `e3fe7638be4f0252775c292981530d0c19d1e681d24d9acb8845c9277ee96809`.
 
-- Backup retained on the host: `/var/backups/way-memory/20260731T163254Z/`;
+- Backup retained on the host: `/var/backups/way-memory/20260731T191130Z/`;
 - `way-memory-api.service`: active after restart;
 - public `/`: HTTP 200;
 - public `/api/health`: HTTP 200;
@@ -40,6 +40,7 @@ The latest anonymous test deployment uses API commit `c128fd8` and Web commit `c
 - public live sample smoke: passed;
 - public Android queue batch smoke: 100 samples accepted, 0 dropped;
 - public route navigation smoke: 3 observations aligned, route published, on-route/off-route projection passed;
+- public one-time navigation handoff smoke: route code bound navigation without a route ID, then reuse was rejected;
 - public long-closure smoke: passed with 1,200 retained Pose points;
 - compact `GET /api/sessions` history response: approximately 44 KB after the bounded session-list change;
 - `/opt/way-memory/data`: approximately 6.8 MB at verification time.
