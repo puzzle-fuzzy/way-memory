@@ -293,6 +293,55 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun visualConfidenceWidensTheFusedUncertainty() {
+        fun alignedPose(confidence: Float): com.puzzlefuzzy.waymemory.sensing.PoseUpdate? {
+            val engine = PoseFusionEngine()
+            engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+            engine.updateVisual(VisualPoseSample(1_100_000_000L, 0f, 0f, 0f, 1f, confidence, "tracking"))
+
+            var timestampNs = 1_200_000_000L
+            repeat(12) {
+                timestampNs += 100_000_000L
+                engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
+            }
+            return engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 1.5f, 0f, 0f, 1f, confidence, "tracking"))
+        }
+
+        val highConfidence = alignedPose(0.95f)
+        val lowConfidence = alignedPose(0.20f)
+        assertNotNull(highConfidence)
+        assertNotNull(lowConfidence)
+        assertTrue(
+            "low-confidence visual correction must expose wider uncertainty",
+            (lowConfidence?.pose?.accuracyM ?: 0f) > (highConfidence?.pose?.accuracyM ?: 0f),
+        )
+    }
+
+    @Test
+    fun nonTrackingVisualFrameCannotMoveTheUnifiedRoute() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateVisual(VisualPoseSample(1_100_000_000L, 0f, 0f, 0f, 1f, 0.9f, "tracking"))
+
+        var timestampNs = 1_200_000_000L
+        repeat(12) {
+            timestampNs += 100_000_000L
+            engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
+        }
+        val aligned = engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 1.5f, 0f, 0f, 1f, 0.9f, "tracking"))
+        assertNotNull(aligned)
+
+        val stable = engine.updateImu(timestampNs + 200_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        assertNotNull(stable)
+        val paused = engine.updateVisual(VisualPoseSample(timestampNs + 300_000_000L, 40f, -20f, 5f, 0.5f, 1f, "paused"))
+        assertEquals(null, paused)
+        val next = engine.updateImu(timestampNs + 400_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        assertNotNull(next)
+        assertTrue("paused visual frame created a false movement", kotlin.math.abs((next?.pose?.xM ?: 0f) - (stable?.pose?.xM ?: 0f)) < 0.01f)
+        assertTrue("paused visual frame created a false movement", kotlin.math.abs((next?.pose?.yM ?: 0f) - (stable?.pose?.yM ?: 0f)) < 0.01f)
+    }
+
+    @Test
     fun visualAlignmentUsesCumulativeDisplacementAcrossSmallFrames() {
         val engine = PoseFusionEngine()
         engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)

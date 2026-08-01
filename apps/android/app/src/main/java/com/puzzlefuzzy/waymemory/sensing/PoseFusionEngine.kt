@@ -250,6 +250,13 @@ class PoseFusionEngine {
     fun updateVisual(sample: VisualPoseSample): PoseUpdate? {
         if (!sample.xM.isFinite() || !sample.yM.isFinite() || !sample.zM.isFinite()) return null
         if (sample.deviceTimestampNs <= 0L || (lastVisualTimestampNs > 0L && sample.deviceTimestampNs <= lastVisualTimestampNs)) return null
+        if (!sample.trackingState.equals("tracking", ignoreCase = true)) {
+            // Keep the fusion boundary defensive even when a future visual
+            // adapter or a replay feeds paused/lost frames directly. A frame
+            // without a valid visual pose must never move the unified route.
+            if (hasVisual) visualResetPending = true
+            return null
+        }
         val previousVisualTimestampNs = lastVisualTimestampNs
         lastVisualTimestampNs = sample.deviceTimestampNs
         val visualAccuracyPrior = sample.accuracyM.takeIf { it.isFinite() }?.coerceIn(0.5f, 5f) ?: 1.5f
