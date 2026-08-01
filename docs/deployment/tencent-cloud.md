@@ -104,9 +104,9 @@ The release bundle is a packaging step, not proof of a public deployment. The pu
 
 ## Latest staging evidence (2026-08-01)
 
-The runtime source commit `8955d135a9b311750d95824d8c05e6f4e4e8832c` was built and passed `bun run smoke:release`; the later commits in this section only update deployment evidence. Its release manifest and all nine payload hashes were verified after staging at `/tmp/way-memory-release-8955d13` on `101.35.246.159`.
+The runtime source commit `8c7608783d50a5f9a100527482c6049c95377d05` was built and passed `bun run smoke:release`; the later commits in this section only update deployment evidence. Its release manifest and all nine payload hashes were verified after staging at `/tmp/way-memory-release-8c76087` on `101.35.246.159`.
 
-The remote `install-release.sh /tmp/way-memory-release-8955d13 --check-only` correctly refused this bundle because `/etc/way-memory/way-memory.env` is still missing. No production files, service restart, Nginx reload, or user data were changed by this staging check.
+The remote `install-release.sh /tmp/way-memory-release-8c76087 --check-only` correctly refused this bundle because `/etc/way-memory/way-memory.env` is still missing. No production files, service restart, Nginx reload, or user data were changed by this staging check.
 
 After building the bundle, verify the bundled API itself before copying it to the host:
 
