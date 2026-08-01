@@ -183,6 +183,7 @@ class ArCorePoseCollector(
         textureConfigured = false
         initialTranslation = null
         lastEmittedTimestampNs = 0L
+        lastStatusKey = null
         emitStatus(VisualTrackingStatus(detail = "视觉采集未启动"))
     }
 
