@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.google.ar.core.ArCoreApk
+import com.google.ar.core.ArCoreApk.Availability
 import com.google.ar.core.Camera
 import com.google.ar.core.Config
 import com.google.ar.core.Session
@@ -42,6 +43,8 @@ data class VisualPoseSample(
     val failureReason: String? = null,
     val trackingReset: Boolean = false,
 )
+
+private const val AVAILABILITY_RETRY_DELAY_MS = 500L
 
 /**
  * Optional ARCore visual-inertial pose source.
@@ -84,6 +87,13 @@ class ArCorePoseCollector(
         }
 
         val availability = runCatching { ArCoreApk.getInstance().checkAvailability(activity) }.getOrNull()
+        if (availability == Availability.UNKNOWN_CHECKING) {
+            emitStatus(VisualTrackingStatus(trackingState = "checking", detail = "正在检查设备的 ARCore 能力"))
+            mainHandler.postDelayed({
+                if (session == null && hostActivity === activity) start(activity)
+            }, AVAILABILITY_RETRY_DELAY_MS)
+            return
+        }
         if (availability == null || !availability.isSupported) {
             emitStatus(VisualTrackingStatus(detail = "设备或 Google Play Services for AR 不可用"))
             return
