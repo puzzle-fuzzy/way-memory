@@ -20,6 +20,7 @@ class SensorCollectorTest {
     @Test
     fun networkFixIsDiagnosticWhenGpsProviderExists() {
         assertTrue(isPrimaryLocationProvider("gps"))
+        assertTrue(isPrimaryLocationProvider("fused"))
         assertFalse(isPrimaryLocationProvider("network"))
         assertFalse(isPrimaryLocationProvider(null))
     }

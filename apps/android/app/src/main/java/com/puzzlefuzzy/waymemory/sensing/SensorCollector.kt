@@ -27,6 +27,7 @@ import java.io.File
 import kotlin.math.sqrt
 
 private const val ROTATION_SOURCE_FRESHNESS_NS = 750_000_000L
+private const val FUSED_LOCATION_PROVIDER = "fused"
 
 /** Transform a device-frame acceleration vector into the rotation matrix's world frame. */
 internal fun transformDeviceAcceleration(
@@ -64,12 +65,14 @@ internal fun shouldAcceptRotationSource(
 }
 
 /**
- * Network location is useful as a diagnostic/fallback only. When a GPS
- * provider exists, allowing a network fix to establish the route origin can
- * create a false jump when the first satellite fix arrives later.
+ * Network location is useful as a diagnostic/fallback only. The platform
+ * fused provider is different: on API 31+ it is an explicit system provider
+ * that may combine GNSS, Wi-Fi and other sources, so it is eligible for the
+ * geographic track while retaining its provider/accuracy metadata.
  */
 internal fun isPrimaryLocationProvider(provider: String?): Boolean =
-    provider?.equals("gps", ignoreCase = true) == true
+    provider?.equals(LocationManager.GPS_PROVIDER, ignoreCase = true) == true
+        || provider?.equals(FUSED_LOCATION_PROVIDER, ignoreCase = true) == true
 
 /**
  * A raw accelerometer minus a lagging gravity estimate is not trustworthy
@@ -375,7 +378,11 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         // network can provide an initial fix when the phone is indoors or GNSS is still
         // warming up. The server still validates every emitted location sample.
         val providers = locationManager.getProviders(true)
-            .filter { it == LocationManager.GPS_PROVIDER || it == LocationManager.NETWORK_PROVIDER }
+            .filter {
+                it == LocationManager.GPS_PROVIDER
+                    || it == LocationManager.NETWORK_PROVIDER
+                    || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && it == FUSED_LOCATION_PROVIDER)
+            }
         if (providers.isEmpty()) {
             updateError("请打开系统定位服务")
             return

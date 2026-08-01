@@ -8,7 +8,7 @@ At capture start, Android inventories the union of the static `TYPE_ALL` list an
 
 ARCore is different: its camera session is attached to the visible Activity and is paused on `onPause`. The route continues with non-visual fusion while the phone is locked or another app is in front. When the Activity returns, the same collector and session resume; orientation changes do not request a new capture start.
 
-The service is declared with the Android location foreground-service type. Precise location is still required for a trustworthy GNSS route. Camera permission is optional for the product because unsupported devices must retain a usable IMU/GNSS/barometer fallback.
+The service is declared with the Android location foreground-service type. Precise location is still required for a trustworthy GNSS route. On API 31 and newer, the collector also subscribes to Android's explicit `fused` provider when available; it is a primary geographic input with its provider and accuracy preserved, while `network` remains diagnostic-only. Camera permission is optional for the product because unsupported devices must retain a usable IMU/GNSS/barometer fallback.
 
 The service is promoted with the explicit `FOREGROUND_SERVICE_TYPE_LOCATION` type on Android 10 and newer. Capture must be started from the visible Activity; after that, the foreground service and its persistent notification are the supported path for continuing location access while the screen is locked. This does not make ARCore camera tracking continue in the background: visual tracking is paused when the Activity pauses and the non-visual route remains active.
 

@@ -178,7 +178,7 @@ Record at minimum:
 
 - `sampleCount`, `rawSampleCount`, `droppedSampleCount`, and `outOfOrderSampleCount`;
 - `outOfOrderSampleCount` defaults to a strict zero-tolerance baseline; use `--max-out-of-order=<N>` only when a field test explicitly records and accepts bounded transport reordering.
-- Geographic points must retain `locationProvider`. Only `gps` may become a point in the primary `track`; network/passive fixes may appear only as raw diagnostic samples and must not create a false route origin or GPS transition jump.
+- Geographic points must retain `locationProvider`. `gps` and Android API 31+ `fused` fixes may become points in the primary `track`; network/passive fixes may appear only as raw diagnostic samples and must not create a false route origin or GPS transition jump.
 - `poseTrack` count and the min/max of `xM`, `yM`, `zM`;
 - Pose timestamp monotonicity, time span, per-source counts and source age;
 - For the rotation case, every pose must keep `motionMode` at `stationary` or `unknown` in addition to staying inside the translation limit;

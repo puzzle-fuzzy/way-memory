@@ -919,7 +919,7 @@ const normalizeLocation = (value: unknown): SensorSample["location"] | null => {
 };
 
 const isPrimaryGeographicProvider = (provider?: string) =>
-  provider === undefined || provider.toLowerCase() === "gps";
+  provider === undefined || ["gps", "fused"].includes(provider.toLowerCase());
 
 const normalizeRelativePosition = (value: unknown): SensorSample["relativePosition"] | null => {
   if (!isRecord(value)) return null;
