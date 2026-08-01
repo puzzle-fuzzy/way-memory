@@ -2,6 +2,8 @@ param(
     [string]$ApkPath = "apps\android\app\build\outputs\apk\debug\app-debug.apk",
     [string]$Serial = "",
     [switch]$RequirePhysical,
+    [switch]$RequireRelease,
+    [string]$ReleaseManifestPath = "",
     [string]$ApiBaseUrl = ""
 )
 
@@ -17,6 +19,30 @@ $displayApiBaseUrl = if ($ApiBaseUrl.Trim()) {
 }
 if ($RequirePhysical -and -not $displayApiBaseUrl.StartsWith("https://", [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Physical sensor acceptance requires an HTTPS API endpoint; refusing to send real route data to the anonymous HTTP test deployment: $displayApiBaseUrl"
+}
+
+if ($RequireRelease) {
+    if (-not $ReleaseManifestPath.Trim()) {
+        throw "-RequireRelease needs -ReleaseManifestPath from build-android-release.ps1"
+    }
+    $resolvedManifest = (Resolve-Path (Join-Path $repo $ReleaseManifestPath)).Path
+    $releaseManifest = Get-Content -Raw -LiteralPath $resolvedManifest | ConvertFrom-Json
+    if ($releaseManifest.format -ne "way-memory.android-release-manifest.v1" -or $releaseManifest.buildType -ne "release") {
+        throw "The release manifest is not a signed way-memory release artifact: $resolvedManifest"
+    }
+    $manifestOrigin = ([Uri]$releaseManifest.apiBaseUrl).GetLeftPart([UriPartial]::Authority)
+    $expectedOrigin = ([Uri]$displayApiBaseUrl).GetLeftPart([UriPartial]::Authority)
+    if ($manifestOrigin -ne $expectedOrigin) {
+        throw "APK API origin does not match the acceptance endpoint: $manifestOrigin vs $expectedOrigin"
+    }
+    $manifestApk = Join-Path (Split-Path -Parent $resolvedManifest) $releaseManifest.apkPath
+    if ((Resolve-Path $manifestApk).Path -ne $resolvedApk) {
+        throw "APK path does not match the release manifest"
+    }
+    $manifestHash = (Get-FileHash -LiteralPath $resolvedApk -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($manifestHash -ne ([string]$releaseManifest.apkSha256).ToLowerInvariant()) {
+        throw "APK SHA256 does not match the release manifest"
+    }
 }
 
 $adbCommand = Get-Command adb -ErrorAction SilentlyContinue

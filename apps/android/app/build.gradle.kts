@@ -16,6 +16,15 @@ val buildingRelease = gradle.startParameter.taskNames.any { it.contains("release
 if (buildingRelease && !configuredApiBaseUrl.startsWith("https://")) {
     throw GradleException("Release builds require an HTTPS wayMemoryApiUrl")
 }
+val releaseKeystore = System.getenv("WAY_MEMORY_RELEASE_KEYSTORE")?.trim()?.takeIf(String::isNotEmpty)
+val releaseStorePassword = System.getenv("WAY_MEMORY_RELEASE_STORE_PASSWORD")?.takeIf(String::isNotEmpty)
+val releaseKeyAlias = System.getenv("WAY_MEMORY_RELEASE_KEY_ALIAS")?.trim()?.takeIf(String::isNotEmpty)
+val releaseKeyPassword = System.getenv("WAY_MEMORY_RELEASE_KEY_PASSWORD")?.takeIf(String::isNotEmpty)
+val releaseSigningValues = listOf(releaseKeystore, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+val releaseSigningConfigured = releaseSigningValues.all { it != null }
+if (releaseSigningValues.any { it != null } && !releaseSigningConfigured) {
+    throw GradleException("Release signing variables must be supplied together")
+}
 val apiBaseUrl = configuredApiBaseUrl
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
@@ -37,10 +46,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("wayMemoryRelease") {
+                storeFile = file(releaseKeystore ?: error("missing release keystore"))
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             optimization {
                 enable = false
+            }
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("wayMemoryRelease")
             }
         }
     }
