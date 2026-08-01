@@ -14,6 +14,14 @@ The checked-in IP configuration is intentionally test-only. The production templ
 
 The production environment file must contain `WAY_MEMORY_AUTH_MODE=enforced`, a long random `WAY_MEMORY_BOOTSTRAP_TOKEN`, `WAY_MEMORY_PUBLIC_ORIGIN=https://way-memory.yxswy.com`, `WAY_MEMORY_ALLOWED_ORIGIN=https://way-memory.yxswy.com`, `WAY_MEMORY_RETENTION_DAYS=90` (or an explicitly approved 1-3,650 day policy), and the persistent `WAY_MEMORY_DB_PATH`. Never commit that file or copy its contents into deployment logs.
 
+After the DNS A record points `way-memory.yxswy.com` to `101.35.246.159`, the release bundle provides a safe initializer:
+
+```bash
+sudo bash /tmp/way-memory-release-<commit>/deploy/tencent-cloud/bootstrap-production-env.sh
+```
+
+It refuses to run while DNS is wrong or if either protected file already exists. It creates `/etc/way-memory/way-memory.env` and a root-only `/etc/way-memory/bootstrap-token` without printing the token. Keep the token on the operator host only; never put it in Git, chat, shell history, or deployment logs. Obtain the ACME certificate through the approved certificate process, then run the release installer in `--check-only` mode before any production restart.
+
 Set `WAY_MEMORY_DB_PATH=/opt/way-memory/data/way-memory.sqlite` in the systemd environment. The service creates the directory and uses a bounded SQLite snapshot store: 100 retained sessions, a 1,024-sample raw replay tail per session, and a two-second flush interval. Keep `/opt/way-memory/data` on the persistent system disk and include it in the backup policy.
 
 The API keeps live sessions in memory for low-latency WebSocket updates and persists bounded session snapshots to SQLite. A process restart recovers recent sessions as stopped instead of losing the learned route. Each retained session keeps a bounded raw replay ring of 1,024 normalized samples, plus bounded Pose, location and event tracks. The configured retention window automatically removes older stopped sessions and routes from both memory and SQLite.

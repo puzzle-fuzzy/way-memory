@@ -87,6 +87,7 @@ await run([
 ]);
 
 const deploymentFiles = [
+  "bootstrap-production-env.sh",
   "install-release.sh",
   "way-memory-api.production.service",
   "way-memory.yxswy.com.nginx.conf.example",
