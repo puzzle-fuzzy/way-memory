@@ -396,8 +396,15 @@ class PoseFusionEngine {
             }
         }
 
-        if (hasBarometer) {
-            position[2] = position[2] * 0.78f + barometerAltitudeM * 0.22f
+        if (hasBarometer && isFresh(timestampNs, lastPressureTimestampNs, PRESSURE_FRESHNESS_NS)) {
+            // Pressure is a low-frequency vertical reference. Applying a
+            // large correction on every IMU frame erases short real lifts and
+            // drops before the pressure sensor has time to react. Keep the
+            // inertial Z displacement during motion, then converge faster
+            // once the phone is stationary and the pressure reference is
+            // useful for drift correction.
+            val barometerGain = if (stationaryFrames >= 3) 0.12f else 0.025f
+            position[2] += (barometerAltitudeM - position[2]) * barometerGain
         }
 
         val horizontalSpeed = hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat()

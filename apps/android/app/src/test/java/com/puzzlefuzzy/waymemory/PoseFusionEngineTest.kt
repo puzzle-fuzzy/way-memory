@@ -34,6 +34,29 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun stableBarometerDoesNotEraseShortVerticalInertialMotion() {
+        val engine = PoseFusionEngine()
+        var timestampNs = 1_000_000_000L
+        engine.updatePressure(1013.25f, timestampNs)
+        engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0f)
+
+        var last: com.puzzlefuzzy.waymemory.sensing.PoseUpdate? = null
+        repeat(20) {
+            timestampNs += 100_000_000L
+            // The pressure remains unchanged while the phone is lifted. The
+            // inertial vertical displacement must remain visible meanwhile.
+            engine.updatePressure(1013.25f, timestampNs)
+            last = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 2f), 0f)
+        }
+
+        assertNotNull(last)
+        assertTrue(
+            "stable pressure erased a real short vertical movement",
+            (last?.pose?.zM ?: 0f) > 0.4f,
+        )
+    }
+
+    @Test
     fun gnssVelocityIsEstimatedFromSuccessiveFixes() {
         val engine = PoseFusionEngine()
         val first = engine.updateGnss(31.230000, 121.470000, 4f, null, 1_000_000_000L)

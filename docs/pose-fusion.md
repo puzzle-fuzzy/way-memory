@@ -25,6 +25,8 @@ The Android client combines:
 
 The output is an uncertainty-bearing estimate, not a promise of centimeter-level accuracy. IMU double integration is corrected when external observations are available, and stationary periods learn a small acceleration bias.
 
+Vertical fusion uses a complementary filter: inertial Z motion is retained at high frequency, while fresh barometer altitude applies a small correction during movement and a stronger convergence while stationary. A short phone lift or drop therefore remains visible even before pressure has changed enough to estimate the new height; pressure is still used for longer elevator and stairs evidence.
+
 Translation and rotation are intentionally separated: a phone can rotate in a blind user's hand while its center remains in place. Gyroscope activity is retained in the raw sensor stream, but zero translational acceleration and zero vertical pressure motion keep the fused pose stationary instead of turning angular motion into walking or an artificial route segment. The regression suite includes a pure-rotation case that asserts all three position axes remain at the origin.
 
 GNSS fixes are also used to estimate a bounded velocity from successive monotonic fixes. A fix is treated as fresh for five seconds; after that, pose accuracy grows with the age of the last fix and the source flags change to `gnss-stale`. The same freshness boundary is applied to barometer and visual evidence, so a previously available sensor cannot silently keep a high-confidence label after its stream has stopped. If GNSS altitude appears after a fix that had no altitude, the engine bridges it through the current relative height instead of resetting the z-axis to an unrelated zero.
