@@ -16,6 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -432,7 +433,7 @@ class SessionUploader(
         val request = Request.Builder()
             .url("${baseUrl.trimEnd('/')}/api/auth/ws-ticket")
             .header("Authorization", "Bearer $accessToken")
-            .post(okhttp3.RequestBody.create(null, ByteArray(0)))
+            .post(ByteArray(0).toRequestBody())
             .build()
         return runCatching {
             client.newCall(request).execute().use { response ->
@@ -456,7 +457,7 @@ class SessionUploader(
         }
         val request = Request.Builder()
             .url("${baseUrl.trimEnd('/')}/api/auth/enrollments/consume")
-            .post(okhttp3.RequestBody.create(null, JSONObject().put("code", code.trim()).toString()))
+            .post(JSONObject().put("code", code.trim()).toString().toRequestBody())
             .build()
         return runCatching {
             client.newCall(request).execute().use { response ->

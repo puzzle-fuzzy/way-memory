@@ -507,6 +507,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
     override fun onProviderEnabled(provider: String) = Unit
     override fun onProviderDisabled(provider: String) = updateError("Location provider disabled: $provider")
+    @Deprecated("Required by the legacy LocationListener contract")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 
     private fun updateError(message: String) {
