@@ -4,6 +4,9 @@ import com.puzzlefuzzy.waymemory.sensing.shouldAcceptRotationSource
 import com.puzzlefuzzy.waymemory.sensing.isPrimaryLocationProvider
 import com.puzzlefuzzy.waymemory.sensing.canUseAccelerometerFallbackDuringRotation
 import com.puzzlefuzzy.waymemory.sensing.buildVisualStatusSample
+import com.puzzlefuzzy.waymemory.sensing.buildSessionLifecycleSample
+import com.puzzlefuzzy.waymemory.sensing.SessionLifecycleEvent
+import com.puzzlefuzzy.waymemory.sensing.PoseEstimateSample
 import com.puzzlefuzzy.waymemory.sensing.transformDeviceAcceleration
 import com.puzzlefuzzy.waymemory.sensing.VisualTrackingStatus
 import org.junit.Assert.assertArrayEquals
@@ -113,5 +116,35 @@ class SensorCollectorTest {
         assertEquals(true, sample?.metadata?.get("available"))
         assertEquals("paused", sample?.metadata?.get("trackingState"))
         assertEquals("INSUFFICIENT_FEATURES", sample?.metadata?.get("failureReason"))
+    }
+
+    @Test
+    fun sessionResumeIsRetainedAsBoundedDiagnosticMetadata() {
+        val sample = buildSessionLifecycleSample(
+            SessionLifecycleEvent(
+                resumed = true,
+                latestPose = PoseEstimateSample(
+                    deviceTimestampNs = 2_000_000_000L,
+                    xM = 1f,
+                    yM = 2f,
+                    zM = 3f,
+                    velocityXMps = 0f,
+                    velocityYMps = 0f,
+                    velocityZMps = 0f,
+                    accuracyM = 1f,
+                    confidence = 0.8f,
+                    source = "fused",
+                    sourceFlags = listOf("recovered-anchor"),
+                    motionMode = "walking",
+                    stationary = false,
+                ),
+            ),
+            3_000_000_000L,
+        )
+
+        assertEquals("way-memory.session-resumed", sample?.sensorType)
+        assertTrue(sample?.pose == null)
+        assertEquals(true, sample?.metadata?.get("resumed"))
+        assertEquals(2_000_000_000L, sample?.metadata?.get("latestPoseTimestampNs"))
     }
 }

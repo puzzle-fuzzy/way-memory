@@ -885,6 +885,8 @@ const normalizeSensorType = (sensorType: string) => {
     linear_acceleration: "linear-acceleration",
     visual_pose: "arcore.visual-pose",
     visual_status: "arcore.visual-status",
+    session_started: "way-memory.session-started",
+    session_resumed: "way-memory.session-resumed",
   }[normalized] ?? normalized;
 };
 
@@ -1512,7 +1514,6 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
         sampleOutOfOrder = true;
       } else {
         runtime.lastPoseTimestampNs = sample.pose.deviceTimestampNs;
-        runtime.lastPose = sample.pose;
         session.poseTrack.push(sample.pose);
         session.correctedPoseTrack?.push(sample.pose);
         posePoints.push(sample.pose);

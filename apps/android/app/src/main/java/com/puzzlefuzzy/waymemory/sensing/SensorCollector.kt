@@ -97,6 +97,19 @@ internal fun buildVisualStatusSample(status: VisualTrackingStatus, timestampNs: 
     )
 }
 
+internal fun buildSessionLifecycleSample(event: SessionLifecycleEvent, timestampNs: Long): CollectedSample? {
+    if (timestampNs <= 0L) return null
+    return CollectedSample(
+        deviceTimestampNs = timestampNs,
+        sensorType = if (event.resumed) "way-memory.session-resumed" else "way-memory.session-started",
+        values = emptyList(),
+        metadata = buildMap {
+            put("resumed", event.resumed)
+            event.latestPose?.let { put("latestPoseTimestampNs", it.deviceTimestampNs) }
+        },
+    )
+}
+
 class SensorCollector(context: Context) : SensorEventListener, LocationListener {
     private val appContext = context.applicationContext
     private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -701,13 +714,24 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     private fun onSessionLifecycle(event: SessionLifecycleEvent) {
-        if (event.resumed) {
-            event.latestPose?.let(poseFusion::seedFromPose)
+        val applyLifecycle = Runnable {
+            if (event.resumed) {
+                event.latestPose?.let(poseFusion::seedFromPose)
+            }
+            if (state.value.collecting) {
+                buildSessionLifecycleSample(event, SystemClock.elapsedRealtimeNanos())?.let(uploader::enqueue)
+            }
+            // For a new session there is no durable anchor to apply. For a
+            // resumed session the seed and lifecycle diagnostic are completed
+            // on the same handler as sensor callbacks before fusion resumes.
+            fusionReady = true
         }
-        // For a new session there is no durable anchor to apply. For a
-        // resumed session seedFromPose has already completed on this callback
-        // thread before fusionReady becomes visible to sensor callbacks.
-        fusionReady = true
+        val handler = sensorHandler
+        if (handler == null || Looper.myLooper() === handler.looper) {
+            applyLifecycle.run()
+        } else if (!handler.post(applyLifecycle)) {
+            applyLifecycle.run()
+        }
     }
 
     private fun onCaptureBlocked(message: String) {

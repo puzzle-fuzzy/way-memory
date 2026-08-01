@@ -8,7 +8,7 @@ const port = 8877;
 const baseUrl = `http://127.0.0.1:${port}`;
 const dbPath = resolve(cwd, ".data/acceptance-cases-check.sqlite");
 const disposableFiles = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
-const cases = ["baseline", "3d", "rotation", "loop", "stairs", "elevator", "recovery", "visual-recovery"] as const;
+const cases = ["baseline", "3d", "rotation", "loop", "stairs", "elevator", "recovery", "process-recovery", "network-interruption", "visual-recovery"] as const;
 
 const removeDisposableFiles = async () => {
   await Promise.all(disposableFiles.map((path) => rm(path, { force: true })));
@@ -159,6 +159,29 @@ const samplesFor = (acceptanceCase: typeof cases[number]) => {
         sample(1, 0, 0, 0, { motionMode: "walking" }),
         sample(2, 0.5, 0.2, 0.1, { sourceFlags: ["imu", "recovered-anchor"] }),
         sample(3, 0.8, 0.4, 0.2, { sourceFlags: ["imu", "recovered-anchor"] }),
+      ];
+    case "process-recovery":
+      return [
+        sample(1, 0, 0, 0, { motionMode: "walking" }),
+        sample(2, 0.5, 0.2, 0.1, { sourceFlags: ["imu", "recovered-anchor"] }),
+        sample(3, 0.8, 0.4, 0.2, { sourceFlags: ["imu", "recovered-anchor"] }),
+        sample(4, 0, 0, 0, {
+          sensorType: "way-memory.session-resumed",
+          values: [],
+          includePose: false,
+          metadata: { resumed: true, latestPoseTimestampNs: 1 },
+        }),
+      ];
+    case "network-interruption":
+      return [
+        sample(1, 0, 0, 0, { motionMode: "walking" }),
+        sample(2, 0.5, 0.2, 0.1),
+        sample(3, 0.8, 0.4, 0.2, {
+          sensorType: "way-memory.session-resumed",
+          values: [],
+          includePose: false,
+          metadata: { resumed: true, latestPoseTimestampNs: 2 },
+        }),
       ];
     case "visual-recovery":
       return [

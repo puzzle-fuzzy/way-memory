@@ -31,7 +31,7 @@ const maximumVisualResetJumpM = Number(valueFor("--max-visual-reset-jump-m") ?? 
 const maximumOutOfOrderSampleCount = Number(valueFor("--max-out-of-order") ?? "0");
 
 if (!sessionId) {
-  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|rotation|loop|stairs|elevator|recovery|visual-recovery] [--max-out-of-order=0] [--max-recovery-jump-m=1.5] [--max-visual-reset-jump-m=5] [--out=<file>]");
+  console.error("Usage: bun run acceptance:report --session=<session-id> [--case=baseline|3d|rotation|loop|stairs|elevator|recovery|process-recovery|network-interruption|visual-recovery] [--max-out-of-order=0] [--max-recovery-jump-m=1.5] [--max-visual-reset-jump-m=5] [--out=<file>]");
   process.exit(2);
 }
 
@@ -78,6 +78,10 @@ try {
       && sample.metadata?.trackingReset === true
   )).length;
   const visualStatusSamples = rawSamples.filter((sample) => sample.sensorType === "arcore.visual-status");
+  const resumedLifecycleSamples = rawSamples.filter((sample) => (
+    sample.sensorType === "way-memory.session-resumed"
+      && sample.metadata?.resumed === true
+  ));
   const visualStatusFailureReasons = [...new Set(visualStatusSamples
     .map((sample) => sample.metadata?.failureReason)
     .filter((item): item is string => typeof item === "string" && item.length > 0))].sort();
@@ -185,6 +189,7 @@ try {
     routeOrderingClean: Number(session.outOfOrderSampleCount ?? 0) <= maximumOutOfOrderSampleCount,
     closureConsistent: closure.adjusted !== true || (closure.status === "closed" && corrected.length >= poses.length),
     recoveryAnchorContinuity,
+    sessionResumeEvidence: resumedLifecycleSamples.length > 0,
     visualResetEvidence: visualResetPoseCount > 0,
     visualResetRawEvidence: visualTrackingResetSampleCount > 0,
     visualResetContinuity: visualResetJumpM !== null && visualResetJumpM <= maximumVisualResetJumpM,
@@ -210,6 +215,8 @@ try {
       && eventTypes.includes("elevator-exit")
       && axes.zM.span >= minimumAxisM,
     recovery: checks.sessionLoaded && checks.poseStream && recoveryAnchorContinuity,
+    "process-recovery": checks.sessionLoaded && checks.poseStream && checks.recoveryAnchorContinuity && checks.sessionResumeEvidence,
+    "network-interruption": checks.sessionLoaded && checks.poseStream && checks.sessionResumeEvidence && checks.rawReplayBounded && checks.sampleIdsUniqueInReplay && checks.serverBounds,
     "visual-recovery": checks.sessionLoaded
       && checks.poseStream
       && checks.poseTimestampMonotonic
@@ -269,6 +276,10 @@ try {
       continuity: recoveryAnchorContinuity,
       firstRecoveredTimestampNs: recoveryFirstPose?.deviceTimestampNs ?? null,
       previousTimestampNs: recoveryPreviousPose?.deviceTimestampNs ?? null,
+    },
+    transportRecovery: {
+      resumedSessionCount: resumedLifecycleSamples.length,
+      sourceSensorType: "way-memory.session-resumed",
     },
     visualRecovery: {
       resetPoseCount: visualResetPoseCount,

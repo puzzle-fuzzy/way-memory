@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$')]
     [string]$SessionId,
-    [ValidateSet("baseline", "3d", "rotation", "loop", "stairs", "elevator", "recovery", "visual-recovery")]
+    [ValidateSet("baseline", "3d", "rotation", "loop", "stairs", "elevator", "recovery", "process-recovery", "network-interruption", "visual-recovery")]
     [string]$Case = "baseline",
     [string]$ApiBase = "http://101.35.246.159",
     [ValidateRange(0, 1024)]
