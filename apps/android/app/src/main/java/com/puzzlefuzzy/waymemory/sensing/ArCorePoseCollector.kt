@@ -71,6 +71,13 @@ class ArCorePoseCollector(
     private var wasTracking = false
 
     fun createView(context: Context): GLSurfaceView {
+        // An Activity recreation (for example, an orientation change) creates
+        // a new GL context and texture name while the session may remain
+        // alive in the application-scoped collector. Rebind the camera to the
+        // new texture, but deliberately keep initialTranslation so the route
+        // does not jump to a new visual origin.
+        surface?.onPause()
+        textureConfigured = false
         return GLSurfaceView(context).also { view ->
             view.setEGLContextClientVersion(2)
             view.setRenderer(Renderer())
