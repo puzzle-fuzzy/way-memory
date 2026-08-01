@@ -67,6 +67,7 @@ class PoseFusionEngine {
     private var visualAlignmentPositionY = 0f
     private var visualLoopClosureEmitted = false
     private var visualResetPending = false
+    private var visualTrackingNeedsReset = false
     private var hasPositionAnchor = false
     private var hasRecoveredAnchor = false
 
@@ -120,6 +121,7 @@ class PoseFusionEngine {
         visualAlignmentPositionY = 0f
         visualLoopClosureEmitted = false
         visualResetPending = false
+        visualTrackingNeedsReset = false
         hasPositionAnchor = false
         hasRecoveredAnchor = false
     }
@@ -254,7 +256,10 @@ class PoseFusionEngine {
             // Keep the fusion boundary defensive even when a future visual
             // adapter or a replay feeds paused/lost frames directly. A frame
             // without a valid visual pose must never move the unified route.
-            if (hasVisual) visualResetPending = true
+            if (hasVisual) {
+                visualResetPending = true
+                visualTrackingNeedsReset = true
+            }
             return null
         }
         val previousVisualTimestampNs = lastVisualTimestampNs
@@ -265,8 +270,9 @@ class PoseFusionEngine {
         // when the source reports lower quality so the fused route exposes
         // uncertainty instead of presenting visual odometry as survey-grade.
         lastVisualAccuracyM = (visualAccuracyPrior + (1f - visualConfidence) * 1.5f).coerceIn(0.5f, 5f)
-        if (sample.trackingReset) {
+        if (sample.trackingReset || visualTrackingNeedsReset) {
             resetVisualReference(sample)
+            visualTrackingNeedsReset = false
             return null
         }
         if (!hasVisual) {

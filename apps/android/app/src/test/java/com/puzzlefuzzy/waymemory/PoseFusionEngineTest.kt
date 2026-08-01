@@ -335,8 +335,11 @@ class PoseFusionEngineTest {
         assertNotNull(stable)
         val paused = engine.updateVisual(VisualPoseSample(timestampNs + 300_000_000L, 40f, -20f, 5f, 0.5f, 1f, "paused"))
         assertEquals(null, paused)
+        val recoveredVisual = engine.updateVisual(VisualPoseSample(timestampNs + 400_000_000L, 40f, -20f, 5f, 0.5f, 1f, "tracking"))
+        assertEquals(null, recoveredVisual)
         val next = engine.updateImu(timestampNs + 400_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
         assertNotNull(next)
+        assertTrue(next?.pose?.sourceFlags?.contains("visual-reset") == true)
         assertTrue("paused visual frame created a false movement", kotlin.math.abs((next?.pose?.xM ?: 0f) - (stable?.pose?.xM ?: 0f)) < 0.01f)
         assertTrue("paused visual frame created a false movement", kotlin.math.abs((next?.pose?.yM ?: 0f) - (stable?.pose?.yM ?: 0f)) < 0.01f)
     }
