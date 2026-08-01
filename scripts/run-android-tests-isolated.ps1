@@ -15,14 +15,37 @@ function Assert-WorkspacePath([string] $path) {
     }
 }
 
+function Remove-IsolatedGradleHome {
+    if (-not (Test-Path -LiteralPath $isolated)) { return }
+
+    $previousGradleHome = $env:GRADLE_USER_HOME
+    try {
+        $env:GRADLE_USER_HOME = $isolated
+        Push-Location (Join-Path $repo "apps\android")
+        try { & .\gradlew.bat --stop | Out-Null } catch { }
+        finally { Pop-Location }
+    } finally {
+        $env:GRADLE_USER_HOME = $previousGradleHome
+    }
+
+    # Windows can keep the daemon registry/native file-event lock briefly
+    # after --stop returns. Retry the exact generated directory instead of
+    # turning a successful Android build into a false failure.
+    for ($attempt = 1; $attempt -le 12; $attempt += 1) {
+        if (-not (Test-Path -LiteralPath $isolated)) { return }
+        try {
+            Remove-Item -LiteralPath $isolated -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $isolated)) { return }
+        } catch {
+            Start-Sleep -Milliseconds ([Math]::Min(2000, $attempt * 200))
+        }
+    }
+    throw "Unable to clean the isolated Gradle home after retries: $isolated"
+}
+
 Assert-WorkspacePath $isolated
 if (Test-Path -LiteralPath $isolated) {
-    $staleGradleHome = $env:GRADLE_USER_HOME
-    $env:GRADLE_USER_HOME = $isolated
-    Push-Location (Join-Path $repo "apps\android")
-    try { & .\gradlew.bat --stop | Out-Null } finally { Pop-Location }
-    $env:GRADLE_USER_HOME = $staleGradleHome
-    Remove-Item -LiteralPath $isolated -Recurse -Force
+    Remove-IsolatedGradleHome
 }
 
 try {
@@ -61,10 +84,5 @@ try {
     }
 } finally {
     Assert-WorkspacePath $isolated
-    if (Test-Path -LiteralPath $isolated) {
-        $env:GRADLE_USER_HOME = $isolated
-        Push-Location (Join-Path $repo "apps\android")
-        try { & .\gradlew.bat --stop | Out-Null } finally { Pop-Location }
-        Remove-Item -LiteralPath $isolated -Recurse -Force
-    }
+    Remove-IsolatedGradleHome
 }

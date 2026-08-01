@@ -17,6 +17,8 @@ The API now has an opt-in enforced authorization mode for the single-node MVP. S
 
 The Android client now exchanges a ten-minute dashboard-generated pairing code over HTTPS, encrypts the resulting device token with an Android Keystore-backed AES-GCM key, and exchanges that token for a short-lived WebSocket ticket before connecting. The dashboard sign-in and pairing-code flow are implemented; the long-term token field remains a legacy acceptance bridge, not the normal onboarding path.
 
+Android cloud backup and device transfer explicitly exclude the app-private capture queue (raw sensor/location samples and recovery markers) and the Keystore-backed credential preferences. A device migration must not silently copy private route data or a device identity to another phone.
+
 Verified-route navigation now has a separate one-time handoff boundary. The dashboard receives a five-minute route code, the API stores only its SHA-256 hash, and the device consumes it atomically during `session.start`. The code is owner-scoped and does not replace the device token, expose a route list, or authorize raw replay. It is suitable for software-only field testing, but the final product still needs a polished authenticated enrollment and accessibility flow.
 
 ## Required production architecture
