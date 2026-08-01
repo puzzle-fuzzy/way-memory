@@ -562,6 +562,10 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
                         put("trackingState", sample.trackingState)
                         put("confidence", sample.confidence)
                         put("trackingReset", sample.trackingReset)
+                        sample.qx?.let { put("qx", it) }
+                        sample.qy?.let { put("qy", it) }
+                        sample.qz?.let { put("qz", it) }
+                        sample.qw?.let { put("qw", it) }
                         sample.failureReason?.let { put("failureReason", it) }
                     },
                     pose = if (poseAccepted) poseUpdate?.pose else null,

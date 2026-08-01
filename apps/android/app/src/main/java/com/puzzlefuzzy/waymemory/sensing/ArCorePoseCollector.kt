@@ -43,6 +43,10 @@ data class VisualPoseSample(
     val trackingState: String,
     val failureReason: String? = null,
     val trackingReset: Boolean = false,
+    val qx: Float? = null,
+    val qy: Float? = null,
+    val qz: Float? = null,
+    val qw: Float? = null,
 )
 
 private const val AVAILABILITY_RETRY_DELAY_MS = 500L
@@ -310,6 +314,7 @@ class ArCorePoseCollector(
                 hasEmittedTrackingFrame = true
                 val anchorRelativePose = anchor.pose.inverse().compose(camera.pose)
                 val relativeTranslation = anchorRelativePose.translation
+                val relativeRotation = anchorRelativePose.rotationQuaternion
                 if (!trackingReset && frame.timestamp - lastEmittedTimestampNs < 100_000_000L) return
                 lastEmittedTimestampNs = frame.timestamp
 
@@ -326,6 +331,10 @@ class ArCorePoseCollector(
                     confidence = ARCORE_TRACKING_CONFIDENCE_PRIOR,
                     trackingState = trackingState.name.lowercase(),
                     trackingReset = trackingReset,
+                    qx = relativeRotation[0],
+                    qy = relativeRotation[1],
+                    qz = relativeRotation[2],
+                    qw = relativeRotation[3],
                 )
                 emitStatus(
                     VisualTrackingStatus(
