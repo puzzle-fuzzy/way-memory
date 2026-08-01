@@ -16,12 +16,12 @@
 
 ## 最新证据快照（2026-08-01）
 
-- 当前运行时代码提交为 `d8d2f7d`，包含 ARCore 首帧重置、Anchor 相对坐标保护和气压过期状态修复；后续提交只补充现场 APK provenance 与验收文档。
+- 当前运行时代码提交为 `2bef800`，包含 ARCore 首帧重置、Anchor 相对坐标保护、Anchor 状态诊断和气压过期状态修复；后续提交只补充现场 APK provenance 与验收文档。
 - Android 隔离全量门禁通过：5 项仪器测试、单元测试、Debug/Release 构建。
 - 服务端门禁通过：实时 WebSocket、重启持久化、动态传感器清单、鉴权/角色隔离、原始回放、幂等、重连、生命周期、保留策略、闭环、路线交接和 10 个合成场景验收；闭环累计距离和 `process-recovery`/`network-interruption` 报告契约已覆盖。
 - 历史模拟器协议链路曾用 Debug APK 实测：17 个可用传感器、17 个模拟 GPS 点、422 个 Pose 点、16,721 个样本，raw replay 上限为 1,024 条；其 APK 来源提交为旧提交 `b7d3864`，只作为历史协议证据，不作为当前代码或实体设备 provenance。模拟器不支持 ARCore，且该证据不计入实体手机传感器验收。
 - 当前运行时生产发布包来源为 `7dbd487994187cf9490835b87c1983e48052217a`（随后仅追加了文档证据提交），已在腾讯云 `/tmp/way-memory-release-7dbd487` 暂存；`bun run release:build`、`bun run smoke:release` 和远端 9 个 payload 哈希校验均通过。远端尚未执行 `install-release.sh`，生产环境文件、DNS 和证书条件仍未满足，因此没有执行生产重启。
-- 当前可供实体传感器验收的 Debug APK 已由 `9c9803b` 构建，API origin 为 `https://way-memory.yxswy.com`，工件目录为 `artifacts/android-release/9c9803b044f84997021af1a3189f10258233a5e2-debug`，SHA-256 为 `de7983a07c01e1d76fcb78566fecce3bca7d2495c66aa4a5cafd0e80d3968aa6`；manifest 校验通过，`-RequirePhysical -RequireArCore` 预检已拒绝当前模拟器，未安装。
+- 当前可供实体传感器验收的 Debug APK 已由 `2bef800` 构建，API origin 为 `https://way-memory.yxswy.com`，工件目录为 `artifacts/android-release/2bef8001a1aa6aa705d5db9d4f3b66eb36057f31-debug`，SHA-256 为 `cf32e129437aa3b2b31c466f1f59aef1bafba65c78d06f08755aa1cacdced3ea`；manifest 校验通过，`-RequirePhysical -RequireArCore` 预检已拒绝当前模拟器，未安装。
 - 当前公网预检仍未通过：`way-memory.yxswy.com` 解析到 `198.18.0.248`，不是预期生产主机 `101.35.246.159`；远端服务进程虽为 active，但生产环境文件、Nginx 配置和 ACME 证书均不存在。当前唯一 ADB 设备仍是 API 36 模拟器，没有实体 Android 手机。
 
 ## 合成验收 smoke 的边界
