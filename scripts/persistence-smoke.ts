@@ -75,6 +75,17 @@ try {
           motionMode: "stationary",
           stationary: true,
         },
+      }, {
+        deviceTimestampNs: 2,
+        sensorType: "arcore.visual-status",
+        values: [],
+        metadata: {
+          available: true,
+          active: true,
+          trackingState: "paused",
+          failureReason: "INSUFFICIENT_FEATURES",
+          detail: "等待视觉特征",
+        },
       }],
     }),
   });
@@ -86,11 +97,13 @@ try {
   await waitForHealth();
   const sessions = await requestJson("/api/sessions") as Array<{ sessionId: string; status: string; posePointCount?: number }>;
   const restored = sessions.find((item) => item.sessionId === session.sessionId);
-  const raw = await requestJson(`/api/sessions/${session.sessionId}/raw`) as { retainedSamples: number; samples?: Array<{ metadata?: { trackingReset?: boolean } }> };
-  if (!restored || restored.status !== "stopped" || restored.posePointCount !== 1 || raw.retainedSamples !== 1 || raw.samples?.[0]?.metadata?.trackingReset !== true) {
+  const raw = await requestJson(`/api/sessions/${session.sessionId}/raw`) as { retainedSamples: number; samples?: Array<{ sensorType?: string; metadata?: { trackingReset?: boolean; trackingState?: string } }> };
+  const restoredSnapshot = await requestJson(`/api/sessions/${session.sessionId}`) as { latestSensors?: Array<{ sensorType?: string; metadata?: { trackingState?: string; failureReason?: string } }> };
+  const restoredVisualStatus = restoredSnapshot.latestSensors?.find((sample) => sample.sensorType === "arcore.visual-status");
+  if (!restored || restored.status !== "stopped" || restored.posePointCount !== 1 || raw.retainedSamples !== 2 || raw.samples?.find((sample) => sample.metadata?.trackingReset === true) === undefined || raw.samples?.find((sample) => sample.sensorType === "arcore.visual-status")?.metadata?.trackingState !== "paused" || restoredVisualStatus?.metadata?.failureReason !== "INSUFFICIENT_FEATURES") {
     throw new Error("persistence assertion failed");
   }
-  console.log("Persistence smoke passed", { sessionId: session.sessionId, posePoints: restored.posePointCount, raw: raw.retainedSamples });
+  console.log("Persistence smoke passed", { sessionId: session.sessionId, posePoints: restored.posePointCount, raw: raw.retainedSamples, visualStatus: true });
 } finally {
   if (first && !first.killed) first.kill();
   if (second && !second.killed) second.kill();
