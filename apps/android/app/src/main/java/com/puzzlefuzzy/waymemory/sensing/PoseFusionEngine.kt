@@ -37,6 +37,8 @@ class PoseFusionEngine {
     private var lastEmitTimestampNs = 0L
     private var lastPressureTimestampNs = 0L
     private var pressureReferenceHpa: Float? = null
+    /** Absolute fused Z assigned to the first pressure sample of this process. */
+    private var pressureAltitudeOffsetM = 0f
     private var barometerAltitudeM = 0f
     private var barometerVerticalSpeedMps = 0f
     private var lastStepTimestampNs = 0L
@@ -95,6 +97,7 @@ class PoseFusionEngine {
         lastEmitTimestampNs = 0L
         lastPressureTimestampNs = 0L
         pressureReferenceHpa = null
+        pressureAltitudeOffsetM = 0f
         barometerAltitudeM = 0f
         barometerVerticalSpeedMps = 0f
         lastStepTimestampNs = 0L
@@ -145,6 +148,7 @@ class PoseFusionEngine {
             // height; treating this sample as absolute zero would snap the
             // recovered route back to the floor.
             pressureReferenceHpa = pressureHpa
+            pressureAltitudeOffsetM = position[2]
             barometerAltitudeM = position[2]
             barometerVerticalSpeedMps = 0f
             lastPressureTimestampNs = timestampNs
@@ -152,7 +156,8 @@ class PoseFusionEngine {
             return
         }
         val reference = pressureReferenceHpa ?: return
-        val rawAltitude = (44_330.0 * (1.0 - (pressureHpa / reference).toDouble().pow(0.190294957))).toFloat()
+        val relativeAltitude = (44_330.0 * (1.0 - (pressureHpa / reference).toDouble().pow(0.190294957))).toFloat()
+        val rawAltitude = pressureAltitudeOffsetM + relativeAltitude
         val previousAltitude = barometerAltitudeM
         barometerAltitudeM = if (!hasBarometer) rawAltitude else barometerAltitudeM * 0.86f + rawAltitude * 0.14f
         val elapsedNs = timestampNs - lastPressureTimestampNs
@@ -239,6 +244,7 @@ class PoseFusionEngine {
         position[0] += (targetEast - position[0]) * gain
         position[1] += (targetNorth - position[1]) * gain
         position[2] += (targetAltitude - position[2]) * (gain * 0.7f)
+        shiftBarometerReference(position[2] - previousPosition[2])
         if (hasStepTrack) {
             stepTrackX += position[0] - previousPosition[0]
             stepTrackY += position[1] - previousPosition[1]
@@ -367,6 +373,7 @@ class PoseFusionEngine {
         position[0] += (targetX - position[0]) * 0.58f
         position[1] += (targetY - position[1]) * 0.58f
         position[2] += (targetZ - position[2]) * 0.58f
+        shiftBarometerReference(position[2] - previousPosition[2])
         if (hasStepTrack) {
             stepTrackX += position[0] - previousPosition[0]
             stepTrackY += position[1] - previousPosition[1]
@@ -680,6 +687,13 @@ class PoseFusionEngine {
         if (markReset) visualResetPending = true
     }
 
+    /** Keep the pressure-relative height aligned after another source moves Z. */
+    private fun shiftBarometerReference(deltaZ: Float) {
+        if (!hasBarometer || !deltaZ.isFinite() || abs(deltaZ) < 0.0001f) return
+        pressureAltitudeOffsetM += deltaZ
+        barometerAltitudeM += deltaZ
+    }
+
     private fun magnitude(values: FloatArray): Float =
         sqrt(values[0] * values[0] + values[1] * values[1] + values[2] * values[2])
 
@@ -706,9 +720,11 @@ class PoseFusionEngine {
             || !pose.xM.isFinite() || !pose.yM.isFinite() || !pose.zM.isFinite()
             || !pose.velocityXMps.isFinite() || !pose.velocityYMps.isFinite() || !pose.velocityZMps.isFinite()
         ) return
+        val previousZ = position[2]
         position[0] = pose.xM
         position[1] = pose.yM
         position[2] = pose.zM
+        shiftBarometerReference(pose.zM - previousZ)
         velocity[0] = pose.velocityXMps
         velocity[1] = pose.velocityYMps
         velocity[2] = pose.velocityZMps

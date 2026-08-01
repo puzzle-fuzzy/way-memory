@@ -1,6 +1,7 @@
 package com.puzzlefuzzy.waymemory
 
 import com.puzzlefuzzy.waymemory.sensing.PoseFusionEngine
+import com.puzzlefuzzy.waymemory.sensing.PoseEstimateSample
 import com.puzzlefuzzy.waymemory.sensing.VisualPoseSample
 import com.puzzlefuzzy.waymemory.sensing.arCoreDeltaToDisplayFrame
 import org.junit.Assert.assertArrayEquals
@@ -252,6 +253,40 @@ class PoseFusionEngineTest {
         }
 
         assertTrue(elevatorEvent)
+    }
+
+    @Test
+    fun pressureBaselineStaysAtRecoveredVerticalAnchor() {
+        val engine = PoseFusionEngine()
+        engine.seedFromPose(
+            PoseEstimateSample(
+                deviceTimestampNs = 1_000_000_000L,
+                xM = 1f,
+                yM = 2f,
+                zM = 8f,
+                velocityXMps = 0f,
+                velocityYMps = 0f,
+                velocityZMps = 0f,
+                accuracyM = 2f,
+                confidence = 0.8f,
+                source = "fused",
+                sourceFlags = listOf("imu", "barometer"),
+                motionMode = "stationary",
+                stationary = true,
+            ),
+        )
+
+        var timestampNs = 1_100_000_000L
+        engine.updatePressure(1013.25f, timestampNs)
+        var last = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0f)
+        repeat(20) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(1013.25f, timestampNs)
+            last = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0f)
+        }
+
+        assertNotNull(last)
+        assertEquals(8f, last?.pose?.zM ?: Float.NaN, 0.2f)
     }
 
     @Test
