@@ -4,6 +4,8 @@
 
 Sensor and location callbacks are registered on a dedicated `HandlerThread`, not the Activity main thread. Local fusion still consumes every callback while the bounded diagnostic queue and UI state updates are kept off the rendering path; the transport limiter only limits persisted/uploaded diagnostics.
 
+At capture start, Android inventories the union of the static `TYPE_ALL` list and the API 24+ dynamic sensor list, de-duplicated by the platform string type and sensor ID. A `DynamicSensorCallback` registers a sensor that appears during capture and marks a disconnected dynamic sensor unavailable without allowing it to create a second inventory entry. The session inventory therefore records the device capability snapshot and registration outcome, while the raw stream remains the authoritative evidence of which sensors actually emitted samples.
+
 ARCore is different: its camera session is attached to the visible Activity and is paused on `onPause`. The route continues with non-visual fusion while the phone is locked or another app is in front. When the Activity returns, the same collector and session resume; orientation changes do not request a new capture start.
 
 The service is declared with the Android location foreground-service type. Precise location is still required for a trustworthy GNSS route. Camera permission is optional for the product because unsupported devices must retain a usable IMU/GNSS/barometer fallback.
