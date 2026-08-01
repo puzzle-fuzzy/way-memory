@@ -106,10 +106,12 @@ export interface RouteNode {
 }
 
 export type NavigationStatus = "on-route" | "near-route" | "off-route" | "no-fix" | "route-not-ready";
+export type NavigationSource = "gnss" | "local-pose" | "none";
 
 export interface NavigationState {
   routeId: string;
   status: NavigationStatus;
+  source: NavigationSource;
   progressM?: number;
   remainingM?: number;
   distanceToRouteM?: number;

@@ -223,7 +223,22 @@ try {
   const navigationAccepted = await nextMessage(navigator);
   if (navigationAccepted.type !== "samples.accepted") throw new Error(`navigation sample failed: ${JSON.stringify(navigationAccepted)}`);
   const navigationSession = await requestJson(`/api/sessions/${navigationSessionId}`);
-  if (navigationSession.response.status !== 200 || navigationSession.body.navigation?.status !== "on-route" || typeof navigationSession.body.navigation?.progressM !== "number" || typeof navigationSession.body.navigation?.remainingM !== "number") throw new Error(`navigation projection failed: ${JSON.stringify(navigationSession.body.navigation)}`);
+  if (navigationSession.response.status !== 200 || navigationSession.body.navigation?.status !== "on-route" || navigationSession.body.navigation?.source !== "gnss" || typeof navigationSession.body.navigation?.progressM !== "number" || typeof navigationSession.body.navigation?.remainingM !== "number") throw new Error(`navigation projection failed: ${JSON.stringify(navigationSession.body.navigation)}`);
+  navigator.send(JSON.stringify({
+    type: "samples",
+    sessionId: navigationSessionId,
+    samples: [{
+      sampleId: "route-navigation-local-pose",
+      deviceTimestampNs: 2_000_000_000,
+      sensorType: "fused.pose",
+      values: [0.5, 0, 0],
+      pose: { deviceTimestampNs: 2_000_000_000, xM: 0.5, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.6, source: "fused", frame: "local-enu", sourceFlags: ["imu", "relative-only"], motionMode: "walking", stationary: false },
+    }],
+  }));
+  const localPoseAccepted = await nextMessage(navigator);
+  if (localPoseAccepted.type !== "samples.accepted") throw new Error(`local-pose navigation sample failed: ${JSON.stringify(localPoseAccepted)}`);
+  const localPoseSession = await requestJson(`/api/sessions/${navigationSessionId}`);
+  if (localPoseSession.body.track?.length !== 1 || localPoseSession.body.navigation?.source !== "local-pose" || localPoseSession.body.navigation?.status !== "near-route" || typeof localPoseSession.body.navigation?.progressM !== "number") throw new Error(`local-pose navigation fallback failed: ${JSON.stringify(localPoseSession.body.navigation)}`);
   navigator.send(JSON.stringify({
     type: "samples",
     sessionId: navigationSessionId,

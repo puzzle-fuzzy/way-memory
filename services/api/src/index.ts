@@ -99,6 +99,9 @@ type SessionRuntime = {
   lastRelativeTimestampNs?: number;
   lastMotionEventTimestampNs?: number;
   navigationAltitudeOffsetM?: number;
+  navigationPoseAnchor?: PoseEstimate;
+  navigationRoutePoseAnchor?: { xM: number; yM: number; zM: number };
+  navigationPoseRouteProgressM?: number;
 };
 
 const sessionRuntime = new Map<string, SessionRuntime>();
@@ -161,7 +164,7 @@ const trackDistanceM = (track: TrackPoint[]) => {
 const navigationStateFor = (route: StoredRoute, location: TrackPoint, altitudeOffsetM?: number): NavigationState => {
   const updatedAt = new Date().toISOString();
   const track = route.track;
-  if (track.length < 2) return { routeId: route.routeId, status: "route-not-ready", updatedAt };
+  if (track.length < 2) return { routeId: route.routeId, status: "route-not-ready", source: "none", updatedAt };
   const earthRadiusM = 6_371_000;
   const origin = track[0];
   const routeHasAltitude = track.every((point) => typeof point.altitudeM === "number" && Number.isFinite(point.altitudeM));
@@ -215,7 +218,7 @@ const navigationStateFor = (route: StoredRoute, location: TrackPoint, altitudeOf
     }
     cumulativeM += segmentLengthM;
   }
-  if (!Number.isFinite(bestDistanceM) || totalM < 0.01) return { routeId: route.routeId, status: "route-not-ready", updatedAt };
+  if (!Number.isFinite(bestDistanceM) || totalM < 0.01) return { routeId: route.routeId, status: "route-not-ready", source: "none", updatedAt };
   const start = track[bestIndex];
   const end = track[Math.min(bestIndex + 1, track.length - 1)];
   const nearestLat = start.lat + (end.lat - start.lat) * bestT;
@@ -232,6 +235,7 @@ const navigationStateFor = (route: StoredRoute, location: TrackPoint, altitudeOf
   return {
     routeId: route.routeId,
     status,
+    source: "gnss",
     progressM: Math.min(totalM, bestProgressM),
     remainingM: Math.max(0, totalM - bestProgressM),
     distanceToRouteM: bestDistanceM,
@@ -242,6 +246,142 @@ const navigationStateFor = (route: StoredRoute, location: TrackPoint, altitudeOf
     ...(targetAltitudeM !== undefined && nearestAltitudeM !== undefined ? { altitudeDeltaM: targetAltitudeM - nearestAltitudeM } : {}),
     accuracyM,
     updatedAt,
+  };
+};
+
+type PoseVector = { xM: number; yM: number; zM: number };
+
+const posePathTotalM = (poses: PoseEstimate[]) => poseTrackDistanceM(poses);
+
+const poseAtPathProgress = (poses: PoseEstimate[], targetProgressM: number): PoseVector | undefined => {
+  if (!poses.length) return undefined;
+  if (poses.length === 1) return { xM: poses[0].xM, yM: poses[0].yM, zM: poses[0].zM };
+  const target = Math.max(0, targetProgressM);
+  let cumulativeM = 0;
+  for (let index = 1; index < poses.length; index += 1) {
+    const previous = poses[index - 1];
+    const current = poses[index];
+    const segmentM = poseDistanceM(previous, current);
+    if (segmentM < 0.001) continue;
+    if (cumulativeM + segmentM >= target) {
+      const ratio = Math.max(0, Math.min(1, (target - cumulativeM) / segmentM));
+      return {
+        xM: previous.xM + (current.xM - previous.xM) * ratio,
+        yM: previous.yM + (current.yM - previous.yM) * ratio,
+        zM: previous.zM + (current.zM - previous.zM) * ratio,
+      };
+    }
+    cumulativeM += segmentM;
+  }
+  const last = poses.at(-1)!;
+  return { xM: last.xM, yM: last.yM, zM: last.zM };
+};
+
+const geographicPathTotalM = (track: TrackPoint[]) => {
+  let totalM = 0;
+  for (let index = 1; index < track.length; index += 1) totalM += geographicDistanceM(track[index - 1], track[index]);
+  return totalM;
+};
+
+const trackPointAtGeographicProgress = (track: TrackPoint[], targetProgressM: number): TrackPoint | undefined => {
+  if (!track.length) return undefined;
+  if (track.length === 1) return track[0];
+  const target = Math.max(0, targetProgressM);
+  let cumulativeM = 0;
+  for (let index = 1; index < track.length; index += 1) {
+    const previous = track[index - 1];
+    const current = track[index];
+    const segmentM = geographicDistanceM(previous, current);
+    if (segmentM < 0.01) continue;
+    if (cumulativeM + segmentM >= target) {
+      const ratio = Math.max(0, Math.min(1, (target - cumulativeM) / segmentM));
+      return {
+        ...current,
+        lat: previous.lat + (current.lat - previous.lat) * ratio,
+        lng: previous.lng + (current.lng - previous.lng) * ratio,
+        accuracyM: Math.max(previous.accuracyM, current.accuracyM),
+        confidence: Math.min(previous.confidence, current.confidence),
+        ...(typeof previous.altitudeM === "number" && typeof current.altitudeM === "number"
+          ? { altitudeM: previous.altitudeM + (current.altitudeM - previous.altitudeM) * ratio }
+          : {}),
+      };
+    }
+    cumulativeM += segmentM;
+  }
+  return track.at(-1);
+};
+
+const navigationStateForPose = (
+  route: StoredRoute,
+  pose: PoseEstimate,
+  runtime: SessionRuntime,
+): NavigationState | undefined => {
+  const startPose = runtime.navigationPoseAnchor;
+  const routeAnchor = runtime.navigationRoutePoseAnchor;
+  if (route.poseTrack.length < 2 || route.track.length < 2 || !startPose || !routeAnchor) return undefined;
+  const target = {
+    xM: routeAnchor.xM + pose.xM - startPose.xM,
+    yM: routeAnchor.yM + pose.yM - startPose.yM,
+    zM: routeAnchor.zM + pose.zM - startPose.zM,
+  };
+  let cumulativeM = 0;
+  let totalM = 0;
+  let bestDistanceM = Number.POSITIVE_INFINITY;
+  let bestProgressM = 0;
+  for (let index = 1; index < route.poseTrack.length; index += 1) {
+    const previous = route.poseTrack[index - 1];
+    const current = route.poseTrack[index];
+    const dx = current.xM - previous.xM;
+    const dy = current.yM - previous.yM;
+    const dz = current.zM - previous.zM;
+    const segmentM = Math.hypot(dx, dy, dz);
+    if (segmentM < 0.001) continue;
+    const ratio = Math.max(0, Math.min(1, (
+      (target.xM - previous.xM) * dx
+      + (target.yM - previous.yM) * dy
+      + (target.zM - previous.zM) * dz
+    ) / (segmentM ** 2)));
+    const nearest = {
+      xM: previous.xM + dx * ratio,
+      yM: previous.yM + dy * ratio,
+      zM: previous.zM + dz * ratio,
+    };
+    const distanceM = Math.hypot(target.xM - nearest.xM, target.yM - nearest.yM, target.zM - nearest.zM);
+    if (distanceM < bestDistanceM) {
+      bestDistanceM = distanceM;
+      bestProgressM = cumulativeM + segmentM * ratio;
+    }
+    cumulativeM += segmentM;
+    totalM += segmentM;
+  }
+  if (!Number.isFinite(bestDistanceM) || totalM < 0.01) return undefined;
+  const geographicTotalM = geographicPathTotalM(route.track);
+  if (geographicTotalM < 0.01) return undefined;
+  const geographicProgressM = Math.min(geographicTotalM, bestProgressM / totalM * geographicTotalM);
+  const nearest = trackPointAtGeographicProgress(route.track, geographicProgressM);
+  if (!nearest) return undefined;
+  const relativeOnly = pose.sourceFlags.includes("relative-only");
+  const accuracyM = Math.max(0.5, pose.accuracyM + startPose.accuracyM * 0.5);
+  const status = relativeOnly
+    ? bestDistanceM <= Math.max(4, accuracyM) ? "near-route" : "off-route"
+    : bestDistanceM <= Math.max(3, accuracyM * 2)
+      ? "on-route"
+      : bestDistanceM <= Math.max(10, accuracyM * 3)
+        ? "near-route"
+        : "off-route";
+  return {
+    routeId: route.routeId,
+    status,
+    source: "local-pose",
+    progressM: geographicProgressM,
+    remainingM: Math.max(0, geographicTotalM - geographicProgressM),
+    distanceToRouteM: bestDistanceM,
+    nearestPointIndex: Math.max(0, Math.floor((route.track.length - 1) * geographicProgressM / geographicTotalM)),
+    nearestLat: nearest.lat,
+    nearestLng: nearest.lng,
+    ...(typeof nearest.altitudeM === "number" ? { nearestAltitudeM: nearest.altitudeM } : {}),
+    accuracyM,
+    updatedAt: new Date().toISOString(),
   };
 };
 
@@ -1168,7 +1308,7 @@ const createSession = (input: CreateSessionInput, ownerId = LOCAL_OWNER_ID): Obs
   if (routeId && route?.ownerId !== ownerId) throw new Error("invalid_route");
   if (input.mode === "navigation" && (!routeId || route?.status !== "verified")) throw new Error("invalid_navigation_route");
   const navigation = input.mode === "navigation" && routeId
-    ? { routeId, status: route.track.length >= 2 ? "no-fix" as const : "route-not-ready" as const, updatedAt: new Date().toISOString() }
+    ? { routeId, status: route.track.length >= 2 ? "no-fix" as const : "route-not-ready" as const, source: "none" as const, updatedAt: new Date().toISOString() }
     : undefined;
   const session: ObservationSession = {
     sessionId: crypto.randomUUID(),
@@ -1214,6 +1354,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   const wasClosureAdjusted = session.closure.adjusted;
   const runtime = sessionRuntime.get(session.sessionId) ?? { rawSamples: [] };
   const navigationRoute = session.mode === "navigation" && session.routeId ? routes.get(session.routeId) : undefined;
+  let navigationGnssUpdated = false;
   runtime.seenSampleIds ??= new Set<string>();
   runtime.seenSampleIdOrder ??= [];
   const normalizedSamples = rawSamples
@@ -1257,6 +1398,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
         sampleOutOfOrder = true;
       } else {
         runtime.lastPoseTimestampNs = sample.pose.deviceTimestampNs;
+        runtime.lastPose = sample.pose;
         session.poseTrack.push(sample.pose);
         session.correctedPoseTrack?.push(sample.pose);
         posePoints.push(sample.pose);
@@ -1319,6 +1461,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
             navigation = navigationStateFor(navigationRoute, point, runtime.navigationAltitudeOffsetM);
           }
           session.navigation = navigation;
+          navigationGnssUpdated = true;
         }
         rememberLocation(session, sample.location, sample.deviceTimestampNs);
         upsertSensor(session, sample, receivedAt, "gnss");
@@ -1333,6 +1476,41 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
     if (sampleOutOfOrder) {
       session.outOfOrderSampleCount += 1;
       session.droppedSampleCount += 1;
+    }
+  }
+  if (navigationRoute) {
+    const navigation = session.navigation;
+    const locationTimestampNs = session.track.at(-1)?.deviceTimestampNs;
+    if (
+      runtime.navigationPoseAnchor === undefined
+      && navigation?.source === "gnss"
+      && typeof navigation.progressM === "number"
+      && locationTimestampNs !== undefined
+      && navigationRoute.poseTrack.length >= 2
+      && navigationRoute.track.length >= 2
+      && session.poseTrack.length
+    ) {
+      const anchorPose = session.poseTrack.reduce((best, candidate) => {
+        if (!best) return candidate;
+        return Math.abs(candidate.deviceTimestampNs - locationTimestampNs) < Math.abs(best.deviceTimestampNs - locationTimestampNs)
+          ? candidate
+          : best;
+      }, undefined as PoseEstimate | undefined);
+      const poseTotalM = posePathTotalM(navigationRoute.poseTrack);
+      const geographicTotalM = geographicPathTotalM(navigationRoute.track);
+      if (anchorPose && poseTotalM > 0.01 && geographicTotalM > 0.01) {
+        const routePoseProgressM = Math.max(0, Math.min(poseTotalM, navigation.progressM / geographicTotalM * poseTotalM));
+        const routePoseAnchor = poseAtPathProgress(navigationRoute.poseTrack, routePoseProgressM);
+        if (routePoseAnchor) {
+          runtime.navigationPoseAnchor = anchorPose;
+          runtime.navigationRoutePoseAnchor = routePoseAnchor;
+          runtime.navigationPoseRouteProgressM = navigation.progressM;
+        }
+      }
+    }
+    if (!navigationGnssUpdated && runtime.lastPose) {
+      const localNavigation = navigationStateForPose(navigationRoute, runtime.lastPose, runtime);
+      if (localNavigation) session.navigation = localNavigation;
     }
   }
   if (session.track.length > MAX_TRACK_POINTS) session.track = session.track.slice(-MAX_TRACK_POINTS);
