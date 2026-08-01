@@ -102,6 +102,12 @@ The generated directory contains `web/`, the Bun-bundled `api/way-memory-api.js`
 
 The release bundle is a packaging step, not proof of a public deployment. The public proof still requires DNS, ACME, Nginx, authenticated WebSocket, cross-network route smoke, and a physical Android device matrix to pass.
 
+## Latest staging evidence (2026-08-01)
+
+The current `main` commit `b92d2611d3267cd122a1c6aa5e022a7c4ae11498` was built and passed `bun run smoke:release`. Its release manifest and all nine payload hashes were verified after staging at `/tmp/way-memory-release-b92d261` on `101.35.246.159`.
+
+The remote `install-release.sh --check-only` correctly refused this bundle because `/etc/way-memory/way-memory.env` is still missing. No production files, service restart, Nginx reload, or user data were changed by this staging check.
+
 After building the bundle, verify the bundled API itself before copying it to the host:
 
 ```powershell

@@ -39,3 +39,9 @@ bun run check:docs
 ## Boundary
 
 This proves the local web/API realtime merge path. It does not prove a physical Android phone, an ARCore-capable device, public HTTPS/WSS, or production deployment. Those remain explicit acceptance gates in `docs/acceptance-status.md` and `docs/device-acceptance.md`.
+
+## Follow-up validation
+
+- The full Android isolated gate was rerun on this commit: five instrumented tests, JVM unit tests, Debug/Release builds, and `BUILD SUCCESSFUL`.
+- The only connected Android target remains `emulator-5554`; the emulator reports ARCore unavailable, so no ARCore or physical sensor evidence is claimed.
+- Tencent Cloud staging is prepared for this commit, but the protected production environment, DNS A record, and ACME certificate are still absent. The release installer refuses to proceed until those checks pass.
