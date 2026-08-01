@@ -21,6 +21,7 @@
     "smoke:lifecycle": "bun run scripts/lifecycle-smoke.ts",
     "smoke:retention": "bun run scripts/retention-smoke.ts",
     "smoke:acceptance-report": "bun run scripts/acceptance-report-smoke.ts",
+    "smoke:acceptance-cases": "bun run scripts/acceptance-cases-smoke.ts",
     "smoke:route": "bun run scripts/route-smoke.ts",
     "smoke:public-live": "bun run scripts/public-live-sample-smoke.ts",
     "smoke:public-route": "bun run scripts/public-route-navigation-smoke.ts",

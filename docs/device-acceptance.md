@@ -172,4 +172,12 @@ Record at minimum:
 
 Builds, local unit tests, public HTTP health, public WebSocket transport, bounded persistence, loop-correction smoke, replay smoke, and reconnect smoke are automated gates. They do not prove phone sensor quality.
 
+The acceptance-report contract itself is covered by an isolated synthetic matrix:
+
+```powershell
+bun run smoke:acceptance-cases
+```
+
+This command must remain separate from physical-device evidence. It validates the report and server boundaries for baseline, 3D, rotation, loop, stairs, elevator, recovery, and visual recovery, but its fixed samples must never be presented as a real sensor capture.
+
 Real-device acceptance passes only after the capture matrix produces the fields above. The product must not claim arbitrary centimeter-level positioning: GNSS, inertial integration, barometer, and ARCore each have different failure modes, so route confidence and source flags remain part of the stored evidence.
