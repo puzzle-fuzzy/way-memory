@@ -78,6 +78,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps
 The physical gate requires the artifact manifest and verifies its API origin and SHA-256 before installation. The script only installs and launches the APK. It does not grant permissions silently and does not fabricate route data.
 When `-RequirePhysical` is used, the script also refuses a non-HTTPS API URL so a real phone cannot accidentally upload private routes to the anonymous HTTP test deployment.
 
+For the `visual-recovery` case, add `-RequireArCore` to the same command. This requires `-RequirePhysical` and checks that the device has the `com.google.ar.core` package before installation; it does not make ARCore mandatory for the IMU/GNSS/barometer fallback cases.
+
 ## Capture matrix
 
 Run each case as a separate session and record the session ID shown by the API/WebSocket logs.

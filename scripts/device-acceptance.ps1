@@ -2,6 +2,7 @@ param(
     [string]$ApkPath = "apps\android\app\build\outputs\apk\debug\app-debug.apk",
     [string]$Serial = "",
     [switch]$RequirePhysical,
+    [switch]$RequireArCore,
     [switch]$RequireRelease,
     [Alias("ReleaseManifestPath")]
     [string]$ArtifactManifestPath = "",
@@ -10,6 +11,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+if ($RequireArCore -and -not $RequirePhysical) {
+    throw "-RequireArCore requires -RequirePhysical so an emulator cannot be treated as visual sensor evidence"
+}
 function Resolve-InputPath([string]$path, [string]$label) {
     if (-not $path -or -not $path.Trim()) {
         throw "$label must not be empty"
@@ -100,6 +104,13 @@ $emulatorFlag = (& $adb -s $Serial shell getprop ro.kernel.qemu 2>$null).Trim()
 $isEmulator = $Serial.StartsWith("emulator-", [System.StringComparison]::OrdinalIgnoreCase) -or $emulatorFlag -eq "1"
 if ($RequirePhysical -and $isEmulator) {
     throw "A physical Android phone is required for sensor acceptance; selected device is an emulator: $Serial"
+}
+if ($RequireArCore) {
+    $arCorePath = @(& $adb -s $Serial shell pm path com.google.ar.core 2>$null | Where-Object { $_ -match '^package:' })
+    if ($arCorePath.Count -eq 0) {
+        throw "ARCore is required for visual-recovery acceptance but com.google.ar.core is not installed: $Serial"
+    }
+    Write-Host "ARCore package: installed"
 }
 
 Write-Host "Device: $Serial"
