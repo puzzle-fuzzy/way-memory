@@ -26,6 +26,7 @@ class PoseFusionEngine {
     private var originLat: Double? = null
     private var originLng: Double? = null
     private var originAltitudeM: Double? = null
+    private var hasAbsoluteGnssAnchor = false
     private var lastGnssAccuracyM = 25f
     private var lastGnssTimestampNs = 0L
     private var lastGnssTargetEastM = 0f
@@ -72,6 +73,7 @@ class PoseFusionEngine {
     private var visualTrackingNeedsReset = false
     private var hasPositionAnchor = false
     private var hasRecoveredAnchor = false
+    private var recoveredAccuracyM = 25f
     private val pendingMotionEvents = ArrayDeque<PendingMotionEvent>()
 
     @Synchronized
@@ -82,6 +84,7 @@ class PoseFusionEngine {
         originLat = null
         originLng = null
         originAltitudeM = null
+        hasAbsoluteGnssAnchor = false
         lastGnssAccuracyM = 25f
         lastGnssTimestampNs = 0L
         lastGnssTargetEastM = 0f
@@ -128,6 +131,7 @@ class PoseFusionEngine {
         visualTrackingNeedsReset = false
         hasPositionAnchor = false
         hasRecoveredAnchor = false
+        recoveredAccuracyM = 25f
         pendingMotionEvents.clear()
     }
 
@@ -176,6 +180,7 @@ class PoseFusionEngine {
             originLat = latitude
             originLng = longitude
             originAltitudeM = altitudeM
+            hasAbsoluteGnssAnchor = true
             if (!hasPositionAnchor) {
                 position[0] = 0f
                 position[1] = 0f
@@ -591,16 +596,22 @@ class PoseFusionEngine {
         val pressureFresh = isFresh(timestampNs, lastPressureTimestampNs, PRESSURE_FRESHNESS_NS)
         val visualFresh = isFresh(timestampNs, lastVisualTimestampNs, VISUAL_FRESHNESS_NS)
         val gnssAgeSeconds = ageSeconds(timestampNs, lastGnssTimestampNs)
+        val visualCorrectionFresh = visualYawRadians != null && visualFresh
         val baseAccuracy = when {
-            visualAligned -> lastVisualAccuracyM
+            visualAligned || visualCorrectionFresh -> lastVisualAccuracyM
             gnssFresh -> lastGnssAccuracyM
             hasGnss -> (lastGnssAccuracyM + gnssAgeSeconds * 0.8f).coerceAtMost(35f)
-            else -> 2.5f
+            visualYawRadians != null && hasVisual -> (lastVisualAccuracyM + ageSeconds(timestampNs, lastVisualTimestampNs) * 1.2f).coerceAtMost(35f)
+            hasRecoveredAnchor -> (recoveredAccuracyM + ageSeconds(timestampNs, lastMotionTimestampNs) * 0.8f).coerceAtMost(35f)
+            hasImu || hasStepTrack -> 12f
+            else -> 25f
         }
         val driftPenalty = when {
             visualAligned -> 0.01f
             gnssFresh -> 0.02f
-            else -> 0.12f
+            visualCorrectionFresh -> 0.04f
+            hasGnss -> 0.18f
+            else -> 0.35f
         }
         val accuracy = (
             baseAccuracy
@@ -619,6 +630,7 @@ class PoseFusionEngine {
             if (visualLoopClosure) add("loop-closure")
             if (hasRecoveredAnchor) add("recovered-anchor")
             if (visualResetPending) add("visual-reset")
+            if (!hasAbsoluteGnssAnchor && !visualCorrectionFresh) add("relative-only")
             if (isEmpty()) add("unknown")
         }
         visualResetPending = false
@@ -706,6 +718,7 @@ class PoseFusionEngine {
         stationaryFrames = if (pose.stationary) 3 else 0
         movingFrames = if (pose.stationary) 0 else 1
         hasImu = pose.sourceFlags.contains("imu")
+        recoveredAccuracyM = pose.accuracyM.coerceIn(0.5f, 50f)
         hasPositionAnchor = true
         hasRecoveredAnchor = true
     }

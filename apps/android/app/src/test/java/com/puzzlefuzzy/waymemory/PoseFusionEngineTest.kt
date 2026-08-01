@@ -34,6 +34,17 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun inertialOnlyPoseIsMarkedRelativeAndDoesNotClaimGnssAccuracy() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        val update = engine.updateImu(1_200_000_000L, floatArrayOf(0.4f, 0f, 0f), 0f)
+
+        assertNotNull(update)
+        assertTrue(update?.pose?.sourceFlags?.contains("relative-only") == true)
+        assertTrue("inertial-only Pose is overconfident", (update?.pose?.accuracyM ?: 0f) >= 12f)
+    }
+
+    @Test
     fun stableBarometerDoesNotEraseShortVerticalInertialMotion() {
         val engine = PoseFusionEngine()
         var timestampNs = 1_000_000_000L
