@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { Database } from "bun:sqlite";
+import { openWayMemoryDatabase } from "./database";
 
 export interface NavigationHandoffGrant {
   handoffId: string;
@@ -25,7 +25,7 @@ export class NavigationHandoffStore {
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
-    this.database = new Database(path);
+    this.database = openWayMemoryDatabase(path);
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS navigation_handoffs (
         handoff_hash TEXT PRIMARY KEY,

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { Database } from "bun:sqlite";
 import type { ObservationSession, SensorSample } from "@way-memory/contracts";
+import { openWayMemoryDatabase } from "./database";
 
 export type SessionSnapshot = {
   session: ObservationSession;
@@ -14,12 +14,8 @@ export class SessionStore {
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
-    this.database = new Database(path);
+    this.database = openWayMemoryDatabase(path);
     this.database.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = NORMAL;
-      PRAGMA busy_timeout = 5000;
-      PRAGMA auto_vacuum = INCREMENTAL;
       CREATE TABLE IF NOT EXISTS session_snapshots (
         session_id TEXT PRIMARY KEY,
         started_at TEXT NOT NULL,

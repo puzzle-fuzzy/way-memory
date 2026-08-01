@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { Database } from "bun:sqlite";
 import type { RouteAlignmentSummary, RouteObservationSummary, RouteSummary } from "@way-memory/contracts";
+import { openWayMemoryDatabase } from "./database";
 
 export type StoredRoute = RouteSummary & { ownerId: string };
 
@@ -11,7 +11,7 @@ export class RouteStore {
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
-    this.database = new Database(path);
+    this.database = openWayMemoryDatabase(path);
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS route_records (
         route_id TEXT PRIMARY KEY,

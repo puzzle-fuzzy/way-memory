@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { openWayMemoryDatabase } from "./database";
 
 export type AuthRole = "device" | "dashboard";
 export type AuthTokenKind = "access" | "ws-ticket";
@@ -54,7 +55,7 @@ export class AuthStore {
   private readonly database: Database;
 
   constructor(path: string) {
-    this.database = new Database(path);
+    this.database = openWayMemoryDatabase(path);
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS auth_tokens (
         token_hash TEXT PRIMARY KEY,

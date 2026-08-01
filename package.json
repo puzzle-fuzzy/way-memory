@@ -12,6 +12,7 @@
     "check:docs": "bun run scripts/check-docs.ts",
     "smoke": "bun run scripts/smoke.ts",
     "smoke:persistence": "bun run scripts/persistence-smoke.ts",
+    "smoke:storage": "bun run scripts/storage-smoke.ts",
     "smoke:closure": "bun run scripts/closure-smoke.ts",
     "smoke:replay": "bun run scripts/replay-smoke.ts",
     "smoke:reconnect": "bun run scripts/reconnect-smoke.ts",
