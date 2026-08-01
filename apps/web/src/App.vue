@@ -545,6 +545,27 @@ const displayedWorldTrack = computed(() => visualMode.value === "fused"
   : visualMode.value === "inertial" ? inertialWorldTrack.value : geographicWorldTrack.value);
 const projectionScene = computed(() => buildProjectionScene(displayedWorldTrack.value));
 const displayedTrack = computed(() => projectionScene.value.points);
+const routeNodeLabels: Record<RouteNode["nodeType"], string> = {
+  start: "起点",
+  turn: "转弯",
+  door: "门",
+  stairs: "楼梯",
+  elevator: "电梯",
+  crossing: "路口",
+  landmark: "地标",
+  hazard: "危险",
+  end: "终点",
+};
+const routeNodeOverlayAllowed = computed(() => {
+  const route = selectedRoute.value;
+  const currentSession = session.value;
+  return Boolean(
+    route
+      && currentSession
+      && visualMode.value !== "location"
+      && (currentSession.routeId === route.routeId || route.referenceSessionId === currentSession.sessionId),
+  );
+});
 
 const motionModeLabel = computed(() => ({
   stationary: "静止",
@@ -774,6 +795,36 @@ const drawPointCanvas = () => {
     context.stroke();
   }
 
+  const routeNodeProjections = routeNodeOverlayAllowed.value
+    ? (selectedRoute.value?.nodeRecords ?? [])
+      .map((node) => ({ node, projection: scene.projectPoint(sceneWorldPoint(node.xM, node.yM, node.zM)) }))
+      .sort((left, right) => left.projection.depth - right.projection.depth)
+    : [];
+  for (const { node, projection } of routeNodeProjections) {
+    const position = toCanvasPoint(projection.x, projection.y);
+    const radius = Math.max(3.5, 5.5 * canvasScale * projection.perspective);
+    context.save();
+    context.globalAlpha = 0.96;
+    context.fillStyle = "#fff8ee";
+    context.strokeStyle = "#a66a3f";
+    context.lineWidth = Math.max(1, 1.6 * canvasScale);
+    context.beginPath();
+    context.moveTo(position.x, position.y - radius);
+    context.lineTo(position.x + radius, position.y);
+    context.lineTo(position.x, position.y + radius);
+    context.lineTo(position.x - radius, position.y);
+    context.closePath();
+    context.fill();
+    context.stroke();
+    if (routeNodeProjections.length <= 24) {
+      context.fillStyle = "#19352d";
+      context.font = `${Math.max(9, 10 * canvasScale)}px Manrope, sans-serif`;
+      context.textAlign = "left";
+      context.fillText(routeNodeLabels[node.nodeType] ?? node.nodeType, position.x + radius + 4 * canvasScale, position.y - 3 * canvasScale);
+    }
+    context.restore();
+  }
+
   const firstPoint = toCanvasPoint(points[0].x, points[0].y);
   context.globalAlpha = 1;
   context.beginPath();
@@ -816,7 +867,7 @@ const scheduleCanvasDraw = () => {
   }, delay);
 };
 
-watch([displayedTrack, cameraYaw, cameraPitch], scheduleCanvasDraw, { flush: "post" });
+watch([displayedTrack, cameraYaw, cameraPitch, selectedRoute], scheduleCanvasDraw, { flush: "post" });
 
 onMounted(() => {
   void refreshRoutes();
