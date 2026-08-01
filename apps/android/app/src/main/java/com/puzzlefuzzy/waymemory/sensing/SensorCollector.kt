@@ -70,6 +70,16 @@ internal fun shouldAcceptRotationSource(
 internal fun isPrimaryLocationProvider(provider: String?, gpsProviderAvailable: Boolean): Boolean =
     provider?.equals("gps", ignoreCase = true) == true || !gpsProviderAvailable
 
+/**
+ * A raw accelerometer minus a lagging gravity estimate is not trustworthy
+ * during a fast hand rotation. A device-provided linear-acceleration stream
+ * has already removed gravity and is handled by a separate path.
+ */
+internal fun canUseAccelerometerFallbackDuringRotation(
+    angularRateMagnitude: Float,
+    maxAngularRateRadPerSecond: Float = 1.25f,
+): Boolean = angularRateMagnitude.isFinite() && angularRateMagnitude <= maxAngularRateRadPerSecond
+
 class SensorCollector(context: Context) : SensorEventListener, LocationListener {
     private val appContext = context.applicationContext
     private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -353,7 +363,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
                     !hasLinearAccelerationSensor
                         || lastLinearAccelerationTimestampNs == 0L
                         || event.timestamp - lastLinearAccelerationTimestampNs > 300_000_000L
-                ) -> {
+                ) && canUseAccelerometerFallbackDuringRotation(angularRateMagnitude) -> {
                     integrateMotion(event.timestamp, removeGravity(values))
                 }
                 else -> null

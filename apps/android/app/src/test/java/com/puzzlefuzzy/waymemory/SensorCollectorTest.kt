@@ -2,6 +2,7 @@ package com.puzzlefuzzy.waymemory
 
 import com.puzzlefuzzy.waymemory.sensing.shouldAcceptRotationSource
 import com.puzzlefuzzy.waymemory.sensing.isPrimaryLocationProvider
+import com.puzzlefuzzy.waymemory.sensing.canUseAccelerometerFallbackDuringRotation
 import com.puzzlefuzzy.waymemory.sensing.transformDeviceAcceleration
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
@@ -19,6 +20,13 @@ class SensorCollectorTest {
     @Test
     fun networkFixCanBeFallbackWhenGpsProviderDoesNotExist() {
         assertTrue(isPrimaryLocationProvider("network", gpsProviderAvailable = false))
+    }
+
+    @Test
+    fun accelerometerFallbackIsBlockedDuringFastRotation() {
+        assertTrue(canUseAccelerometerFallbackDuringRotation(0.8f))
+        assertFalse(canUseAccelerometerFallbackDuringRotation(1.3f))
+        assertFalse(canUseAccelerometerFallbackDuringRotation(Float.NaN))
     }
 
     @Test
