@@ -77,6 +77,19 @@ try {
     sample.sensorType === "arcore.visual-pose"
       && sample.metadata?.trackingReset === true
   )).length;
+  const visualStatusSamples = rawSamples.filter((sample) => sample.sensorType === "arcore.visual-status");
+  const visualStatusFailureReasons = [...new Set(visualStatusSamples
+    .map((sample) => sample.metadata?.failureReason)
+    .filter((item): item is string => typeof item === "string" && item.length > 0))].sort();
+  const visualStatusDiagnostic = visualStatusSamples.length > 0 && visualStatusSamples.every((sample) => (
+    typeof sample.metadata?.available === "boolean"
+      && typeof sample.metadata?.active === "boolean"
+      && typeof sample.metadata?.trackingState === "string"
+      && typeof sample.metadata?.detail === "string"
+      && sample.pose === undefined
+      && sample.relativePosition === undefined
+      && sample.motionEvent === undefined
+  ));
   const rawSensorTypeCounts = Object.fromEntries(rawSamples.reduce((counts, sample) => {
     if (typeof sample.sensorType === "string") counts.set(sample.sensorType, (counts.get(sample.sensorType) ?? 0) + 1);
     return counts;
@@ -175,6 +188,8 @@ try {
     visualResetEvidence: visualResetPoseCount > 0,
     visualResetRawEvidence: visualTrackingResetSampleCount > 0,
     visualResetContinuity: visualResetJumpM !== null && visualResetJumpM <= maximumVisualResetJumpM,
+    visualStatusRawEvidence: visualStatusSamples.length > 0,
+    visualStatusDiagnostic,
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
     clientManifest: client.applicationId === "com.puzzlefuzzy.waymemory"
       && typeof client.versionName === "string"
@@ -201,6 +216,8 @@ try {
       && checks.visualResetEvidence
       && checks.visualResetRawEvidence
       && checks.visualResetContinuity
+      && checks.visualStatusRawEvidence
+      && checks.visualStatusDiagnostic
       && loopClosureEventCount <= 1
       && checks.serverBounds,
   };
@@ -256,6 +273,9 @@ try {
     visualRecovery: {
       resetPoseCount: visualResetPoseCount,
       rawTrackingResetSampleCount: visualTrackingResetSampleCount,
+      statusSampleCount: visualStatusSamples.length,
+      statusFailureReasons: visualStatusFailureReasons,
+      statusDiagnostic: visualStatusDiagnostic,
       sourceFlag: "visual-reset",
       jumpM: visualResetJumpM,
       limitM: maximumVisualResetJumpM,

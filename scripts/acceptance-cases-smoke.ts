@@ -83,15 +83,17 @@ const sample = (
     stationary?: boolean;
     motionEvent?: JsonRecord;
     metadata?: JsonRecord;
+    includePose?: boolean;
+    values?: number[];
   } = {},
 ) => ({
   sampleId: `acceptance-case-${timestampNs}-${options.sensorType ?? "accelerometer"}`,
   deviceTimestampNs: timestampNs,
   sensorType: options.sensorType ?? "accelerometer",
   sensorId: 1,
-  values: [xM, yM, zM],
+  values: options.values ?? [xM, yM, zM],
   ...(options.metadata ? { metadata: options.metadata } : {}),
-  pose: pose(timestampNs, xM, yM, zM, options),
+  ...(options.includePose === false ? {} : { pose: pose(timestampNs, xM, yM, zM, options) }),
   ...(options.motionEvent ? { motionEvent: options.motionEvent } : {}),
 });
 
@@ -167,6 +169,17 @@ const samplesFor = (acceptanceCase: typeof cases[number]) => {
           metadata: { trackingState: "tracking", confidence: 0.65, trackingReset: true },
         }),
         sample(3, 0.7, 0.2, 0.2, { sourceFlags: ["imu", "visual-aligned"] }),
+        sample(4, 0, 0, 0, {
+          sensorType: "arcore.visual-status",
+          values: [],
+          includePose: false,
+          metadata: {
+            available: true,
+            active: true,
+            trackingState: "tracking",
+            detail: "视觉位姿正常",
+          },
+        }),
       ];
   }
 };
