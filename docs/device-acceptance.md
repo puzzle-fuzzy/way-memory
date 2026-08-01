@@ -18,7 +18,7 @@ bun run android:acceptance
 
 The `-PwayMemoryApiUrl` value is important: `10.0.2.2` is only the Android emulator host and is not reachable from a physical phone. The acceptance APK must be built with the public API URL (or an explicitly reachable HTTPS deployment).
 
-This matrix uses a debug APK, so its current HTTP test endpoint is permitted. A release build refuses an `http://` API URL; production must use an HTTPS domain and WSS.
+This matrix uses a debug APK; only the debug variant permits HTTP/WS for a trusted LAN or emulator test network. A release build refuses an `http://` API URL and does not enable Android cleartext traffic; production must use an HTTPS domain and WSS.
 
 For the final physical-device gate, build and record an exact release artifact first:
 
