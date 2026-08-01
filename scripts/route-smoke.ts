@@ -87,7 +87,7 @@ try {
     samples: [
       { sampleId: "route-sample-1", deviceTimestampNs: 100, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4, altitudeM: 100, provider: "gps" }, relativePosition: { xM: 0, yM: 0, zM: 0, accuracyM: 1 }, pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
       { sampleId: "route-network-diagnostic", deviceTimestampNs: 150, sensorType: "location", values: [], location: { lat: 31.2404, lng: 121.47, accuracyM: 80, provider: "network" }, relativePosition: { xM: 999, yM: 999, zM: 999, accuracyM: 1 }, pose: { deviceTimestampNs: 150, xM: 999, yM: 999, zM: 999, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.99, source: "fused", frame: "local-enu", sourceFlags: ["gnss"], motionMode: "walking", stationary: false }, motionEvent: { eventId: "network-fake-event", deviceTimestampNs: 150, type: "loop-candidate", confidence: 0.99 } },
-      { sampleId: "route-sample-2", deviceTimestampNs: 200, sensorType: "location", values: [], location: { lat: 31.23041, lng: 121.47, accuracyM: 4, altitudeM: 101 }, relativePosition: { xM: 1, yM: 0, zM: 0, accuracyM: 1 }, pose: { deviceTimestampNs: 200, xM: 1, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
+      { sampleId: "route-sample-2", deviceTimestampNs: 200, sensorType: "location", values: [], location: { lat: 31.23041, lng: 121.47, accuracyM: 4, altitudeM: 101 }, relativePosition: { xM: 1, yM: 0, zM: 1, accuracyM: 1 }, pose: { deviceTimestampNs: 200, xM: 1, yM: 0, zM: 1, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0.5, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "elevator", stationary: false } },
     ],
   }));
   const accepted = await nextMessage(device);
@@ -231,8 +231,8 @@ try {
       sampleId: "route-navigation-local-pose",
       deviceTimestampNs: 2_000_000_000,
       sensorType: "fused.pose",
-      values: [0.5, 0, 0],
-      pose: { deviceTimestampNs: 2_000_000_000, xM: 0.5, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.6, source: "fused", frame: "local-enu", sourceFlags: ["imu", "relative-only"], motionMode: "walking", stationary: false },
+      values: [0.5, 0, 0.5],
+      pose: { deviceTimestampNs: 2_000_000_000, xM: 0.5, yM: 0, zM: 0.5, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0.5, accuracyM: 1, confidence: 0.6, source: "fused", frame: "local-enu", sourceFlags: ["imu", "relative-only"], motionMode: "elevator", stationary: false },
     }],
   }));
   const localPoseAccepted = await nextMessage(navigator);
