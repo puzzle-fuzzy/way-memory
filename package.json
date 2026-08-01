@@ -31,6 +31,7 @@
     "preflight:public-tls": "bun run scripts/public-tls-preflight.ts",
     "acceptance:report": "bun scripts/acceptance-report.ts",
     "android:acceptance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1",
+    "check:device-matrix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-device-matrix.ps1",
     "replay:session": "bun scripts/replay-session.ts",
     "dev:api": "bun run services/api/src/index.ts",
     "dev:web": "bun --cwd=apps/web run dev",

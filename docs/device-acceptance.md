@@ -90,6 +90,17 @@ Run each case as a separate session and record the session ID shown by the API/W
 
 ## Server evidence
 
+每个实体手机案例完成后，使用 `scripts/collect-device-evidence.ps1` 保存 acceptance report、bounded raw replay、APK provenance 和哈希清单。全部案例完成后，用矩阵校验器进行最终审计；它要求 baseline、3d、rotation、loop、visual-recovery、stairs、elevator、recovery、network-interruption 和 process-recovery 每项各有一份通过报告，并校验 API origin、源码提交、APK SHA-256、report/raw 哈希和会话 ID：
+
+```powershell
+bun run check:device-matrix -- -EvidenceRoot artifacts/device-evidence `
+  -ArtifactManifestPath artifacts/android-release/<artifact>/ANDROID-RELEASE-MANIFEST.json `
+  -ExpectedApiBaseUrl https://way-memory.yxswy.com `
+  -ExpectedSourceCommit <git-commit>
+```
+
+矩阵校验器只读取证据，不创建或修改路线数据；缺少任何案例、报告未通过、哈希不匹配或 provenance 不一致都会以非零退出。
+
 For a captured session `<SESSION_ID>`:
 
 ```powershell
