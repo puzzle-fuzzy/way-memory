@@ -264,7 +264,7 @@ class ArCorePoseCollector(
                         active = true,
                         trackingState = trackingState.name.lowercase(),
                         failureReason = failureReason,
-                        detail = if (trackingState == TrackingState.TRACKING) "视觉位姿正常" else "等待视觉特征",
+                        detail = if (trackingState == TrackingState.TRACKING) "相机视觉跟踪正常" else "等待视觉特征",
                     ),
                 )
                 if (trackingState != TrackingState.TRACKING || frame.timestamp <= 0L) {
@@ -291,6 +291,15 @@ class ArCorePoseCollector(
                     )
                 }.getOrNull()?.also { visualAnchor = it }
                 if (anchor == null || anchor.trackingState != TrackingState.TRACKING) {
+                    emitStatus(
+                        VisualTrackingStatus(
+                            available = true,
+                            active = true,
+                            trackingState = trackingState.name.lowercase(),
+                            failureReason = "ANCHOR_NOT_TRACKING",
+                            detail = "视觉锚点等待重定位",
+                        ),
+                    )
                     // Force the next tracked frame through the relocalization
                     // path if creating or tracking the anchor failed.
                     wasTracking = false
@@ -317,6 +326,14 @@ class ArCorePoseCollector(
                     confidence = ARCORE_TRACKING_CONFIDENCE_PRIOR,
                     trackingState = trackingState.name.lowercase(),
                     trackingReset = trackingReset,
+                )
+                emitStatus(
+                    VisualTrackingStatus(
+                        available = true,
+                        active = true,
+                        trackingState = trackingState.name.lowercase(),
+                        detail = "视觉锚点正常",
+                    ),
                 )
                 mainHandler.post { onPose(sample) }
             } catch (_: com.google.ar.core.exceptions.NotYetAvailableException) {
