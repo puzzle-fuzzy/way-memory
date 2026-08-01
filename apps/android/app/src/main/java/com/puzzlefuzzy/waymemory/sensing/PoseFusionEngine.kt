@@ -441,7 +441,14 @@ class PoseFusionEngine {
     }
 
     private fun updateMotionEvidence(horizontalSpeed: Float) {
-        val elevatorEvidence = abs(barometerVerticalSpeedMps) > 0.25f && horizontalSpeed < 0.9f && movingFrames > 3
+        // A phone can be held nearly motionless inside an elevator. Requiring
+        // movingFrames here would classify that real vertical trip as
+        // stationary forever. Pressure movement plus low horizontal speed is
+        // sufficient when the IMU is stable; movingFrames still covers the
+        // acceleration during elevator take-off/braking.
+        val elevatorEvidence = abs(barometerVerticalSpeedMps) > 0.25f
+            && horizontalSpeed < 0.9f
+            && (movingFrames > 3 || stationaryFrames >= 3)
         // Exit evidence must decay faster than it accumulates. Otherwise a
         // short low-horizontal-speed phase at the bottom of a staircase can
         // keep the route classified as an elevator for several seconds.

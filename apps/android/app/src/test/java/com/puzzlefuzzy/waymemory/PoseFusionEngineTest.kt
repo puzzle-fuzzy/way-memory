@@ -180,6 +180,23 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun pressureChangeWhilePhoneIsHeldStillProducesElevatorCandidate() {
+        val engine = PoseFusionEngine()
+        var elevatorEvent = false
+        var timestampNs = 1_000_000_000L
+        val baselinePressure = 1013.25f
+        engine.updatePressure(baselinePressure, timestampNs)
+        repeat(24) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(baselinePressure - (it + 1) * 0.08f, timestampNs)
+            val update = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0.02f)
+            if (update?.motionEvent?.type == "elevator-candidate") elevatorEvent = true
+        }
+
+        assertTrue(elevatorEvent)
+    }
+
+    @Test
     fun elevatorEvidenceDecaysAndEmitsAnExitEvent() {
         val engine = PoseFusionEngine()
         var elevatorExit = false

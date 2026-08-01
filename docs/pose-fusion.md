@@ -59,7 +59,7 @@ When Android recreates the process, the uploader resumes the same server session
 
 ## Elevator and stairs
 
-Pressure vertical speed, horizontal speed, and motion state can emit `elevator-candidate` and `elevator-exit`. Weather, air conditioning, and building airflow make pressure alone insufficient for floor confirmation. Floor transitions need visual structure, a floor plan/annotation, or explicit user confirmation. Stairs should be inferred from repeated vertical steps and walking cadence, not from a single pressure spike.
+Pressure vertical speed, horizontal speed, and motion state can emit `elevator-candidate` and `elevator-exit`; the phone does not need to be shaken or translated horizontally because it may be held still inside the elevator. Weather, air conditioning, and building airflow make pressure alone insufficient for floor confirmation. Floor transitions need visual structure, a floor plan/annotation, or explicit user confirmation. Stairs should be inferred from repeated vertical steps and walking cadence, not from a single pressure spike.
 
 ## Failure policy
 
