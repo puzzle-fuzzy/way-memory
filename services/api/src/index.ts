@@ -1214,8 +1214,9 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
     const sensorType = normalizeSensorType(sample.sensorType);
     const nonPrimaryLocationSample = sample.location !== undefined
       && !isPrimaryGeographicProvider(sample.location.provider);
+    const derivedSampleAllowed = !nonPrimaryLocationSample;
     let sampleOutOfOrder = false;
-    if (sample.pose && !nonPrimaryLocationSample) {
+    if (sample.pose && derivedSampleAllowed) {
       const previousTimestampNs = runtime.lastPoseTimestampNs;
       if (previousTimestampNs !== undefined && sample.pose.deviceTimestampNs <= previousTimestampNs) {
         sampleOutOfOrder = true;
@@ -1233,7 +1234,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
         }
       }
     }
-    if (sample.motionEvent) {
+    if (sample.motionEvent && derivedSampleAllowed) {
       const previousTimestampNs = runtime.lastMotionEventTimestampNs;
       if (previousTimestampNs !== undefined && sample.motionEvent.deviceTimestampNs <= previousTimestampNs) {
         sampleOutOfOrder = true;
@@ -1243,7 +1244,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
         motionEvents.push(sample.motionEvent);
       }
     }
-    if (sample.relativePosition) {
+    if (sample.relativePosition && derivedSampleAllowed) {
       const previousTimestampNs = runtime.lastRelativeTimestampNs;
       if (previousTimestampNs !== undefined && sample.deviceTimestampNs <= previousTimestampNs) {
         sampleOutOfOrder = true;

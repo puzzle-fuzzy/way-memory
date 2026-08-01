@@ -85,9 +85,9 @@ try {
     type: "samples",
     sessionId,
     samples: [
-      { sampleId: "route-sample-1", deviceTimestampNs: 100, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4, altitudeM: 100, provider: "gps" }, pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
-      { sampleId: "route-network-diagnostic", deviceTimestampNs: 150, sensorType: "location", values: [], location: { lat: 31.2404, lng: 121.47, accuracyM: 80, provider: "network" }, pose: { deviceTimestampNs: 150, xM: 999, yM: 999, zM: 999, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.99, source: "fused", frame: "local-enu", sourceFlags: ["gnss"], motionMode: "walking", stationary: false } },
-      { sampleId: "route-sample-2", deviceTimestampNs: 200, sensorType: "location", values: [], location: { lat: 31.23041, lng: 121.47, accuracyM: 4, altitudeM: 101 }, pose: { deviceTimestampNs: 200, xM: 1, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
+      { sampleId: "route-sample-1", deviceTimestampNs: 100, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4, altitudeM: 100, provider: "gps" }, relativePosition: { xM: 0, yM: 0, zM: 0, accuracyM: 1 }, pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
+      { sampleId: "route-network-diagnostic", deviceTimestampNs: 150, sensorType: "location", values: [], location: { lat: 31.2404, lng: 121.47, accuracyM: 80, provider: "network" }, relativePosition: { xM: 999, yM: 999, zM: 999, accuracyM: 1 }, pose: { deviceTimestampNs: 150, xM: 999, yM: 999, zM: 999, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.99, source: "fused", frame: "local-enu", sourceFlags: ["gnss"], motionMode: "walking", stationary: false }, motionEvent: { eventId: "network-fake-event", deviceTimestampNs: 150, type: "loop-candidate", confidence: 0.99 } },
+      { sampleId: "route-sample-2", deviceTimestampNs: 200, sensorType: "location", values: [], location: { lat: 31.23041, lng: 121.47, accuracyM: 4, altitudeM: 101 }, relativePosition: { xM: 1, yM: 0, zM: 0, accuracyM: 1 }, pose: { deviceTimestampNs: 200, xM: 1, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
     ],
   }));
   const accepted = await nextMessage(device);
@@ -96,6 +96,8 @@ try {
 
   const stopped = await requestJson(`/api/sessions/${sessionId}/stop`, { method: "POST" });
   if (stopped.response.status !== 200 || stopped.body.status !== "stopped") throw new Error("route session did not stop");
+  const session = await requestJson(`/api/sessions/${sessionId}`);
+  if (session.body?.relativeTrack?.length !== 2 || session.body?.motionEvents?.length !== 0 || session.body?.poseTrack?.length !== 2) throw new Error(`non-primary location derived data polluted the route: ${JSON.stringify({ relativeTrack: session.body?.relativeTrack?.length, motionEvents: session.body?.motionEvents?.length, poseTrack: session.body?.poseTrack?.length })}`);
   const attached = await requestJson(`/api/routes/${routeId}/observations`, {
     method: "POST",
     headers: { "content-type": "application/json" },
