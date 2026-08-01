@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
+    [ValidatePattern('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$')]
     [string]$SessionId,
     [ValidateSet("baseline", "3d", "rotation", "loop", "stairs", "elevator", "recovery", "visual-recovery")]
     [string]$Case = "baseline",
@@ -17,7 +17,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$sessionOutput = Join-Path (Join-Path $repo $OutputRoot) $SessionId
+$outputRootCandidate = if ([System.IO.Path]::IsPathRooted($OutputRoot)) {
+    $OutputRoot
+} else {
+    Join-Path $repo $OutputRoot
+}
+$resolvedOutputRoot = [System.IO.Path]::GetFullPath($outputRootCandidate)
+if (-not $resolvedOutputRoot.StartsWith($repo + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputRoot must stay inside the repository: $resolvedOutputRoot"
+}
+if ($resolvedOutputRoot -eq $repo) {
+    throw "Refusing to use the repository root as OutputRoot"
+}
+$sessionOutput = Join-Path $resolvedOutputRoot $SessionId
 if (Test-Path -LiteralPath $sessionOutput) {
     throw "Evidence directory already exists: $sessionOutput. Choose a new OutputRoot or remove only this previous evidence directory after review."
 }
