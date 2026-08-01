@@ -58,6 +58,16 @@ internal fun arCoreDeltaToDisplayFrame(delta: FloatArray): FloatArray {
 }
 
 /**
+ * The first tracked frame establishes the ordinary visual origin. A reset is
+ * meaningful only after at least one tracked frame has already been emitted
+ * and tracking then paused or was lost.
+ */
+internal fun shouldEmitVisualTrackingReset(
+    hasEmittedTrackingFrame: Boolean,
+    wasTracking: Boolean,
+): Boolean = hasEmittedTrackingFrame && !wasTracking
+
+/**
  * Optional ARCore visual-inertial pose source.
  *
  * ARCore's world is local to one session. The adapter deliberately emits an
@@ -80,6 +90,7 @@ class ArCorePoseCollector(
     private var lastEmittedTimestampNs = 0L
     private var lastStatusKey: String? = null
     private var wasTracking = false
+    private var hasEmittedTrackingFrame = false
 
     fun createView(context: Context): GLSurfaceView {
         // An Activity recreation (for example, an orientation change) creates
@@ -138,6 +149,7 @@ class ArCorePoseCollector(
                 initialTranslation = null
                 lastEmittedTimestampNs = 0L
                 wasTracking = false
+                hasEmittedTrackingFrame = false
             }
             resumeSession()
         } catch (error: UnavailableUserDeclinedInstallationException) {
@@ -179,6 +191,7 @@ class ArCorePoseCollector(
         runCatching { session?.close() }
         session = null
         wasTracking = false
+        hasEmittedTrackingFrame = false
         hostActivity = null
         textureConfigured = false
         initialTranslation = null
@@ -251,8 +264,9 @@ class ArCorePoseCollector(
                 }
 
                 val translation = camera.pose.translation
-                val trackingReset = !wasTracking
+                val trackingReset = shouldEmitVisualTrackingReset(hasEmittedTrackingFrame, wasTracking)
                 wasTracking = true
+                hasEmittedTrackingFrame = true
                 if (trackingReset) initialTranslation = translation.copyOf()
                 val origin = initialTranslation ?: translation.copyOf().also { initialTranslation = it }
                 val deltaX = translation[0] - origin[0]

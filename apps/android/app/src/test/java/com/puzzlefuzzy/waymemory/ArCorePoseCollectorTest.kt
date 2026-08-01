@@ -1,8 +1,11 @@
 package com.puzzlefuzzy.waymemory
 
 import com.puzzlefuzzy.waymemory.sensing.arCoreDeltaToDisplayFrame
+import com.puzzlefuzzy.waymemory.sensing.shouldEmitVisualTrackingReset
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ArCorePoseCollectorTest {
@@ -22,5 +25,12 @@ class ArCorePoseCollectorTest {
         assertThrows(IllegalArgumentException::class.java) {
             arCoreDeltaToDisplayFrame(floatArrayOf(1f, 2f))
         }
+    }
+
+    @Test
+    fun onlyTrackingAfterAnEarlierFrameIsAReset() {
+        assertFalse(shouldEmitVisualTrackingReset(hasEmittedTrackingFrame = false, wasTracking = false))
+        assertFalse(shouldEmitVisualTrackingReset(hasEmittedTrackingFrame = true, wasTracking = true))
+        assertTrue(shouldEmitVisualTrackingReset(hasEmittedTrackingFrame = true, wasTracking = false))
     }
 }
