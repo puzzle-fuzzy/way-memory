@@ -114,6 +114,15 @@ bun run acceptance:report --case=recovery --max-recovery-jump-m=1.5 --out=artifa
 bun run acceptance:report --case=visual-recovery --max-visual-reset-jump-m=5 --out=artifacts/<SESSION_ID>-visual-recovery.json
 ```
 
+The report compares the APK's recorded `client.apiBaseUrl` with
+`WAY_MEMORY_API_URL`. For an Android emulator, the API may be reached from
+the phone as `http://10.0.2.2:8787` while the report runs on the host at
+`http://127.0.0.1:8787`; set
+`WAY_MEMORY_EXPECTED_CLIENT_API_ORIGIN=http://10.0.2.2:8787` for that local
+protocol test. Production and physical-device evidence should leave this
+override unset so the recorded client origin must match the deployed HTTPS
+origin.
+
 也可以用一次性证据采集脚本保存选定 case 的报告和 raw replay：
 
 ```powershell

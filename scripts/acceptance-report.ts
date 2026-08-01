@@ -14,6 +14,9 @@ const hasFlag = (name: string) => args.includes(name) || args.some((item) => ite
 const apiBase = (Bun.env.WAY_MEMORY_API_URL ?? "http://101.35.246.159").replace(/\/$/, "");
 const dashboardToken = Bun.env.WAY_MEMORY_DASHBOARD_TOKEN?.trim();
 const apiUrl = new URL(apiBase);
+const expectedClientApiOrigin = new URL(
+  (Bun.env.WAY_MEMORY_EXPECTED_CLIENT_API_ORIGIN ?? apiBase).replace(/\/$/, ""),
+).origin;
 const localHttpHost = apiUrl.protocol === "http:" && ["127.0.0.1", "localhost"].includes(apiUrl.hostname);
 if (dashboardToken && apiUrl.protocol !== "https:" && !localHttpHost) {
   throw new Error("WAY_MEMORY_DASHBOARD_TOKEN requires an HTTPS WAY_MEMORY_API_URL");
@@ -142,7 +145,6 @@ try {
   const duplicateSampleIds = sampleIds.length - new Set(sampleIds).size;
   const closure = (session.closure ?? {}) as JsonRecord;
   const client = (session.client ?? {}) as JsonRecord;
-  const expectedApiOrigin = new URL(apiBase).origin;
   const clientApiOrigin = typeof client.apiBaseUrl === "string"
     ? (() => { try { return new URL(client.apiBaseUrl).origin; } catch { return null; } })()
     : null;
@@ -150,7 +152,15 @@ try {
     sessionLoaded: session.sessionId === sessionId,
     sensorInventory: inventory.length > 0 && registeredSensors > 0,
     sensorTransportBudget: transportBudgetSensors === registeredSensors && registeredSensors > 0,
-    rawReplayBounded: rawSamples.length > 0 && rawSamples.length <= 1024 && Number(session.rawSampleCount ?? 0) <= 1024,
+    // `rawSampleCount` is the lifetime count for the session. The server is
+    // intentionally allowed to accept a long capture while retaining only a
+    // bounded replay tail, so the bound must be checked against the retained
+    // samples and the server-reported retention contract—not the lifetime
+    // counter.
+    rawReplayBounded: rawSamples.length > 0
+      && rawSamples.length <= Number(raw.maxRetainedSamples ?? 1024)
+      && Number(raw.maxRetainedSamples ?? 0) === 1024
+      && Number(raw.retainedSamples ?? rawSamples.length) === rawSamples.length,
     poseStream: poses.length > 0,
     rawMotionSensorEvidence: hasRawMotionSensorEvidence,
     poseTimestampMonotonic,
@@ -169,7 +179,7 @@ try {
     clientManifest: client.applicationId === "com.puzzlefuzzy.waymemory"
       && typeof client.versionName === "string"
       && (client.buildType === "debug" || client.buildType === "release")
-      && clientApiOrigin === expectedApiOrigin,
+      && clientApiOrigin === expectedClientApiOrigin,
   };
   const caseChecks: Record<string, boolean> = {
     baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.rawMotionSensorEvidence && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.routeOrderingClean && checks.serverBounds && checks.clientManifest,
