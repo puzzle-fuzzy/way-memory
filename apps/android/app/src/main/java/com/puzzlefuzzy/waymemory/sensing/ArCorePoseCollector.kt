@@ -12,6 +12,7 @@ import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.google.ar.core.ArCoreApk
 import com.google.ar.core.ArCoreApk.Availability
+import com.google.ar.core.Anchor
 import com.google.ar.core.Camera
 import com.google.ar.core.Config
 import com.google.ar.core.Session
@@ -45,9 +46,10 @@ data class VisualPoseSample(
 )
 
 private const val AVAILABILITY_RETRY_DELAY_MS = 500L
-// ARCore exposes a metric relative pose here, but not a per-frame absolute
-// position covariance. Keep this prior conservative; the fusion layer can
-// still use the relative correction without claiming centimeter accuracy.
+// ARCore exposes a metric pose relative to the session anchor here, but not a
+// per-frame absolute position covariance. Keep this prior conservative; the
+// fusion layer can still use the relative correction without claiming
+// centimeter accuracy.
 private const val ARCORE_TRACKING_ACCURACY_PRIOR_M = 1.0f
 private const val ARCORE_TRACKING_CONFIDENCE_PRIOR = 0.65f
 
@@ -70,7 +72,9 @@ internal fun shouldEmitVisualTrackingReset(
 /**
  * Optional ARCore visual-inertial pose source.
  *
- * ARCore's world is local to one session. The adapter deliberately emits an
+ * ARCore's world is local to one session and its numeric world coordinates can
+ * be revised as tracking improves. The adapter keeps one session-local Anchor
+ * and emits the camera pose relative to that Anchor. It deliberately emits an
  * `arcore-local` frame and never pretends it is latitude/longitude or global
  * ENU. The fusion layer can only promote it after an explicit alignment.
  */
@@ -86,7 +90,7 @@ class ArCorePoseCollector(
     private var userRequestedInstall = true
     private var resumed = false
     private var textureConfigured = false
-    private var initialTranslation: FloatArray? = null
+    private var visualAnchor: Anchor? = null
     private var lastEmittedTimestampNs = 0L
     private var lastStatusKey: String? = null
     private var wasTracking = false
@@ -96,7 +100,7 @@ class ArCorePoseCollector(
         // An Activity recreation (for example, an orientation change) creates
         // a new GL context and texture name while the session may remain
         // alive in the application-scoped collector. Rebind the camera to the
-        // new texture, but deliberately keep initialTranslation so the route
+        // new texture, but deliberately keep the session Anchor so the route
         // does not jump to a new visual origin.
         surface?.onPause()
         textureConfigured = false
@@ -146,7 +150,7 @@ class ArCorePoseCollector(
                     arSession.configure(config)
                 }
                 textureConfigured = false
-                initialTranslation = null
+                visualAnchor = null
                 lastEmittedTimestampNs = 0L
                 wasTracking = false
                 hasEmittedTrackingFrame = false
@@ -182,19 +186,25 @@ class ArCorePoseCollector(
         runCatching { session?.pause() }
         surface?.onPause()
         resumed = false
-        wasTracking = false
+        // A deliberate Activity pause (rotation or a brief lock-screen
+        // handoff) is not itself evidence that ARCore lost the physical
+        // track. Keep the state optimistic until the resumed session emits a
+        // real PAUSED frame; this preserves the Anchor across ordinary
+        // rotation while still allowing genuine relocalization to reset it.
+        wasTracking = hasEmittedTrackingFrame
         emitStatus(VisualTrackingStatus(available = session != null, detail = "视觉采集已暂停"))
     }
 
     fun stop() {
         onHostPause()
+        runCatching { visualAnchor?.detach() }
+        visualAnchor = null
         runCatching { session?.close() }
         session = null
         wasTracking = false
         hasEmittedTrackingFrame = false
         hostActivity = null
         textureConfigured = false
-        initialTranslation = null
         lastEmittedTimestampNs = 0L
         lastStatusKey = null
         emitStatus(VisualTrackingStatus(detail = "视觉采集未启动"))
@@ -263,21 +273,41 @@ class ArCorePoseCollector(
                     return
                 }
 
-                val translation = camera.pose.translation
                 val trackingReset = shouldEmitVisualTrackingReset(hasEmittedTrackingFrame, wasTracking)
+                if (trackingReset) {
+                    runCatching { visualAnchor?.detach() }
+                    visualAnchor = null
+                }
+                val anchor = visualAnchor ?: runCatching {
+                    arSession.createAnchor(camera.pose)
+                }.onFailure {
+                    emitStatus(
+                        VisualTrackingStatus(
+                            available = true,
+                            active = true,
+                            trackingState = trackingState.name.lowercase(),
+                            detail = "视觉锚点创建失败：${it.javaClass.simpleName}",
+                        ),
+                    )
+                }.getOrNull()?.also { visualAnchor = it }
+                if (anchor == null || anchor.trackingState != TrackingState.TRACKING) {
+                    // Force the next tracked frame through the relocalization
+                    // path if creating or tracking the anchor failed.
+                    wasTracking = false
+                    lastEmittedTimestampNs = 0L
+                    return
+                }
                 wasTracking = true
                 hasEmittedTrackingFrame = true
-                if (trackingReset) initialTranslation = translation.copyOf()
-                val origin = initialTranslation ?: translation.copyOf().also { initialTranslation = it }
-                val deltaX = translation[0] - origin[0]
-                val deltaY = translation[1] - origin[1]
-                val deltaZ = translation[2] - origin[2]
+                val anchorRelativePose = anchor.pose.inverse().compose(camera.pose)
+                val relativeTranslation = anchorRelativePose.translation
                 if (!trackingReset && frame.timestamp - lastEmittedTimestampNs < 100_000_000L) return
                 lastEmittedTimestampNs = frame.timestamp
 
-                // ARCore: +X right, +Y up, -Z forward. Convert to a stable
-                // local display frame: X right, Y forward, Z up.
-                val displayDelta = arCoreDeltaToDisplayFrame(floatArrayOf(deltaX, deltaY, deltaZ))
+                // ARCore: +X right, +Y up, -Z forward. Convert the
+                // anchor-relative pose into a stable local display frame:
+                // X right, Y forward, Z up.
+                val displayDelta = arCoreDeltaToDisplayFrame(relativeTranslation)
                 val sample = VisualPoseSample(
                     deviceTimestampNs = frame.timestamp,
                     xM = displayDelta[0],
