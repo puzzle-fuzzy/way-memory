@@ -637,6 +637,11 @@ for (const snapshot of sessionStore.load(MAX_PERSISTED_SESSIONS, retentionCutoff
   snapshot.session.sensorStats ??= [];
   snapshot.session.sensorInventory ??= [];
   snapshot.session.outOfOrderSampleCount ??= 0;
+  if (snapshot.session.navigation && !snapshot.session.navigation.source) {
+    snapshot.session.navigation.source = snapshot.session.navigation.status === "no-fix" || snapshot.session.navigation.status === "route-not-ready"
+      ? "none"
+      : "gnss";
+  }
   snapshot.session.ownerId ??= LOCAL_OWNER_ID;
   snapshot.session.status = "stopped";
   sessions.set(snapshot.session.sessionId, snapshot.session);
