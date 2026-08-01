@@ -50,7 +50,7 @@ These are test-environment facts, not a production release claim: the public ent
 
 ## Current release boundary (2026-08-01)
 
-The repository `main` branch contains the authenticated route-learning and one-time navigation-handoff regression gate through commit `197c45b`. The current public IP deployment has not been switched to this protected release: it remains the anonymous HTTP/WS test environment described above.
+The repository `main` branch contains the authenticated route-learning, one-time navigation-handoff, and field-evidence provenance gates. The current public IP deployment has not been switched to this protected release: it remains the anonymous HTTP/WS test environment described above.
 
 The production cutover is currently blocked by external host state, not by the local API checks:
 
