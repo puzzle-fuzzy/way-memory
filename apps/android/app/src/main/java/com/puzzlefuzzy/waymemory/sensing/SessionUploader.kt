@@ -350,6 +350,7 @@ class SessionUploader(
 
     /** Publish a bounded capability snapshot when a dynamic sensor changes state. */
     fun updateSensorInventory(sensorInventory: List<SensorInventorySample>) {
+        if (!running) return
         this.sensorInventory = sensorInventory.take(MAX_SENSOR_INVENTORY)
         val sessionId = activeSessionId ?: return
         val currentSocket = socket ?: return
