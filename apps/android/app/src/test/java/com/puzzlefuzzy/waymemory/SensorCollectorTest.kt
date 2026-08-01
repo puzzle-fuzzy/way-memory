@@ -3,8 +3,11 @@ package com.puzzlefuzzy.waymemory
 import com.puzzlefuzzy.waymemory.sensing.shouldAcceptRotationSource
 import com.puzzlefuzzy.waymemory.sensing.isPrimaryLocationProvider
 import com.puzzlefuzzy.waymemory.sensing.canUseAccelerometerFallbackDuringRotation
+import com.puzzlefuzzy.waymemory.sensing.buildVisualStatusSample
 import com.puzzlefuzzy.waymemory.sensing.transformDeviceAcceleration
+import com.puzzlefuzzy.waymemory.sensing.VisualTrackingStatus
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -89,5 +92,26 @@ class SensorCollectorTest {
                 incomingTimestampNs = 1_900_000_000L,
             ),
         )
+    }
+
+    @Test
+    fun visualTrackingStatusIsRetainedAsDiagnosticMetadataOnly() {
+        val sample = buildVisualStatusSample(
+            VisualTrackingStatus(
+                available = true,
+                active = true,
+                trackingState = "paused",
+                failureReason = "INSUFFICIENT_FEATURES",
+                detail = "等待视觉特征",
+            ),
+            3_000_000_000L,
+        )
+
+        assertEquals("arcore.visual-status", sample?.sensorType)
+        assertTrue(sample?.pose == null)
+        assertTrue(sample?.relativePosition == null)
+        assertEquals(true, sample?.metadata?.get("available"))
+        assertEquals("paused", sample?.metadata?.get("trackingState"))
+        assertEquals("INSUFFICIENT_FEATURES", sample?.metadata?.get("failureReason"))
     }
 }

@@ -75,7 +75,7 @@ Run each case as a separate session and record the session ID shown by the API/W
 
 | Case | Device action | Required evidence |
 | --- | --- | --- |
-| Sensor inventory | Start capture while holding the phone still, then move and rotate it | The Android screen and session `sensorInventory` list the device-provided sensors, including any registration-denied entries and each sensor's `transportMaxHz`; the session has bounded raw samples for known and unknown sensor types; no crash |
+| Sensor inventory | Start capture while holding the phone still, then move and rotate it | The Android screen and session `sensorInventory` list the device-provided sensors, including any registration-denied entries and each sensor's `transportMaxHz`; the session has bounded raw samples for known and unknown sensor types, plus `arcore.visual-status` when ARCore is checked; no crash |
 | 3D translation | Move the phone forward/back, left/right, and up/down for at least 30 seconds | `poseTrack` contains changing `xM/yM/zM`; the web canvas shows individual 3D points, not an invented connecting line |
 | Rotation only | Rotate in place without translating | Orientation/visual samples change, but translation is not falsely reported as large movement |
 | Closed loop | Walk a loop and return near the start | Raw start/end remain visible; `closure` is only `closed` when aligned visual loop evidence exists; corrected track is separate from raw track |

@@ -80,6 +80,22 @@ internal fun canUseAccelerometerFallbackDuringRotation(
     maxAngularRateRadPerSecond: Float = 1.25f,
 ): Boolean = angularRateMagnitude.isFinite() && angularRateMagnitude <= maxAngularRateRadPerSecond
 
+internal fun buildVisualStatusSample(status: VisualTrackingStatus, timestampNs: Long): CollectedSample? {
+    if (timestampNs <= 0L) return null
+    return CollectedSample(
+        deviceTimestampNs = timestampNs,
+        sensorType = "arcore.visual-status",
+        values = emptyList(),
+        metadata = buildMap {
+            put("available", status.available)
+            put("active", status.active)
+            put("trackingState", status.trackingState.take(64))
+            status.failureReason?.takeIf(String::isNotBlank)?.let { put("failureReason", it.take(128)) }
+            put("detail", status.detail.take(256))
+        },
+    )
+}
+
 class SensorCollector(context: Context) : SensorEventListener, LocationListener {
     private val appContext = context.applicationContext
     private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -122,6 +138,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private var totalCollectedSamples = 0L
     private var lastSensorUiPublishMs = 0L
     private var lastPoseUiPublishMs = 0L
+    private var lastVisualStatusKey: String? = null
     @Volatile private var fusionReady = true
 
     val uiState: StateFlow<SensorUiState> = state.asStateFlow()
@@ -179,6 +196,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         totalCollectedSamples = 0L
         lastSensorUiPublishMs = 0L
         lastPoseUiPublishMs = 0L
+        lastVisualStatusKey = null
         transportLimiter.reset()
         stepDetectorRegistered = false
         lastStepCounter = null
@@ -223,6 +241,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         sensorThread = null
         sensorHandler = null
         lastPublishedLocation = null
+        lastVisualStatusKey = null
         resetMotionState()
         fusionReady = true
         visualCollector.stop()
@@ -430,6 +449,11 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
     private fun onVisualStatus(status: VisualTrackingStatus) {
         state.value = state.value.copy(visualTracking = status)
+        if (!state.value.collecting) return
+        val key = listOf(status.available, status.active, status.trackingState, status.failureReason, status.detail).joinToString("|")
+        if (key == lastVisualStatusKey) return
+        lastVisualStatusKey = key
+        buildVisualStatusSample(status, SystemClock.elapsedRealtimeNanos())?.let(uploader::enqueue)
     }
 
     private fun onVisualPose(sample: VisualPoseSample) {
@@ -633,6 +657,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         sensorThread = null
         sensorHandler = null
         visualCollector.stop()
+        lastVisualStatusKey = null
         resetMotionState()
         fusionReady = true
         state.value = state.value.copy(collecting = false, error = message)
