@@ -1,3 +1,5 @@
+import { resolve4 } from "node:dns/promises";
+
 type JsonRecord = Record<string, unknown>;
 
 const configuredBaseUrl = Bun.env.WAY_MEMORY_PUBLIC_BASE_URL ?? "https://way-memory.yxswy.com";
@@ -23,6 +25,7 @@ const base = (() => {
 
 const httpBase = base.replace(/^https:/, "http:");
 const wsBase = base.replace(/^https:/, "wss:");
+const publicHostname = new URL(base).hostname;
 
 const fetchJson = async (path: string, init?: RequestInit) => {
   const response = await fetch(`${base}${path}`, { ...init, redirect: "manual", cache: "no-store" });
@@ -59,7 +62,23 @@ const checkHttpRedirect = async () => {
   return response.status;
 };
 
+const checkDns = async () => {
+  const addresses = await resolve4(publicHostname).catch(() => [] as string[]);
+  const expectedAddress = Bun.env.WAY_MEMORY_EXPECTED_PUBLIC_IP?.trim();
+  if (!addresses.length) {
+    if (expectedAddress) fail(`DNS lookup returned no A record for ${publicHostname}; expected ${expectedAddress}`);
+    console.warn(`DNS lookup returned no A record for ${publicHostname}; continuing to the HTTP edge checks`);
+    return addresses;
+  }
+  if (expectedAddress && !addresses.includes(expectedAddress)) {
+    fail(`DNS A record mismatch for ${publicHostname}: expected ${expectedAddress}, got ${addresses.join(", ")}`);
+  }
+  console.log("Public DNS A records", { hostname: publicHostname, addresses });
+  return addresses;
+};
+
 const run = async () => {
+  const dnsAddresses = await checkDns();
   const redirectStatus = await checkHttpRedirect();
   const web = await fetch(`${base}/`, { redirect: "manual", cache: "no-store" });
   if (web.status !== 200 || !(web.headers.get("content-type") ?? "").toLowerCase().includes("text/html")) {
@@ -100,6 +119,7 @@ const run = async () => {
 
   console.log("Public TLS preflight passed", {
     base,
+    dnsA: dnsAddresses,
     httpRedirect: redirectStatus,
     httpsWeb: 200,
     httpsHealth: 200,

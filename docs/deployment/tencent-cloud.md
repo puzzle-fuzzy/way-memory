@@ -74,6 +74,8 @@ After the production templates are installed, verify the edge before building a 
 $env:WAY_MEMORY_PUBLIC_BASE_URL = "https://way-memory.yxswy.com"
 $env:WAY_MEMORY_REQUIRE_AUTH = "1"
 $env:WAY_MEMORY_DASHBOARD_TOKEN = "<operator environment value>"
+# Optional strict DNS check for the current Tencent Cloud host.
+$env:WAY_MEMORY_EXPECTED_PUBLIC_IP = "101.35.246.159"
 bun run preflight:public-tls
 ```
 
