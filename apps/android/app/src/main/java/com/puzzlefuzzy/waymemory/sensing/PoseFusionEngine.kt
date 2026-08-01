@@ -9,6 +9,7 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 import kotlin.math.cos
 import kotlin.math.sin
+import java.util.ArrayDeque
 
 /**
  * Small, deterministic on-device fusion layer for the MVP.
@@ -71,6 +72,7 @@ class PoseFusionEngine {
     private var visualTrackingNeedsReset = false
     private var hasPositionAnchor = false
     private var hasRecoveredAnchor = false
+    private val pendingMotionEvents = ArrayDeque<PendingMotionEvent>()
 
     @Synchronized
     fun reset() {
@@ -126,6 +128,7 @@ class PoseFusionEngine {
         visualTrackingNeedsReset = false
         hasPositionAnchor = false
         hasRecoveredAnchor = false
+        pendingMotionEvents.clear()
     }
 
     @Synchronized
@@ -529,59 +532,59 @@ class PoseFusionEngine {
                 ),
                 (lastVisualZ - visualOriginZ).toDouble(),
             ) <= 1.5
-        if (visualLoopClosure) visualLoopClosureEmitted = true
-        val event = when {
-            visualLoopClosure -> MotionEventSample(
-                eventId = UUID.randomUUID().toString(),
-                deviceTimestampNs = timestampNs,
-                type = "loop-closed",
-                confidence = 0.72f,
-                details = mapOf("visualTravelledM" to visualTravelledM),
-            )
-            motionMode != lastMotionMode && motionMode == "elevator" -> MotionEventSample(
-                eventId = UUID.randomUUID().toString(),
-                deviceTimestampNs = timestampNs,
-                type = "elevator-candidate",
-                confidence = (0.55f + elevatorEvidenceFrames / 40f).coerceAtMost(0.92f),
-                details = mapOf("barometerVerticalSpeedMps" to barometerVerticalSpeedMps),
-            )
-            motionMode != lastMotionMode && motionMode == "stairs" -> MotionEventSample(
-                eventId = UUID.randomUUID().toString(),
-                deviceTimestampNs = timestampNs,
-                type = "stairs-enter",
-                confidence = (0.52f + stairsEvidenceFrames / 40f).coerceAtMost(0.88f),
-                details = mapOf(
-                    "barometerVerticalSpeedMps" to barometerVerticalSpeedMps,
-                    "horizontalSpeedMps" to horizontalSpeed,
+        if (visualLoopClosure) {
+            visualLoopClosureEmitted = true
+            pendingMotionEvents.addFirst(
+                PendingMotionEvent(
+                    type = "loop-closed",
+                    confidence = 0.72f,
+                    details = mapOf("visualTravelledM" to visualTravelledM),
                 ),
             )
-            lastMotionMode == "elevator" && motionMode != "elevator" -> MotionEventSample(
-                eventId = UUID.randomUUID().toString(),
-                deviceTimestampNs = timestampNs,
-                type = "elevator-exit",
-                confidence = 0.72f,
-            )
-            lastMotionMode == "stairs" && motionMode != "stairs" -> MotionEventSample(
-                eventId = UUID.randomUUID().toString(),
-                deviceTimestampNs = timestampNs,
-                type = "stairs-exit",
-                confidence = 0.7f,
-            )
-            motionMode != lastMotionMode && motionMode == "stationary" -> MotionEventSample(
-                eventId = UUID.randomUUID().toString(),
-                deviceTimestampNs = timestampNs,
-                type = "stationary-enter",
-                confidence = 0.84f,
-            )
-            lastMotionMode == "stationary" && motionMode != "stationary" -> MotionEventSample(
-                eventId = UUID.randomUUID().toString(),
-                deviceTimestampNs = timestampNs,
-                type = "stationary-exit",
-                confidence = 0.78f,
-            )
-            else -> null
         }
-        lastMotionMode = motionMode
+        if (motionMode != lastMotionMode) {
+            when {
+                lastMotionMode == "elevator" && motionMode != "elevator" -> pendingMotionEvents.addLast(
+                    PendingMotionEvent("elevator-exit", 0.72f),
+                )
+                lastMotionMode == "stairs" && motionMode != "stairs" -> pendingMotionEvents.addLast(
+                    PendingMotionEvent("stairs-exit", 0.7f),
+                )
+            }
+            if (lastMotionMode == "stationary" && motionMode != "stationary") {
+                pendingMotionEvents.addLast(PendingMotionEvent("stationary-exit", 0.78f))
+            }
+            when (motionMode) {
+                "elevator" -> pendingMotionEvents.addLast(
+                    PendingMotionEvent(
+                        type = "elevator-candidate",
+                        confidence = (0.55f + elevatorEvidenceFrames / 40f).coerceAtMost(0.92f),
+                        details = mapOf("barometerVerticalSpeedMps" to barometerVerticalSpeedMps),
+                    ),
+                )
+                "stairs" -> pendingMotionEvents.addLast(
+                    PendingMotionEvent(
+                        type = "stairs-enter",
+                        confidence = (0.52f + stairsEvidenceFrames / 40f).coerceAtMost(0.88f),
+                        details = mapOf(
+                            "barometerVerticalSpeedMps" to barometerVerticalSpeedMps,
+                            "horizontalSpeedMps" to horizontalSpeed,
+                        ),
+                    ),
+                )
+                "stationary" -> pendingMotionEvents.addLast(PendingMotionEvent("stationary-enter", 0.84f))
+            }
+            lastMotionMode = motionMode
+        }
+        val event = pendingMotionEvents.pollFirst()?.let { pending ->
+            MotionEventSample(
+                eventId = UUID.randomUUID().toString(),
+                deviceTimestampNs = timestampNs,
+                type = pending.type,
+                confidence = pending.confidence,
+                details = pending.details,
+            )
+        }
 
         val positionMagnitude = magnitude(position)
         val gnssFresh = isFresh(timestampNs, lastGnssTimestampNs, GNSS_FRESHNESS_NS)
@@ -725,4 +728,10 @@ class PoseFusionEngine {
 data class PoseUpdate(
     val pose: PoseEstimateSample,
     val motionEvent: MotionEventSample?,
+)
+
+private data class PendingMotionEvent(
+    val type: String,
+    val confidence: Float,
+    val details: Map<String, Any?> = emptyMap(),
 )

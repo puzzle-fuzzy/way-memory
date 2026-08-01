@@ -311,6 +311,30 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun directSpecialModeTransitionPreservesExitAndEntryEvents() {
+        val engine = PoseFusionEngine()
+        val observedEvents = mutableListOf<String>()
+        var timestampNs = 1_000_000_000L
+        val baselinePressure = 1013.25f
+        engine.updatePressure(baselinePressure, timestampNs)
+        repeat(14) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(baselinePressure - (it + 1) * 0.08f, timestampNs)
+            engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0f)
+        }
+
+        repeat(30) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(baselinePressure - 1.12f - (it + 1) * 0.04f, timestampNs)
+            engine.updateImu(timestampNs, floatArrayOf(2.0f, 0f, 0f), 0f)?.motionEvent?.type?.let(observedEvents::add)
+        }
+
+        assertTrue(observedEvents.contains("elevator-exit"))
+        assertTrue(observedEvents.contains("stairs-enter"))
+        assertTrue(observedEvents.indexOf("elevator-exit") < observedEvents.indexOf("stairs-enter"))
+    }
+
+    @Test
     fun visualPoseIsPromotedOnlyAfterFrameAlignment() {
         val engine = PoseFusionEngine()
         engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)

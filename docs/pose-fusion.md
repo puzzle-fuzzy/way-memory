@@ -67,6 +67,8 @@ When Android recreates the process, the uploader resumes the same server session
 
 Pressure vertical speed, horizontal speed, and motion state can emit `elevator-candidate` and `elevator-exit`; the phone does not need to be shaken or translated horizontally because it may be held still inside the elevator. Weather, air conditioning, and building airflow make pressure alone insufficient for floor confirmation. Floor transitions need visual structure, a floor plan/annotation, or explicit user confirmation. Stairs should be inferred from repeated vertical steps and walking cadence, not from a single pressure spike.
 
+Mode transition events are emitted through an ordered pending-event queue. If the classifier moves directly from stairs to elevator (or the reverse), the previous mode's exit event is delivered before the next mode's entry event instead of being overwritten by the single latest classifier result. The same ordering is used for stationary exit/entry and remains visible in raw replay.
+
 ## Failure policy
 
 Camera occlusion, low light, textureless surfaces, background restrictions, or missing ARCore must lower confidence and expose the active source. The system must not continue drawing a visually precise path after its uncertainty has exceeded the route's acceptance threshold.
