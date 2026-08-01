@@ -61,9 +61,15 @@ try {
     body: JSON.stringify({ samples: [
       { deviceTimestampNs: 1, sensorType: "pose", values: [0, 0, 0], pose: { deviceTimestampNs: 1, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.8, source: "fused", frame: "local-enu", sourceFlags: ["imu"], motionMode: "stationary", stationary: true } },
       { deviceTimestampNs: 2, sensorType: "pose", values: [1, 0, 0], pose: { deviceTimestampNs: 2, xM: 1, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.8, source: "fused", frame: "local-enu", sourceFlags: ["imu"], motionMode: "walking", stationary: false } },
+      { deviceTimestampNs: 3, sensorType: "arcore.visual-pose", values: [0, 0, 0], metadata: { trackingState: "tracking", trackingReset: true, confidence: 0.9 }, pose: { deviceTimestampNs: 3, xM: 1, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.8, source: "fused", frame: "local-enu", sourceFlags: ["imu", "visual-reset"], motionMode: "walking", stationary: false } },
     ] }),
   }, deviceToken);
   if (sampleResult.response.status !== 200) throw new Error(`source samples failed: ${JSON.stringify(sampleResult.body)}`);
+  const sourceRaw = await request(`/api/sessions/${source.sessionId}/raw`, undefined, dashboardToken);
+  const sourceVisualSample = sourceRaw.body?.samples?.find((sample: { sensorType?: string }) => sample.sensorType === "arcore.visual-pose");
+  if (sourceRaw.response.status !== 200 || sourceVisualSample?.metadata?.trackingReset !== true) {
+    throw new Error(`source visual metadata was not retained: ${JSON.stringify(sourceRaw.body)}`);
+  }
   const stopResult = await request(`/api/sessions/${source.sessionId}/stop`, { method: "POST" }, deviceToken);
   if (stopResult.response.status !== 200) throw new Error(`source stop failed: ${JSON.stringify(stopResult.body)}`);
   const replay = Bun.spawn(["bun", "run", "scripts/replay-session.ts", source.sessionId], {
@@ -76,10 +82,15 @@ try {
   if (replayExit !== 0) throw new Error(`replay command failed: ${await new Response(replay.stderr).text()}`);
   const sessionsResult = await request("/api/sessions", undefined, dashboardToken);
   if (sessionsResult.response.status !== 200) throw new Error(`dashboard session list failed: ${JSON.stringify(sessionsResult.body)}`);
-  const sessions = sessionsResult.body as Array<{ deviceId: string; sampleCount: number; status: string }>;
+  const sessions = sessionsResult.body as Array<{ sessionId: string; deviceId: string; sampleCount: number; status: string }>;
   const replayed = sessions.find((item) => item.deviceId === `replay:${source.sessionId}`);
-  if (!replayed || replayed.sampleCount !== 2 || replayed.status !== "stopped") throw new Error(`replay assertion failed: ${JSON.stringify(sessions)}`);
-  console.log("Replay smoke passed", { sourceSessionId: source.sessionId, replayedSamples: replayed.sampleCount });
+  if (!replayed || replayed.sampleCount !== 3 || replayed.status !== "stopped") throw new Error(`replay assertion failed: ${JSON.stringify(sessions)}`);
+  const replayedRaw = await request(`/api/sessions/${replayed.sessionId}/raw`, undefined, dashboardToken);
+  const replayedVisualSample = replayedRaw.body?.samples?.find((sample: { sensorType?: string }) => sample.sensorType === "arcore.visual-pose");
+  if (replayedVisualSample?.metadata?.trackingReset !== true) {
+    throw new Error(`replayed visual metadata was not retained: ${JSON.stringify(replayedRaw.body)}`);
+  }
+  console.log("Replay smoke passed", { sourceSessionId: source.sessionId, replayedSamples: replayed.sampleCount, sourceVisualMetadata: true, replayedVisualMetadata: true });
 } finally {
   if (api && !api.killed) api.kill();
   await api?.exited;

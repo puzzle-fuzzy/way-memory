@@ -629,6 +629,7 @@ const normalizeSensorType = (sensorType: string) => {
     geomagnetic_rotation_vector: "rotation-vector",
     rotation_vector: "rotation-vector",
     linear_acceleration: "linear-acceleration",
+    visual_pose: "arcore.visual-pose",
   }[normalized] ?? normalized;
 };
 
@@ -670,6 +671,28 @@ const normalizeRelativePosition = (value: unknown): SensorSample["relativePositi
     zM,
     ...(accuracyM === undefined || accuracyM === null ? {} : { accuracyM }),
   };
+};
+
+const normalizeSampleMetadata = (value: unknown): SensorSample["metadata"] | null => {
+  if (!isRecord(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > 16) return null;
+  const metadata: Record<string, number | string | boolean> = {};
+  for (const [key, item] of entries) {
+    if (!key || key.length > 64) return null;
+    if (typeof item === "number") {
+      if (!Number.isFinite(item)) return null;
+      metadata[key] = item;
+    } else if (typeof item === "string") {
+      if (item.length > 256) return null;
+      metadata[key] = item;
+    } else if (typeof item === "boolean") {
+      metadata[key] = item;
+    } else {
+      return null;
+    }
+  }
+  return metadata;
 };
 
 const motionModes = new Set<MotionMode>(["stationary", "walking", "stairs", "elevator", "vehicle", "unknown"]);
@@ -771,6 +794,8 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
   if (!Array.isArray(rawValues) || rawValues.length > MAX_SENSOR_VALUES) return null;
   const values = rawValues.map(finiteNumber);
   if (values.some((item) => item === null)) return null;
+  const metadata = value.metadata === undefined ? undefined : normalizeSampleMetadata(value.metadata);
+  if (value.metadata !== undefined && metadata === null) return null;
   const sensorAccuracy = value.sensorAccuracy === undefined ? undefined : finiteNumber(value.sensorAccuracy);
   if (value.sensorAccuracy !== undefined && (sensorAccuracy === null || !Number.isInteger(sensorAccuracy) || sensorAccuracy < 0 || sensorAccuracy > 3)) return null;
   const accuracy = value.accuracy === undefined ? undefined : finiteNumber(value.accuracy);
@@ -788,6 +813,7 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
     deviceTimestampNs,
     sensorType,
     values: values as number[],
+    ...(metadata === undefined || metadata === null ? {} : { metadata }),
     ...(sensorAccuracy === undefined || sensorAccuracy === null ? {} : { sensorAccuracy }),
     ...(accuracy === undefined || accuracy === null ? {} : { accuracy }),
     ...(location ? { location } : {}),

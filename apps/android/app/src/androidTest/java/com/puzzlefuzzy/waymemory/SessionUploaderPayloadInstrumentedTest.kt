@@ -28,4 +28,28 @@ class SessionUploaderPayloadInstrumentedTest {
         assertTrue(samples.get(0) is JSONObject)
         assertEquals(10, samples.getJSONObject(0).getLong("deviceTimestampNs"))
     }
+
+    @Test
+    fun visualDiagnosticsSurviveTheQueuedPayloadCodec() {
+        val payload = buildSamplesMessage(
+            sessionId = "session-visual-reset",
+            batch = listOf(
+                CollectedSample(
+                    deviceTimestampNs = 20,
+                    sensorType = "arcore.visual-pose",
+                    values = listOf(0f, 0f, 0f),
+                    metadata = mapOf(
+                        "trackingState" to "tracking",
+                        "trackingReset" to true,
+                        "confidence" to 0.9f,
+                    ),
+                ),
+            ),
+        )
+
+        val metadata = payload.getJSONArray("samples").getJSONObject(0).getJSONObject("metadata")
+        assertEquals("tracking", metadata.getString("trackingState"))
+        assertTrue(metadata.getBoolean("trackingReset"))
+        assertEquals(0.9, metadata.getDouble("confidence"), 0.0001)
+    }
 }

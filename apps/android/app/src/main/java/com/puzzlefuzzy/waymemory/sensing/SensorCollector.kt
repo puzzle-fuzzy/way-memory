@@ -394,6 +394,12 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
                     sensorType = "arcore.visual-pose",
                     values = listOf(sample.xM, sample.yM, sample.zM),
                     accuracy = sample.accuracyM,
+                    metadata = buildMap {
+                        put("trackingState", sample.trackingState)
+                        put("confidence", sample.confidence)
+                        put("trackingReset", sample.trackingReset)
+                        sample.failureReason?.let { put("failureReason", it) }
+                    },
                     pose = if (poseAccepted) poseUpdate?.pose else null,
                     motionEvent = if (poseAccepted) poseUpdate?.motionEvent else null,
                 ),

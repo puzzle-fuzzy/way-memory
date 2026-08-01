@@ -203,6 +203,8 @@ export interface SensorSample {
   deviceTimestampNs: number;
   sensorType: string;
   values: number[];
+  /** Bounded primitive diagnostics retained for deterministic raw replay. */
+  metadata?: Record<string, number | string | boolean>;
   sensorAccuracy?: number;
   accuracy?: number;
   location?: {

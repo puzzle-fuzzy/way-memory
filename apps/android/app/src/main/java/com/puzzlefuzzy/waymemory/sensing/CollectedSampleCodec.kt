@@ -25,6 +25,13 @@ internal object CollectedSampleCodec : SampleCodec {
         put("deviceTimestampNs", deviceTimestampNs)
         put("sensorType", sensorType)
         put("values", JSONArray(values))
+        if (metadata.isNotEmpty()) {
+            put("metadata", JSONObject().apply {
+                metadata.forEach { (key, value) ->
+                    if (value is Number || value is String || value is Boolean) put(key, value)
+                }
+            })
+        }
         sensorAccuracy?.let { put("sensorAccuracy", it) }
         accuracy?.let { put("accuracy", it) }
         location?.let {
@@ -82,6 +89,7 @@ internal object CollectedSampleCodec : SampleCodec {
         deviceTimestampNs = getLong("deviceTimestampNs"),
         sensorType = getString("sensorType"),
         values = optJSONArray("values").toFloatList(),
+        metadata = optJSONObject("metadata")?.toAnyMap() ?: emptyMap(),
         sensorAccuracy = optIntOrNull("sensorAccuracy"),
         accuracy = optFloatOrNull("accuracy"),
         location = optJSONObject("location")?.let {

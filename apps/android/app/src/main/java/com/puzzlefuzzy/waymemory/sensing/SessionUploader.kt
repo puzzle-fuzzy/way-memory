@@ -31,6 +31,7 @@ data class CollectedSample(
     val deviceTimestampNs: Long,
     val sensorType: String,
     val values: List<Float> = emptyList(),
+    val metadata: Map<String, Any?> = emptyMap(),
     val sensorAccuracy: Int? = null,
     val accuracy: Float? = null,
     val location: LocationSample? = null,

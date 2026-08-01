@@ -70,6 +70,10 @@ try {
   const eventTypes = [...new Set(motionEvents.map((event) => event.type).filter((item): item is string => typeof item === "string"))].sort();
   const loopClosureEventCount = motionEvents.filter((event) => event.type === "loop-closed").length;
   const rawSensorTypes = [...new Set(rawSamples.map((sample) => sample.sensorType).filter((item): item is string => typeof item === "string"))].sort();
+  const visualTrackingResetSampleCount = rawSamples.filter((sample) => (
+    sample.sensorType === "arcore.visual-pose"
+      && sample.metadata?.trackingReset === true
+  )).length;
   const rawSensorTypeCounts = Object.fromEntries(rawSamples.reduce((counts, sample) => {
     if (typeof sample.sensorType === "string") counts.set(sample.sensorType, (counts.get(sample.sensorType) ?? 0) + 1);
     return counts;
@@ -150,6 +154,7 @@ try {
     closureConsistent: closure.adjusted !== true || (closure.status === "closed" && corrected.length >= poses.length),
     recoveryAnchorContinuity,
     visualResetEvidence: visualResetPoseCount > 0,
+    visualResetRawEvidence: visualTrackingResetSampleCount > 0,
     visualResetContinuity: visualResetJumpM !== null && visualResetJumpM <= maximumVisualResetJumpM,
     serverBounds: Number(session.droppedSampleCount ?? 0) >= 0 && poses.length <= 1200 && motionEvents.length <= 128,
     clientManifest: client.applicationId === "com.puzzlefuzzy.waymemory"
@@ -175,6 +180,7 @@ try {
       && checks.poseStream
       && checks.poseTimestampMonotonic
       && checks.visualResetEvidence
+      && checks.visualResetRawEvidence
       && checks.visualResetContinuity
       && loopClosureEventCount <= 1
       && checks.serverBounds,
@@ -229,6 +235,7 @@ try {
     },
     visualRecovery: {
       resetPoseCount: visualResetPoseCount,
+      rawTrackingResetSampleCount: visualTrackingResetSampleCount,
       sourceFlag: "visual-reset",
       jumpM: visualResetJumpM,
       limitM: maximumVisualResetJumpM,
