@@ -153,7 +153,7 @@ private fun SensorScreen(collector: SensorCollector) {
                 Text("手机传感器采集", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "先建立可靠的原始观测，再进入路线学习。当前会话只在应用前台运行。",
+                    "先建立可靠的原始观测，再进入路线学习。前台服务会持续采集；锁屏后视觉暂停，但 IMU、定位与气压仍可继续。",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
