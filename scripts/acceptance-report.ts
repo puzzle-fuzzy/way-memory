@@ -121,6 +121,14 @@ try {
   const registeredSensors = inventory.filter((sensor) => sensor.registered === true).length;
   const hasGyroscopeSample = rawSensorTypes.some((type) => type.includes("gyroscope"));
   const normalizedRawSensorTypes = rawSensorTypes.map((type) => type.toLowerCase().replaceAll("_", "-"));
+  const rawMotionSensorTypes = normalizedRawSensorTypes.filter((type) => (
+    type.includes("accelerometer")
+      || type.includes("linear-acceleration")
+      || type.includes("gyroscope")
+      || type.includes("rotation-vector")
+      || type.includes("gravity")
+  ));
+  const hasRawMotionSensorEvidence = rawMotionSensorTypes.length > 0;
   const hasRotationSample = normalizedRawSensorTypes.some((type) => type.includes("rotation-vector") || type.includes("game-rotation"));
   const transportBudgetSensors = inventory.filter((sensor) => (
     sensor.registered === true
@@ -144,6 +152,7 @@ try {
     sensorTransportBudget: transportBudgetSensors === registeredSensors && registeredSensors > 0,
     rawReplayBounded: rawSamples.length > 0 && rawSamples.length <= 1024 && Number(session.rawSampleCount ?? 0) <= 1024,
     poseStream: poses.length > 0,
+    rawMotionSensorEvidence: hasRawMotionSensorEvidence,
     poseTimestampMonotonic,
     threeAxisMovement: axes.xM.span >= minimumAxisM && axes.yM.span >= minimumAxisM && axes.zM.span >= minimumAxisM,
     rotationSensorEvidence: hasGyroscopeSample || hasRotationSample,
@@ -163,7 +172,7 @@ try {
       && clientApiOrigin === expectedApiOrigin,
   };
   const caseChecks: Record<string, boolean> = {
-    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.routeOrderingClean && checks.serverBounds && checks.clientManifest,
+    baseline: checks.sessionLoaded && checks.sensorInventory && checks.sensorTransportBudget && checks.rawReplayBounded && checks.rawMotionSensorEvidence && checks.poseStream && checks.poseTimestampMonotonic && checks.sampleIdsUniqueInReplay && checks.routeOrderingClean && checks.serverBounds && checks.clientManifest,
     "3d": checks.poseStream && checks.threeAxisMovement,
     rotation: checks.rotationSensorEvidence && checks.rotationTranslationBounded && checks.rotationMotionModeSafe,
     loop: checks.closureConsistent && closure.status === "closed" && closure.adjusted === true && corrected.length > 0,
@@ -218,6 +227,7 @@ try {
     eventTypes,
     rawSensorTypes,
     rawSensorTypeCounts,
+    rawMotionSensorTypes,
     rotation: {
       hasGyroscopeSample,
       hasRotationSample,

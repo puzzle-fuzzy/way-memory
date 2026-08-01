@@ -153,6 +153,7 @@ Record at minimum:
 - Pose timestamp monotonicity, time span, per-source counts and source age;
 - For the rotation case, every pose must keep `motionMode` at `stationary` or `unknown` in addition to staying inside the translation limit;
 - raw sensor type counts, `sourceFlags`, `frame`, `motionMode`, and `motionEvents`;
+- The baseline must include at least one retained raw motion sensor stream (`accelerometer`, `linear-acceleration`, `gyroscope`, `rotation-vector`, or `gravity`); a session containing only fused Pose/location samples is not valid sensor evidence.
 - `closure.status`, `closure.adjusted`, and whether `correctedPoseTrack` is present;
 - `client.applicationId`, `client.versionName`, `client.buildType`, and normalized `client.apiBaseUrl`;
 - the web page screenshot showing the same session ID and point count.
