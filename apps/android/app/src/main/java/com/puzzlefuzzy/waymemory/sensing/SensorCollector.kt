@@ -25,6 +25,29 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import kotlin.math.sqrt
 
+private const val ROTATION_SOURCE_FRESHNESS_NS = 750_000_000L
+
+/**
+ * Decide whether a rotation-vector callback may replace the currently selected
+ * source. The rule is pure so callback ordering and source failover can be
+ * regression-tested without constructing Android framework services.
+ */
+internal fun shouldAcceptRotationSource(
+    currentPriority: Int,
+    currentTimestampNs: Long,
+    incomingPriority: Int,
+    incomingTimestampNs: Long,
+    freshnessNs: Long = ROTATION_SOURCE_FRESHNESS_NS,
+): Boolean {
+    if (incomingPriority <= 0 || incomingTimestampNs <= 0L) return false
+    val currentFresh = currentPriority > 0
+        && incomingTimestampNs >= currentTimestampNs
+        && incomingTimestampNs - currentTimestampNs <= freshnessNs
+    if (incomingPriority < currentPriority && currentFresh) return false
+    if (incomingPriority <= currentPriority && incomingTimestampNs <= currentTimestampNs) return false
+    return true
+}
+
 class SensorCollector(context: Context) : SensorEventListener, LocationListener {
     private val appContext = context.applicationContext
     private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -560,11 +583,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         if (values.size < 3) return
         if (timestampNs <= 0L) return
         val priority = rotationSourcePriority(sensorType)
-        val currentSourceFresh = rotationSourcePriority > 0
-            && timestampNs >= rotationSourceTimestampNs
-            && timestampNs - rotationSourceTimestampNs <= ROTATION_SOURCE_FRESHNESS_NS
-        if (priority < rotationSourcePriority && currentSourceFresh) return
-        if (priority <= rotationSourcePriority && timestampNs <= rotationSourceTimestampNs) return
+        if (!shouldAcceptRotationSource(rotationSourcePriority, rotationSourceTimestampNs, priority, timestampNs)) return
         SensorManager.getRotationMatrixFromVector(rotationMatrix, values.toFloatArray())
         hasRotationMatrix = true
         hasRotationVector = true
@@ -672,6 +691,5 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         private const val MAX_COUNTER_STEP_DELTA = 8
         private const val SENSOR_UI_INTERVAL_MS = 100L
         private const val POSE_UI_INTERVAL_MS = 50L
-        private const val ROTATION_SOURCE_FRESHNESS_NS = 750_000_000L
     }
 }
