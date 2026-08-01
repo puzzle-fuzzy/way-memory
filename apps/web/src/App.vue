@@ -4,7 +4,7 @@ import type { LiveSensorSnapshot, RouteNode, TrackPoint } from "@way-memory/cont
 import { useRealtimeSession } from "./composables/useRealtimeSession";
 import { useRoutes } from "./composables/useRoutes";
 
-const { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, followLatest, setAuthToken, enrollDevice } = useRealtimeSession();
+const { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, downloadSessionExport, followLatest, setAuthToken, enrollDevice } = useRealtimeSession();
 const { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute, createNode, createNavigationHandoff } = useRoutes();
 const dashboardToken = ref("");
 const newEnrollmentCode = ref("");
@@ -18,6 +18,8 @@ const annotationType = ref<RouteNode["nodeType"]>("landmark");
 const annotationInstruction = ref("");
 const annotationError = ref("");
 const annotationBusy = ref(false);
+const exportError = ref("");
+const exportBusy = ref(false);
 const annotationTypes: Array<{ value: RouteNode["nodeType"]; label: string }> = [
   { value: "landmark", label: "视觉地标" },
   { value: "turn", label: "转弯" },
@@ -112,6 +114,19 @@ async function createManualAnnotation() {
     annotationError.value = error instanceof Error ? error.message : "人工标注保存失败";
   } finally {
     annotationBusy.value = false;
+  }
+}
+
+async function downloadCurrentSessionExport() {
+  if (!session.value) return;
+  exportBusy.value = true;
+  exportError.value = "";
+  try {
+    await downloadSessionExport(session.value.sessionId);
+  } catch (error) {
+    exportError.value = error instanceof Error ? error.message : "原始回放下载失败";
+  } finally {
+    exportBusy.value = false;
   }
 }
 
@@ -952,8 +967,10 @@ const activities = computed(() => {
         <button v-if="!followingLive" class="rounded-full border border-ember/30 bg-[#fff8ee] px-3 py-1.5 text-ember" type="button" @click="followLatest">跟随实时</button>
         <select class="max-w-[320px] rounded-full border border-[#d3e0d7] bg-white/80 px-3 py-1.5 outline-none" :value="selectedSessionId ?? ''" aria-label="选择历史采集会话" @change="onSessionChange">
           <option value="" disabled>历史采集会话</option>
-         <option v-for="item in availableSessions" :key="item.sessionId" :value="item.sessionId">{{ sessionHistoryLabel(item) }}</option>
+          <option v-for="item in availableSessions" :key="item.sessionId" :value="item.sessionId">{{ sessionHistoryLabel(item) }}</option>
         </select>
+        <button v-if="session && routeManagementAvailable" class="rounded-full border border-[#cddbd1] bg-white/80 px-3 py-1.5 text-muted disabled:cursor-not-allowed disabled:opacity-50" type="button" :disabled="exportBusy" @click="downloadCurrentSessionExport">{{ exportBusy ? '导出中…' : '下载原始回放' }}</button>
+        <span v-if="exportError" class="text-ember">{{ exportError }}</span>
         <template v-if="routeManagementAvailable">
           <button v-if="selectedRoute && selectedRoute.status === 'verified'" class="rounded-full border border-ember/40 bg-[#fff8ee] px-3 py-1.5 text-ember disabled:cursor-not-allowed disabled:opacity-50" type="button" :disabled="routeBusy" @click="createNavigationHandoffCode">生成导航交接码</button>
           <div v-if="navigationHandoff" class="flex min-w-[280px] flex-1 items-center gap-2 rounded-2xl border border-[#ead7bf] bg-[#fff8ee] px-3 py-2 text-[10px] text-[#8c6845]">

@@ -169,6 +169,26 @@ export function useRealtimeSession() {
     }
   }
 
+  async function downloadSessionExport(sessionId: string) {
+    const response = await fetch(endpoint(`/api/sessions/${encodeURIComponent(sessionId)}/export`), {
+      cache: "no-store",
+      headers: requestHeaders(),
+    });
+    if (response.status === 401) {
+      authRequired.value = true;
+      connection.value = "offline";
+      throw new Error("dashboard authorization required");
+    }
+    if (!response.ok) throw new Error(`API ${response.status}`);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `way-memory-${sessionId}.json`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+  }
+
   function followLatest() {
     followingLive.value = true;
     selectedSessionId.value = null;
@@ -252,5 +272,5 @@ export function useRealtimeSession() {
     socket?.close();
   });
 
-  return { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, refreshSnapshot, selectSession, followLatest, setAuthToken, clearAuthToken, enrollDevice };
+  return { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, refreshSnapshot, selectSession, downloadSessionExport, followLatest, setAuthToken, clearAuthToken, enrollDevice };
 }
