@@ -62,6 +62,7 @@ class PoseFusionEngine {
     private var visualYawRadians: Float? = null
     private var visualRouteOriginX = 0f
     private var visualRouteOriginY = 0f
+    private var visualRouteOriginZ = 0f
     private var visualAlignmentPositionX = 0f
     private var visualAlignmentPositionY = 0f
     private var visualLoopClosureEmitted = false
@@ -114,6 +115,7 @@ class PoseFusionEngine {
         visualYawRadians = null
         visualRouteOriginX = 0f
         visualRouteOriginY = 0f
+        visualRouteOriginZ = 0f
         visualAlignmentPositionX = 0f
         visualAlignmentPositionY = 0f
         visualLoopClosureEmitted = false
@@ -298,6 +300,11 @@ class PoseFusionEngine {
                 val rotated = rotateVisual(visualOriginX, visualOriginY)
                 visualRouteOriginX = position[0] - rotated.first
                 visualRouteOriginY = position[1] - rotated.second
+                // ARCore's vertical coordinate is session-local too. Keep
+                // the current fused height as the global anchor so a visual
+                // relocalization during stairs/elevator motion cannot snap
+                // the route back to the ARCore origin (usually z=0).
+                visualRouteOriginZ = position[2] - visualOriginZ
             }
         }
 
@@ -305,10 +312,11 @@ class PoseFusionEngine {
         val target = rotateVisual(sample.xM, sample.yM)
         val targetX = visualRouteOriginX + target.first
         val targetY = visualRouteOriginY + target.second
+        val targetZ = visualRouteOriginZ + sample.zM
         val previousPosition = position.copyOf()
         position[0] += (targetX - position[0]) * 0.58f
         position[1] += (targetY - position[1]) * 0.58f
-        position[2] += (sample.zM - position[2]) * 0.58f
+        position[2] += (targetZ - position[2]) * 0.58f
         if (hasStepTrack) {
             stepTrackX += position[0] - previousPosition[0]
             stepTrackY += position[1] - previousPosition[1]
@@ -318,7 +326,7 @@ class PoseFusionEngine {
             val measuredVelocity = floatArrayOf(
                 (targetX - previousPosition[0]) / elapsedSeconds,
                 (targetY - previousPosition[1]) / elapsedSeconds,
-                (sample.zM - previousPosition[2]) / elapsedSeconds,
+                (targetZ - previousPosition[2]) / elapsedSeconds,
             )
             for (index in 0..2) {
                 val limit = if (index == 2) 5f else 15f

@@ -343,6 +343,40 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun visualRealignmentPreservesExistingVerticalRouteAnchor() {
+        val engine = PoseFusionEngine()
+        engine.seedFromPose(
+            com.puzzlefuzzy.waymemory.sensing.PoseEstimateSample(
+                deviceTimestampNs = 1_000_000_000L,
+                xM = 4f,
+                yM = 0f,
+                zM = 7.5f,
+                velocityXMps = 0f,
+                velocityYMps = 0f,
+                velocityZMps = 0f,
+                accuracyM = 1f,
+                confidence = 0.9f,
+                source = "fused",
+                sourceFlags = listOf("imu", "barometer"),
+                motionMode = "stairs",
+                stationary = false,
+            ),
+        )
+        engine.updateVisual(VisualPoseSample(1_100_000_000L, 10f, 20f, 2f, 0.15f, 0.9f, "tracking"))
+
+        var timestampNs = 1_200_000_000L
+        repeat(14) {
+            timestampNs += 100_000_000L
+            engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
+        }
+        val aligned = engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 11.5f, 20f, 2f, 0.15f, 0.9f, "tracking"))
+
+        assertNotNull(aligned)
+        assertTrue(aligned?.pose?.sourceFlags?.contains("visual-aligned") == true)
+        assertTrue("visual realignment snapped the vertical route anchor", (aligned?.pose?.zM ?: 0f) > 5f)
+    }
+
+    @Test
     fun implausibleVisualJumpIsRejectedAndReanchored() {
         val engine = PoseFusionEngine()
         engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
