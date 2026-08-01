@@ -3,6 +3,7 @@ package com.puzzlefuzzy.waymemory
 import com.puzzlefuzzy.waymemory.sensing.SensorInventorySample
 import com.puzzlefuzzy.waymemory.sensing.SessionUploader
 import com.puzzlefuzzy.waymemory.sensing.buildSessionStartRequest
+import com.puzzlefuzzy.waymemory.sensing.canSendCredentialOverTransport
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,6 +11,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionUploaderPayloadTest {
+    @Test
+    fun deviceCredentialsRequireHttpsExceptForLocalDevelopmentEndpoints() {
+        assertTrue(canSendCredentialOverTransport("https://way-memory.yxswy.com"))
+        assertTrue(canSendCredentialOverTransport("http://127.0.0.1:8787"))
+        assertTrue(canSendCredentialOverTransport("http://10.0.2.2:8787"))
+        assertFalse(canSendCredentialOverTransport("http://101.35.246.159"))
+        assertFalse(canSendCredentialOverTransport("ws://way-memory.yxswy.com"))
+    }
+
     @Test
     fun replacementSessionStartRetainsSensorInventoryAndTransportBudget() {
         val request = buildSessionStartRequest(

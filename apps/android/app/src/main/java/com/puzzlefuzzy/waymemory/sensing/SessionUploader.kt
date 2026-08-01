@@ -1,6 +1,7 @@
 package com.puzzlefuzzy.waymemory.sensing
 
 import android.util.Log
+import android.net.Uri
 import com.puzzlefuzzy.waymemory.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +22,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.net.URI as JavaUri
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 
@@ -138,6 +140,13 @@ internal fun buildSamplesMessage(sessionId: String, batch: List<CollectedSample>
         // JSON-encoded strings.
         batch.forEach { put(JSONObject(CollectedSampleCodec.encode(it))) }
     })
+
+internal fun canSendCredentialOverTransport(baseUrl: String): Boolean {
+    val uri = runCatching { JavaUri(baseUrl.trim()) }.getOrNull() ?: return false
+    val scheme = uri.scheme?.lowercase() ?: return false
+    val host = uri.host?.lowercase()?.trim('[', ']') ?: return false
+    return scheme == "https" || (scheme == "http" && host in setOf("localhost", "127.0.0.1", "::1", "10.0.2.2"))
+}
 
 internal fun parseSessionLifecycleEvent(message: JSONObject): SessionLifecycleEvent? {
     val type = message.optString("type")
@@ -356,7 +365,13 @@ class SessionUploader(
 
     private fun connect() {
         if (!running || socket != null) return
-        val ticket = credentialStore?.readToken()?.let(::requestWebSocketTicket)
+        val accessToken = credentialStore?.readToken()
+        if (accessToken != null && !canSendCredentialOverTransport(baseUrl)) {
+            state.update { current -> current.copy(connected = false, lastError = "已阻止向非 HTTPS 服务发送设备凭据") }
+            nextConnectAtMs = System.currentTimeMillis() + MAX_RECONNECT_DELAY_MS
+            return
+        }
+        val ticket = accessToken?.let(::requestWebSocketTicket)
         val ticketQuery = ticket?.let { "&ticket=${android.net.Uri.encode(it)}" } ?: ""
         val websocketUrl = baseUrl.trimEnd('/')
             .replaceFirst("http://", "ws://")
@@ -366,6 +381,10 @@ class SessionUploader(
     }
 
     private fun requestWebSocketTicket(accessToken: String): String? {
+        if (!canSendCredentialOverTransport(baseUrl)) {
+            state.update { current -> current.copy(lastError = "已阻止向非 HTTPS 服务发送设备凭据") }
+            return null
+        }
         val request = Request.Builder()
             .url("${baseUrl.trimEnd('/')}/api/auth/ws-ticket")
             .header("Authorization", "Bearer $accessToken")
