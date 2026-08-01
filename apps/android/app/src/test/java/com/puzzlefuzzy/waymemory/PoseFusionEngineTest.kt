@@ -302,6 +302,25 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun visualAlignmentStartsForSubMeterTranslation() {
+        val engine = PoseFusionEngine()
+        engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)
+        engine.updateVisual(VisualPoseSample(1_100_000_000L, 0f, 0f, 0f, 0.15f, 0.9f, "tracking"))
+
+        var timestampNs = 1_200_000_000L
+        var visualX = 0f
+        var aligned: com.puzzlefuzzy.waymemory.sensing.PoseUpdate? = null
+        repeat(8) {
+            timestampNs += 100_000_000L
+            engine.updateImu(timestampNs, floatArrayOf(1.0f, 0f, 0f), 0.05f)
+            visualX += 0.05f
+            aligned = engine.updateVisual(VisualPoseSample(timestampNs + 10_000_000L, visualX, 0f, 0f, 0.15f, 0.9f, "tracking")) ?: aligned
+        }
+
+        assertTrue("sub-meter visual movement did not align", aligned?.pose?.sourceFlags?.contains("visual-aligned") == true)
+    }
+
+    @Test
     fun visualReturnEmitsLoopClosureEvidence() {
         val engine = PoseFusionEngine()
         engine.updateImu(1_000_000_000L, floatArrayOf(0f, 0f, 0f), 0f)

@@ -33,7 +33,7 @@ GNSS fixes are also used to estimate a bounded velocity from successive monotoni
 
 ARCore 1.54.0 is integrated as an optional feature. It starts only after camera permission, device support, and Google Play Services for AR are available. Unsupported devices continue with GNSS, IMU, and barometer.
 
-ARCore uses a session-local metric frame. The adapter converts `+X right, +Y up, -Z forward` into the display frame `X right, Y forward, Z up`. It waits for meaningful visual and inertial displacement before estimating horizontal alignment. Samples before alignment remain diagnostic and are not promoted into the unified route. Promoted poses carry `visual` and `visual-aligned` source flags.
+ARCore uses a session-local metric frame. The adapter converts `+X right, +Y up, -Z forward` into the display frame `X right, Y forward, Z up`. It waits for at least `0.35m` visual displacement and `0.10m` inertial displacement before estimating horizontal alignment, so short phone movements can enter the unified route without using a single noisy frame. Samples before alignment remain diagnostic and are not promoted into the unified route. Promoted poses carry `visual` and `visual-aligned` source flags.
 
 Visual correction also contributes velocity in meters per second using the frame timestamp interval. It is not computed from a raw position error, which would mix meters and meters per second. When visual frames pause, subsequent inertial poses expose `visual-stale` until a fresh tracked frame arrives.
 

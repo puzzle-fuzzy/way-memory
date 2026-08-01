@@ -295,7 +295,7 @@ class PoseFusionEngine {
             // Use the cumulative displacement from the first visual frame.
             // A normal ARCore frame moves only a few centimetres, so a
             // single-frame threshold would never align during slow walking.
-            if (visualDistanceFromOrigin > 1.2f && inertialDistance > 0.3f) {
+            if (visualDistanceFromOrigin > MIN_VISUAL_ALIGNMENT_DISTANCE_M && inertialDistance > MIN_INERTIAL_ALIGNMENT_DISTANCE_M) {
                 visualYawRadians = atan2(inertialDeltaY, inertialDeltaX) - atan2(visualDeltaFromOriginY, visualDeltaFromOriginX)
                 val rotated = rotateVisual(visualOriginX, visualOriginY)
                 visualRouteOriginX = position[0] - rotated.first
@@ -659,6 +659,8 @@ class PoseFusionEngine {
         private const val STEP_LENGTH_M = 0.65f
         private const val MAX_STEPS_PER_EVENT = 8
         private const val MAX_VISUAL_SPEED_MPS = 12f
+        private const val MIN_VISUAL_ALIGNMENT_DISTANCE_M = 0.35f
+        private const val MIN_INERTIAL_ALIGNMENT_DISTANCE_M = 0.10f
     }
 }
 
