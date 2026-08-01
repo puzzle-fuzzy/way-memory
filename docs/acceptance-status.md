@@ -16,7 +16,7 @@
 
 ## 最新证据快照（2026-08-01）
 
-- 当前 `origin/main` 为 `88c6bba`；最新运行时代码提交为 `bea992f`，包含 ARCore 首帧重置边界和气压过期状态修复；`88c6bba` 只更新部署证据文档。
+- 当前 `origin/main` 为 `a4dc4e7`；最新运行时代码提交为 `bea992f`，包含 ARCore 首帧重置边界和气压过期状态修复；当前分支后续提交补充了现场 APK provenance 与 ARCore 实体设备预检。
 - Android 隔离全量门禁通过：5 项仪器测试、单元测试、Debug/Release 构建。
 - 服务端门禁通过：实时 WebSocket、重启持久化、动态传感器清单、鉴权/角色隔离、原始回放、幂等、重连、生命周期、保留策略、闭环、路线交接和 10 个合成场景验收；闭环累计距离和 `process-recovery`/`network-interruption` 报告契约已覆盖。
 - 历史模拟器协议链路曾用 Debug APK 实测：17 个可用传感器、17 个模拟 GPS 点、422 个 Pose 点、16,721 个样本，raw replay 上限为 1,024 条；其 APK 来源提交为旧提交 `b7d3864`，只作为历史协议证据，不作为当前代码或实体设备 provenance。模拟器不支持 ARCore，且该证据不计入实体手机传感器验收。
