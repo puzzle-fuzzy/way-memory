@@ -209,6 +209,11 @@ private fun SensorScreen(collector: SensorCollector) {
                             TextButton(onClick = { collector.saveDeviceCredential(deviceToken) }) { Text("保存到本机") }
                             if (state.deviceCredentialConfigured) TextButton(onClick = { deviceToken = ""; collector.clearDeviceCredential() }) { Text("清除") }
                         }
+                        if (!state.collecting && sync.pendingSamples > 0) {
+                            TextButton(onClick = collector::discardPendingCapture) {
+                                Text("明确清除未上传会话（${sync.pendingSamples} 条）")
+                            }
+                        }
                         OutlinedTextField(
                             value = navigationHandoffToken,
                             onValueChange = { navigationHandoffToken = it.take(256) },

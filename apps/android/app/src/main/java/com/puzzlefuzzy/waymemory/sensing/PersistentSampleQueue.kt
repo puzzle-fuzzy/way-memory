@@ -78,6 +78,18 @@ internal class PersistentSampleQueue(
     @Synchronized
     fun size(): Int = queue.size
 
+    /** Explicit user action only; never call this during automatic recovery. */
+    @Synchronized
+    fun clear() {
+        closeOutput()
+        queue.clear()
+        acknowledgedBytes = 0L
+        fileBytes = 0L
+        pendingBytes = 0L
+        spoolFile.delete()
+        cursorFile.delete()
+    }
+
     @Synchronized
     override fun close() {
         flushAndSync()

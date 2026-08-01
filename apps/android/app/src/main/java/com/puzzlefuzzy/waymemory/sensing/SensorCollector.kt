@@ -41,6 +41,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         storageDirectory = File(appContext.filesDir, "capture-queue"),
         credentialStore = credentialStore,
         onSessionLifecycle = ::onSessionLifecycle,
+        onCaptureBlocked = ::onCaptureBlocked,
     )
     private val transportLimiter = SensorTransportRateLimiter()
     private val visualCollector = ArCorePoseCollector(
@@ -90,6 +91,12 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     fun clearDeviceCredential() {
         credentialStore.clear()
         state.value = state.value.copy(deviceCredentialConfigured = false)
+    }
+
+    fun discardPendingCapture() {
+        if (state.value.collecting) return
+        uploader.discardPendingCapture()
+        state.value = state.value.copy(error = null)
     }
 
     fun availableSensorCount(): Int = sensorManager.getSensorList(Sensor.TYPE_ALL).size
@@ -522,6 +529,18 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         // resumed session seedFromPose has already completed on this callback
         // thread before fusionReady becomes visible to sensor callbacks.
         fusionReady = true
+    }
+
+    private fun onCaptureBlocked(message: String) {
+        sensorManager.unregisterListener(this)
+        locationManager.removeUpdates(this)
+        sensorThread?.quitSafely()
+        sensorThread = null
+        sensorHandler = null
+        visualCollector.stop()
+        resetMotionState()
+        fusionReady = true
+        state.value = state.value.copy(collecting = false, error = message)
     }
 
     private fun updateRotationMatrix(values: List<Float>) {

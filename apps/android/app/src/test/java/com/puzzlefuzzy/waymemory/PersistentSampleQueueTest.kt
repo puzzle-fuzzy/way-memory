@@ -33,6 +33,14 @@ class PersistentSampleQueueTest {
                 reopened.acknowledge(1)
                 assertEquals(0, reopened.size())
             }
+            PersistentSampleQueue(directory, maxSamples = 2, codec = TestCodec).use { queue ->
+                queue.add(first)
+                queue.clear()
+                assertEquals(0, queue.size())
+            }
+            PersistentSampleQueue(directory, maxSamples = 2, codec = TestCodec).use { cleared ->
+                assertEquals(0, cleared.size())
+            }
             assertTrue(directory.exists())
         } finally {
             directory.deleteRecursively()

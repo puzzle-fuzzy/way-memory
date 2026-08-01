@@ -239,6 +239,7 @@ class SessionUploader(
     storageDirectory: File,
     private val credentialStore: DeviceCredentialStore? = null,
     private val onSessionLifecycle: ((SessionLifecycleEvent) -> Unit)? = null,
+    private val onCaptureBlocked: ((String) -> Unit)? = null,
 ) : WebSocketListener() {
     private val client = OkHttpClient.Builder().pingInterval(15, TimeUnit.SECONDS).build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -326,7 +327,11 @@ class SessionUploader(
         val stopSocket = socket
         val stopSessionId = activeSessionId
         if (stopSocket == null || stopSessionId == null) {
-            finishStop(stopSocket)
+            finishStop(
+                stopSocket = stopSocket,
+                sessionId = stopSessionId,
+                sessionFinalized = stopSessionId == null,
+            )
             return
         }
         scope.launch {
@@ -335,17 +340,22 @@ class SessionUploader(
                 if (inFlightBatchSize == 0) flush()
                 delay(STOP_DRAIN_POLL_MS)
             }
-            stopSocket.send(JSONObject().put("type", "session.stop").put("sessionId", stopSessionId).toString())
-            finishStop(stopSocket)
+            val drained = queue.size() == 0 && stopSocket === socket
+            val stopSent = drained && stopSocket.send(
+                JSONObject().put("type", "session.stop").put("sessionId", stopSessionId).toString(),
+            )
+            finishStop(
+                stopSocket = stopSocket,
+                sessionId = stopSessionId,
+                sessionFinalized = stopSent,
+            )
         }
     }
 
-    private fun finishStop(stopSocket: WebSocket?) {
-        connectionJob = null
-        stopSocket?.close(1000, "session stopped")
-        if (socket === stopSocket) socket = null
-        inFlightBatchSize = 0
-        inFlightSocket = null
+    /** Explicitly discards a stale, unsent capture after UI confirmation. */
+    fun discardPendingCapture() {
+        if (running) return
+        queue.clear()
         sessionIdFile.delete()
         sessionConfigFile.delete()
         activeSessionId = null
@@ -353,8 +363,41 @@ class SessionUploader(
             current.copy(
                 connected = false,
                 sessionId = null,
+                pendingSamples = 0,
+                lastError = "已按用户确认清除未上传会话",
+            )
+        }
+    }
+
+    private fun finishStop(stopSocket: WebSocket?, sessionId: String?, sessionFinalized: Boolean) {
+        connectionJob = null
+        stopSocket?.close(1000, "session stopped")
+        if (socket === stopSocket) socket = null
+        inFlightBatchSize = 0
+        inFlightSocket = null
+        if (sessionFinalized) {
+            sessionIdFile.delete()
+            sessionConfigFile.delete()
+            activeSessionId = null
+        } else if (sessionId != null) {
+            // Keep the session marker and pending queue bound together after
+            // a failed drain. A later capture must resume this session rather
+            // than attach old samples to a new one.
+            sessionIdFile.parentFile?.mkdirs()
+            sessionIdFile.writeText(sessionId)
+            activeSessionId = sessionId
+        }
+        val stopWarning = if (!sessionFinalized && sessionId != null) {
+            "网络未确认会话已停止；已保留 ${queue.size()} 条待上传样本，下次开始将继续当前会话"
+        } else {
+            null
+        }
+        state.update { current ->
+            current.copy(
+                connected = false,
+                sessionId = if (sessionFinalized) null else sessionId,
                 pendingSamples = queue.size(),
-                lastError = if (queue.size() > 0) {
+                lastError = stopWarning ?: if (queue.size() > 0) {
                     "停止采集，仍有 ${queue.size()} 条样本保存在本机，下一次采集将继续上传"
                 } else {
                     current.lastError
@@ -488,9 +531,21 @@ class SessionUploader(
                 "error" -> {
                     val error = message.optString("error")
                     if (BuildConfig.DEBUG) Log.w(TAG, "server error=$error")
-                    if (error == "session_resume_failed" && activeSessionId != null && running) {
-                    activeSessionId = null
-                    sessionIdFile.delete()
+                    if (error == "session_resume_failed" && queue.size() > 0 && activeSessionId != null && running) {
+                        running = false
+                        connectionJob?.cancel()
+                        if (socket === webSocket) {
+                            socket = null
+                            inFlightBatchSize = 0
+                            inFlightSocket = null
+                        }
+                        val message = "会话已过期；${queue.size()} 条旧样本已保留，请恢复网络后重试，或明确清除后开始新会话"
+                        state.update { current -> current.copy(connected = false, lastError = message) }
+                        onCaptureBlocked?.invoke(message)
+                        webSocket.close(1000, "session resume failed")
+                    } else if (error == "session_resume_failed" && activeSessionId != null && running) {
+                        activeSessionId = null
+                        sessionIdFile.delete()
                         state.update { current -> current.copy(sessionId = null, lastError = "会话已过期，正在建立新会话") }
                         webSocket.send(sessionStartMessage().toString())
                     } else {
