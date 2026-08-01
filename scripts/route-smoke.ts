@@ -86,6 +86,7 @@ try {
     sessionId,
     samples: [
       { sampleId: "route-sample-1", deviceTimestampNs: 100, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4, altitudeM: 100, provider: "gps" }, pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
+      { sampleId: "route-network-diagnostic", deviceTimestampNs: 150, sensorType: "location", values: [], location: { lat: 31.2404, lng: 121.47, accuracyM: 80, provider: "network" }, pose: { deviceTimestampNs: 150, xM: 999, yM: 999, zM: 999, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.99, source: "fused", frame: "local-enu", sourceFlags: ["gnss"], motionMode: "walking", stationary: false } },
       { sampleId: "route-sample-2", deviceTimestampNs: 200, sensorType: "location", values: [], location: { lat: 31.23041, lng: 121.47, accuracyM: 4, altitudeM: 101 }, pose: { deviceTimestampNs: 200, xM: 1, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
     ],
   }));

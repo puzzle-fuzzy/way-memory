@@ -67,8 +67,8 @@ internal fun shouldAcceptRotationSource(
  * provider exists, allowing a network fix to establish the route origin can
  * create a false jump when the first satellite fix arrives later.
  */
-internal fun isPrimaryLocationProvider(provider: String?, gpsProviderAvailable: Boolean): Boolean =
-    provider?.equals("gps", ignoreCase = true) == true || !gpsProviderAvailable
+internal fun isPrimaryLocationProvider(provider: String?): Boolean =
+    provider?.equals("gps", ignoreCase = true) == true
 
 /**
  * A raw accelerometer minus a lagging gravity estimate is not trustworthy
@@ -105,7 +105,6 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         onStatus = ::onVisualStatus,
     )
     private var lastPublishedLocation: Location? = null
-    private var gpsProviderAvailable = false
     private val rotationMatrix = FloatArray(9)
     private val gravity = FloatArray(3)
     private val magneticField = FloatArray(3)
@@ -177,7 +176,6 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         sensorInventory.clear()
         registeredSensorKeys.clear()
         lastPublishedLocation = null
-        gpsProviderAvailable = false
         totalCollectedSamples = 0L
         lastSensorUiPublishMs = 0L
         lastPoseUiPublishMs = 0L
@@ -290,7 +288,6 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             updateError("请打开系统定位服务")
             return
         }
-        gpsProviderAvailable = providers.any { it == LocationManager.GPS_PROVIDER }
         var subscribed = 0
         providers.forEach { provider ->
             runCatching {
@@ -312,7 +309,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         val nowNs = SystemClock.elapsedRealtimeNanos()
         providers.mapNotNull { provider ->
             runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
-        }.filter { isPrimaryLocationProvider(it.provider, gpsProviderAvailable) }
+        }.filter { isPrimaryLocationProvider(it.provider) }
             .maxByOrNull { it.elapsedRealtimeNanos }
             ?.takeIf { it.elapsedRealtimeNanos > 0 && nowNs - it.elapsedRealtimeNanos <= 30_000_000_000L }
             ?.let(::onLocationChanged)
@@ -501,7 +498,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     override fun onLocationChanged(location: Location) {
-        if (!isPrimaryLocationProvider(location.provider, gpsProviderAvailable)) {
+        if (!isPrimaryLocationProvider(location.provider)) {
             enqueueNetworkLocationDiagnostic(location)
             return
         }
@@ -594,14 +591,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         return true
     }
 
-    override fun onProviderEnabled(provider: String) {
-        if (provider == LocationManager.GPS_PROVIDER) gpsProviderAvailable = true
-    }
-
-    override fun onProviderDisabled(provider: String) {
-        if (provider == LocationManager.GPS_PROVIDER) gpsProviderAvailable = false
-        updateError("Location provider disabled: $provider")
-    }
+    override fun onProviderEnabled(provider: String) = Unit
+    override fun onProviderDisabled(provider: String) = updateError("Location provider disabled: $provider")
     @Deprecated("Required by the legacy LocationListener contract")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 

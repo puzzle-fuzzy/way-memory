@@ -13,13 +13,9 @@ import org.junit.Test
 class SensorCollectorTest {
     @Test
     fun networkFixIsDiagnosticWhenGpsProviderExists() {
-        assertTrue(isPrimaryLocationProvider("gps", gpsProviderAvailable = true))
-        assertFalse(isPrimaryLocationProvider("network", gpsProviderAvailable = true))
-    }
-
-    @Test
-    fun networkFixCanBeFallbackWhenGpsProviderDoesNotExist() {
-        assertTrue(isPrimaryLocationProvider("network", gpsProviderAvailable = false))
+        assertTrue(isPrimaryLocationProvider("gps"))
+        assertFalse(isPrimaryLocationProvider("network"))
+        assertFalse(isPrimaryLocationProvider(null))
     }
 
     @Test

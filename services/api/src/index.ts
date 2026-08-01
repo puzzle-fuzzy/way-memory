@@ -661,6 +661,9 @@ const normalizeLocation = (value: unknown): SensorSample["location"] | null => {
   };
 };
 
+const isPrimaryGeographicProvider = (provider?: string) =>
+  provider === undefined || provider.toLowerCase() === "gps";
+
 const normalizeRelativePosition = (value: unknown): SensorSample["relativePosition"] | null => {
   if (!isRecord(value)) return null;
   const xM = finiteNumber(value.xM);
@@ -1209,8 +1212,10 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
   }
   for (const sample of samples) {
     const sensorType = normalizeSensorType(sample.sensorType);
+    const nonPrimaryLocationSample = sample.location !== undefined
+      && !isPrimaryGeographicProvider(sample.location.provider);
     let sampleOutOfOrder = false;
-    if (sample.pose) {
+    if (sample.pose && !nonPrimaryLocationSample) {
       const previousTimestampNs = runtime.lastPoseTimestampNs;
       if (previousTimestampNs !== undefined && sample.pose.deviceTimestampNs <= previousTimestampNs) {
         sampleOutOfOrder = true;
@@ -1250,7 +1255,7 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
         session.latestRelativePosition = motionPoint;
       }
     }
-    if (sample.location) {
+    if (sample.location && isPrimaryGeographicProvider(sample.location.provider)) {
       const previousLocationTimestampNs = runtime.lastLocation?.deviceTimestampNs;
       if (previousLocationTimestampNs !== undefined && sample.deviceTimestampNs <= previousLocationTimestampNs) {
         sampleOutOfOrder = true;
@@ -1284,7 +1289,10 @@ const acceptSamples = (session: ObservationSession, rawSamples: unknown[]) => {
       }
     } else {
       if (sensorType === "barometer") updateBarometerAltitude(session, sample);
-      upsertSensor(session, sample, receivedAt, sensorType);
+      const diagnosticSensorType = sample.location?.provider
+        ? `location-${normalizeSensorType(sample.location.provider)}`
+        : sensorType;
+      upsertSensor(session, sample, receivedAt, diagnosticSensorType);
     }
     if (sampleOutOfOrder) {
       session.outOfOrderSampleCount += 1;
