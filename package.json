@@ -24,6 +24,7 @@
     "smoke:public-route": "bun run scripts/public-route-navigation-smoke.ts",
     "smoke:public-closure": "bun run scripts/public-closure-smoke.ts",
     "smoke:public-auth": "bun run scripts/public-auth-smoke.ts",
+    "smoke:release": "bun run scripts/release-runtime-smoke.ts",
     "preflight:public-tls": "bun run scripts/public-tls-preflight.ts",
     "acceptance:report": "bun scripts/acceptance-report.ts",
     "android:acceptance": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1",
@@ -31,6 +32,7 @@
     "dev:api": "bun run services/api/src/index.ts",
     "dev:web": "bun --cwd=apps/web run dev",
     "build:web": "bun --cwd=apps/web run build",
-    "typecheck:web": "bun --cwd=apps/web run typecheck"
+    "typecheck:web": "bun --cwd=apps/web run typecheck",
+    "release:build": "bun run scripts/build-release.ts"
   }
 }

@@ -4,6 +4,7 @@ build/
 .gradle-cache/
 .tmp-build/
 .tmp-*-build/
+.release/
 .env
 .env.*
 !.env.example
