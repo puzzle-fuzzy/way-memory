@@ -1,7 +1,12 @@
-import type { NavigationHandoffGrant, RouteSummary } from "@way-memory/contracts";
+import type { NavigationHandoffGrant, RouteNode, RouteSummary } from "@way-memory/contracts";
 import { ref } from "vue";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+
+export type CreateRouteNodeInput = Pick<RouteNode, "nodeType" | "instruction" | "xM" | "yM" | "zM" | "confidence"> & {
+  lat?: number;
+  lng?: number;
+};
 
 function endpoint(path: string) {
   return `${apiBase}${path}`;
@@ -72,6 +77,21 @@ export function useRoutes() {
     }
   }
 
+  async function createNode(routeId: string, node: CreateRouteNodeInput) {
+    routeBusy.value = true;
+    try {
+      const route = await request(`/api/routes/${encodeURIComponent(routeId)}/nodes`, {
+        method: "POST",
+        body: JSON.stringify(node),
+      }) as RouteSummary;
+      routes.value = routes.value.map((item) => item.routeId === route.routeId ? route : item);
+      routeError.value = "";
+      return route;
+    } finally {
+      routeBusy.value = false;
+    }
+  }
+
   async function createNavigationHandoff(routeId: string) {
     routeBusy.value = true;
     try {
@@ -83,5 +103,5 @@ export function useRoutes() {
     }
   }
 
-  return { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute, createNavigationHandoff };
+  return { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute, createNode, createNavigationHandoff };
 }

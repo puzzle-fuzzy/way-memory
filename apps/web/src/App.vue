@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { LiveSensorSnapshot, TrackPoint } from "@way-memory/contracts";
+import type { LiveSensorSnapshot, RouteNode, TrackPoint } from "@way-memory/contracts";
 import { useRealtimeSession } from "./composables/useRealtimeSession";
 import { useRoutes } from "./composables/useRoutes";
 
 const { connection, authRequired, authenticated, latestSession, availableSessions, selectedSessionId, followingLive, selectSession, followLatest, setAuthToken, enrollDevice } = useRealtimeSession();
-const { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute, createNavigationHandoff } = useRoutes();
+const { routes, routeBusy, routeError, refreshRoutes, createRoute, attachObservation, publishRoute, createNode, createNavigationHandoff } = useRoutes();
 const dashboardToken = ref("");
 const newEnrollmentCode = ref("");
 const enrollmentError = ref("");
@@ -14,6 +14,21 @@ const selectedRouteId = ref("");
 const routeName = ref("盲人路线");
 const routeActionError = ref("");
 const navigationHandoff = ref<{ token: string; routeId: string; expiresAt: string } | null>(null);
+const annotationType = ref<RouteNode["nodeType"]>("landmark");
+const annotationInstruction = ref("");
+const annotationError = ref("");
+const annotationBusy = ref(false);
+const annotationTypes: Array<{ value: RouteNode["nodeType"]; label: string }> = [
+  { value: "landmark", label: "视觉地标" },
+  { value: "turn", label: "转弯" },
+  { value: "door", label: "门" },
+  { value: "stairs", label: "楼梯" },
+  { value: "elevator", label: "电梯" },
+  { value: "crossing", label: "路口" },
+  { value: "hazard", label: "危险点" },
+  { value: "start", label: "起点" },
+  { value: "end", label: "终点" },
+];
 const routeManagementAvailable = computed(() => !authRequired.value || authenticated.value);
 const selectedRoute = computed(() => routes.value.find((route) => route.routeId === selectedRouteId.value));
 
@@ -69,6 +84,37 @@ async function createNavigationHandoffCode() {
   }
 }
 
+async function createManualAnnotation() {
+  const route = selectedRoute.value;
+  const pose = annotationPose.value;
+  const instruction = annotationInstruction.value.trim();
+  if (!route || !pose || !instruction) {
+    annotationError.value = "请先选择路线、确保收到 Pose，并填写标注说明";
+    return;
+  }
+  annotationBusy.value = true;
+  annotationError.value = "";
+  try {
+    const accuracyM = Number.isFinite(pose.accuracyM) ? pose.accuracyM : 10;
+    const confidence = Math.max(0.05, Math.min(0.98, 1 - accuracyM / 20));
+    const location = session.value?.latestLocation;
+    await createNode(route.routeId, {
+      nodeType: annotationType.value,
+      instruction,
+      xM: pose.xM,
+      yM: pose.yM,
+      zM: pose.zM,
+      confidence,
+      ...(location ? { lat: location.lat, lng: location.lng } : {}),
+    });
+    annotationInstruction.value = "";
+  } catch (error) {
+    annotationError.value = error instanceof Error ? error.message : "人工标注保存失败";
+  } finally {
+    annotationBusy.value = false;
+  }
+}
+
 const connectionLabel = computed(() => ({
   connecting: "连接中",
   connected: "实时同步",
@@ -76,6 +122,7 @@ const connectionLabel = computed(() => ({
 }[connection.value]));
 
 const session = computed(() => latestSession.value);
+const annotationPose = computed(() => session.value?.latestPose ?? session.value?.latestRelativePosition);
 const hasSession = computed(() => Boolean(session.value));
 const isCollecting = computed(() => session.value?.status === "active");
 const sessionLabel = computed(() => {
@@ -867,6 +914,16 @@ const activities = computed(() => {
       </div>
       <div v-if="routeManagementAvailable && (routeActionError || routeError)" class="z-10 border-b border-[#ead7bf] bg-[#fff8ee] px-4 py-1.5 text-[10px] text-[#8c6845] sm:px-7">路线工作区：{{ routeActionError || routeError }}</div>
 
+      <div v-if="routeManagementAvailable && selectedRoute" class="z-10 flex flex-wrap items-center gap-2 border-b border-[#d3e0d7] bg-[#f8fbf8] px-4 py-2 text-[10px] text-muted sm:px-7">
+        <span class="font-semibold text-ink">人工标注</span>
+        <select v-model="annotationType" class="rounded-full border border-[#cddbd1] bg-white px-3 py-1.5 outline-none" aria-label="标注类型">
+          <option v-for="item in annotationTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
+        <input v-model="annotationInstruction" class="min-w-[220px] flex-1 rounded-full border border-[#cddbd1] bg-white px-3 py-1.5 outline-none focus:border-ember" type="text" maxlength="256" placeholder="例如：沿右侧墙面直行，到门口向左" aria-label="标注说明" @keyup.enter="createManualAnnotation" />
+        <button class="rounded-full bg-ink px-3 py-1.5 text-paper disabled:cursor-not-allowed disabled:opacity-40" type="button" :disabled="routeBusy || annotationBusy || selectedRoute.status !== 'draft' || !annotationPose" @click="createManualAnnotation">{{ annotationBusy ? '保存中…' : '记录当前位置' }}</button>
+        <span class="whitespace-nowrap">{{ selectedRoute.nodes }} 个节点 · {{ selectedRoute.status === 'draft' ? '绑定当前 Pose' : '已发布路线不可直接修改' }}</span>
+        <span v-if="annotationError" class="basis-full text-ember">{{ annotationError }}</span>
+      </div>
       <div v-if="authRequired" class="z-10 flex flex-wrap items-center gap-3 border-b border-[#ead7bf] bg-[#fff8ee] px-4 py-3 text-xs text-[#8c6845] sm:px-7">
         <span class="font-semibold">服务端已开启访问控制，请输入 dashboard token 才能查看轨迹。</span>
         <input v-model="dashboardToken" class="min-w-[240px] flex-1 rounded-full border border-[#e3c9a7] bg-white px-3 py-2 font-mono text-[10px] outline-none" type="password" autocomplete="off" placeholder="dashboard token" @keyup.enter="setAuthToken(dashboardToken)" />
