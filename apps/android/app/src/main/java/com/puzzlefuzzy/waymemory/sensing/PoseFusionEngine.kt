@@ -412,7 +412,10 @@ class PoseFusionEngine {
         // Stationary here means translationally stationary. A blind user's
         // phone may rotate in the hand while the body remains in place; gyro
         // activity must not turn that into walking or artificial displacement.
-        val stationaryNow = accelerationMagnitude < 0.14f && abs(barometerVerticalSpeedMps) < 0.12f
+        val pressureVerticalSpeed = if (
+            hasBarometer && isFresh(timestampNs, lastPressureTimestampNs, PRESSURE_FRESHNESS_NS)
+        ) barometerVerticalSpeedMps else 0f
+        val stationaryNow = accelerationMagnitude < 0.14f && abs(pressureVerticalSpeed) < 0.12f
 
         if (stationaryNow) {
             stationaryFrames += 1
@@ -447,7 +450,7 @@ class PoseFusionEngine {
         }
 
         val horizontalSpeed = hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat()
-        updateMotionEvidence(horizontalSpeed)
+        updateMotionEvidence(timestampNs, horizontalSpeed)
         return buildUpdate(timestampNs, force = false)
     }
 
@@ -500,24 +503,31 @@ class PoseFusionEngine {
         movingFrames = min(40, movingFrames + stepCountDelta)
         stepCount += stepCountDelta.toLong()
         lastStepTimestampNs = timestampNs
-        updateMotionEvidence(hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat())
+        updateMotionEvidence(timestampNs, hypot(velocity[0].toDouble(), velocity[1].toDouble()).toFloat())
         return buildUpdate(timestampNs, force = true)
     }
 
-    private fun updateMotionEvidence(horizontalSpeed: Float) {
+    private fun updateMotionEvidence(timestampNs: Long, horizontalSpeed: Float) {
+        val pressureFresh = hasBarometer && isFresh(timestampNs, lastPressureTimestampNs, PRESSURE_FRESHNESS_NS)
+        val verticalSpeed = if (pressureFresh) barometerVerticalSpeedMps else 0f
         // A phone can be held nearly motionless inside an elevator. Requiring
         // movingFrames here would classify that real vertical trip as
         // stationary forever. Pressure movement plus low horizontal speed is
         // sufficient when the IMU is stable; movingFrames still covers the
         // acceleration during elevator take-off/braking.
-        val elevatorEvidence = abs(barometerVerticalSpeedMps) > 0.25f
+        val elevatorEvidence = pressureFresh
+            && abs(verticalSpeed) > 0.25f
             && horizontalSpeed < 0.9f
             && (movingFrames > 3 || stationaryFrames >= 3)
         // Exit evidence must decay faster than it accumulates. Otherwise a
         // short low-horizontal-speed phase at the bottom of a staircase can
         // keep the route classified as an elevator for several seconds.
         if (elevatorEvidence) elevatorEvidenceFrames = min(40, elevatorEvidenceFrames + 1) else elevatorEvidenceFrames = maxOf(0, elevatorEvidenceFrames - 3)
-        val stairsEvidence = abs(barometerVerticalSpeedMps) > 0.12f && horizontalSpeed >= 0.3f && movingFrames > 3 && !elevatorEvidence
+        val stairsEvidence = pressureFresh
+            && abs(verticalSpeed) > 0.12f
+            && horizontalSpeed >= 0.3f
+            && movingFrames > 3
+            && !elevatorEvidence
         if (stairsEvidence) stairsEvidenceFrames = min(40, stairsEvidenceFrames + 1) else stairsEvidenceFrames = maxOf(0, stairsEvidenceFrames - 2)
     }
 

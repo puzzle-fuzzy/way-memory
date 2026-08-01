@@ -314,6 +314,31 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun stalePressureCannotKeepElevatorModeAlive() {
+        val engine = PoseFusionEngine()
+        var timestampNs = 1_000_000_000L
+        val baselinePressure = 1013.25f
+        engine.updatePressure(baselinePressure, timestampNs)
+        var elevatorCandidate = false
+        repeat(12) {
+            timestampNs += 200_000_000L
+            engine.updatePressure(baselinePressure - (it + 1) * 0.08f, timestampNs)
+            val update = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0.02f)
+            if (update?.motionEvent?.type == "elevator-candidate") elevatorCandidate = true
+        }
+        assertTrue(elevatorCandidate)
+
+        var elevatorExit = false
+        repeat(24) {
+            timestampNs += 200_000_000L
+            val update = engine.updateImu(timestampNs, floatArrayOf(0f, 0f, 0f), 0.02f)
+            if (update?.motionEvent?.type == "elevator-exit") elevatorExit = true
+        }
+
+        assertTrue(elevatorExit)
+    }
+
+    @Test
     fun sustainedVerticalMotionWithHorizontalTravelProducesStairsEvent() {
         val engine = PoseFusionEngine()
         var stairsEvent = false
