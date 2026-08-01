@@ -16,11 +16,11 @@
 
 ## 最新证据快照（2026-08-01）
 
-- 当前主分支提交：`b0506f9`；导航实现提交：`896c785`；本轮闭环距离与恢复证据修复提交：`42a5850`（均已推送到 `origin/main`）。
+- 本轮构建基线提交：`4094672`；导航实现提交：`896c785`；本轮闭环距离与恢复证据修复提交：`42a5850`（均已推送到 `origin/main`）。
 - Android 隔离全量门禁通过：5 项仪器测试、单元测试、Debug/Release 构建。
 - 服务端门禁通过：实时 WebSocket、重启持久化、动态传感器清单、鉴权/角色隔离、原始回放、幂等、重连、生命周期、保留策略、闭环、路线交接和 10 个合成场景验收；闭环累计距离和 `process-recovery`/`network-interruption` 报告契约已覆盖。
 - 本机模拟器协议链路已实测：17 个可用传感器、7 个 GPS 点、204 个 Pose 点、13,668 个样本，WebSocket 上传成功；模拟器不支持 ARCore，且该证据不计入实体手机传感器验收。
-- 当前 Debug APK 来源提交为 `b0506f9`，API origin 为 `https://way-memory.yxswy.com`，SHA-256 为 `98a27a64243057208dbd008edd1f67f584493d493b1afd2d99609e0a6986966d`；它已在 `emulator-5554` 安装启动，但模拟器证据仅覆盖协议和生命周期，不计入真实传感器验收。
+- 当前 Debug APK 来源提交为 `4094672`，API origin 为 `https://way-memory.yxswy.com`，SHA-256 为 `481a3832d516ebb11ec2caee723fb29c67fc614e7207f1b30ae665f81f26c884`；它已在 `emulator-5554` 安装启动，但模拟器证据仅覆盖协议和生命周期，不计入真实传感器验收。
 - 公网预检仍未通过：`way-memory.yxswy.com` 没有有效 A 记录，HTTP 入口返回 `502`；腾讯云临时发布包的 `--check-only` 也因缺少受保护的 `/etc/way-memory/way-memory.env` 而拒绝继续。未执行生产重启。
 
 ## 合成验收 smoke 的边界
