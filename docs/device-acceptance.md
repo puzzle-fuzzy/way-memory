@@ -1,6 +1,6 @@
 # Android real-device acceptance
 
-This is the gate between “the code builds” and “the product recorded a real route”. The current Windows workstation has no authorized `adb` device, so this checklist is intentionally not marked passed until a phone produces the evidence below.
+This is the gate between “the code builds” and “the product recorded a real route”. The current Windows workstation has an authorized Android emulator but no physical Android phone, so this checklist is intentionally not marked passed until a phone produces the evidence below.
 
 ## Prepare
 
