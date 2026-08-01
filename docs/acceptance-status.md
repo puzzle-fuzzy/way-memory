@@ -21,7 +21,7 @@
 - 服务端门禁通过：实时 WebSocket、重启持久化、动态传感器清单、鉴权/角色隔离、原始回放、幂等、重连、生命周期、保留策略、闭环、路线交接和 10 个合成场景验收；闭环累计距离和 `process-recovery`/`network-interruption` 报告契约已覆盖。
 - 历史模拟器协议链路曾用 Debug APK 实测：17 个可用传感器、17 个模拟 GPS 点、422 个 Pose 点、16,721 个样本，raw replay 上限为 1,024 条；其 APK 来源提交为旧提交 `b7d3864`，只作为历史协议证据，不作为当前代码或实体设备 provenance。模拟器不支持 ARCore，且该证据不计入实体手机传感器验收。
 - 最新运行时发布包来源为 `bea992f`，已在腾讯云 `/tmp/way-memory-release-bea992f` 暂存；manifest 和 9 个 payload 哈希已验证。远端 `install-release.sh ... --check-only` 因缺少受保护的 `/etc/way-memory/way-memory.env` 拒绝继续，未执行生产重启。
-- 当前可供实体传感器验收的 Debug APK 已由 `fd473e9` 构建，API origin 为 `https://way-memory.yxswy.com`，工件目录为 `artifacts/android-release/fd473e92a142428b1cc8f215ec2d4b214f4c0859-debug`，SHA-256 为 `9a9034914aaa0e99f694e650c40f3c0cdeff3781896ce91228a74a6ee4cd32f7`；`-RequirePhysical` 预检已拒绝当前模拟器，未安装。
+- 当前可供实体传感器验收的 Debug APK 已由 `9036e52` 构建，API origin 为 `https://way-memory.yxswy.com`，工件目录为 `artifacts/android-release/9036e522f1315e59799855342bcf53e111ee983e-debug`，SHA-256 为 `9a9034914aaa0e99f694e650c40f3c0cdeff3781896ce91228a74a6ee4cd32f7`；`-RequirePhysical` 预检已拒绝当前模拟器，未安装。
 - 当前公网预检仍未通过：`way-memory.yxswy.com` 解析到 `198.18.0.248`，不是预期生产主机 `101.35.246.159`；远端服务进程虽为 active，但生产环境文件、Nginx 配置和 ACME 证书均不存在。当前唯一 ADB 设备仍是 API 36 模拟器，没有实体 Android 手机。
 
 ## 合成验收 smoke 的边界
