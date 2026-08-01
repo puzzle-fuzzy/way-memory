@@ -176,9 +176,14 @@ const routeStatusLabel = computed(() => {
 const navigationLabel = computed(() => {
   const navigation = session.value?.navigation;
   if (!navigation) return "";
+  const source = navigation.source === "gnss"
+    ? "GNSS"
+    : navigation.source === "local-pose"
+      ? "局部 Pose"
+      : "等待锚定";
   const progress = typeof navigation.progressM === "number" ? `${navigation.progressM.toFixed(1)}m` : "等待定位";
   const distance = typeof navigation.distanceToRouteM === "number" ? ` · 偏离 ${navigation.distanceToRouteM.toFixed(1)}m` : "";
-  return `导航 ${navigation.status} · ${progress}${distance}`;
+  return `导航 ${navigation.status} · ${source} · ${progress}${distance}`;
 });
 
 const track = computed(() => session.value?.track ?? []);
