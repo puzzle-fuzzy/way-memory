@@ -14,6 +14,14 @@
 | 公网 HTTPS/WSS 与生产存储 | 发布包校验通过；DNS、证书和生产环境仍缺失 | 未完成 |
 | 实体 Android 传感器矩阵 | `docs/device-acceptance.md` 的实体手机采集矩阵 | 未完成 |
 
+## 最新证据快照（2026-08-01）
+
+- 当前源码：`05ddfb7`（`main` 已推送到 `origin/main`）。
+- Android 隔离全量门禁通过：5 项仪器测试、单元测试、Debug/Release 构建。
+- 服务端门禁通过：实时 WebSocket、重启持久化、动态传感器清单、鉴权/角色隔离、原始回放、幂等、重连、生命周期、保留策略、闭环、路线交接和 8 个合成场景验收。
+- 与该源码绑定的 Debug APK SHA-256：`1c1a09081b20d57e2424ea7a708784eeb5cf71f69755e30f44bf3c888b439938`；它已在 `emulator-5554` 安装启动，但模拟器证据仅覆盖协议和生命周期，不计入真实传感器验收。
+- 公网预检仍未通过：`way-memory.yxswy.com` 没有有效 A 记录，HTTP 入口返回 `502`；腾讯云临时发布包的 `--check-only` 也因缺少受保护的 `/etc/way-memory/way-memory.env` 而拒绝继续。未执行生产重启。
+
 ## 合成验收 smoke 的边界
 
 ```powershell
