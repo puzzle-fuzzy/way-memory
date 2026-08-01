@@ -271,12 +271,16 @@ class PoseFusionEngine {
         // uncertainty instead of presenting visual odometry as survey-grade.
         lastVisualAccuracyM = (visualAccuracyPrior + (1f - visualConfidence) * 1.5f).coerceIn(0.5f, 5f)
         if (sample.trackingReset || visualTrackingNeedsReset) {
-            resetVisualReference(sample)
+            resetVisualReference(sample, markReset = true)
             visualTrackingNeedsReset = false
             return null
         }
         if (!hasVisual) {
-            resetVisualReference(sample)
+            // Establishing the first session-local visual origin is normal
+            // startup, not a relocalization. Keep this distinction explicit
+            // so replay/audit consumers only see visual-reset after tracking
+            // actually paused or a visual jump was rejected.
+            resetVisualReference(sample, markReset = false)
             return null
         }
 
@@ -291,7 +295,7 @@ class PoseFusionEngine {
         if (previousVisualTimestampNs > 0L && visualElapsedNs in 10_000_000L..1_000_000_000L) {
             val visualSpeedMps = deltaVisualDistance / (visualElapsedNs / 1_000_000_000f)
             if (!visualSpeedMps.isFinite() || visualSpeedMps > MAX_VISUAL_SPEED_MPS) {
-                resetVisualReference(sample)
+                resetVisualReference(sample, markReset = true)
                 return null
             }
         }
@@ -619,7 +623,7 @@ class PoseFusionEngine {
         return east to north
     }
 
-    private fun resetVisualReference(sample: VisualPoseSample) {
+    private fun resetVisualReference(sample: VisualPoseSample, markReset: Boolean) {
         hasVisual = true
         visualOriginX = sample.xM
         visualOriginY = sample.yM
@@ -631,7 +635,7 @@ class PoseFusionEngine {
         visualAlignmentPositionY = position[1]
         visualYawRadians = null
         visualTravelledM = 0f
-        visualResetPending = true
+        if (markReset) visualResetPending = true
     }
 
     private fun magnitude(values: FloatArray): Float =

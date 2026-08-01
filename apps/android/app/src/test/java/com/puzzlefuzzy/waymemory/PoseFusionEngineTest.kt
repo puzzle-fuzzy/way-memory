@@ -312,6 +312,7 @@ class PoseFusionEngineTest {
         val aligned = engine.updateVisual(VisualPoseSample(timestampNs + 100_000_000L, 1.5f, 0f, 0f, 0.15f, 0.9f, "tracking"))
         assertNotNull(aligned)
         assertTrue(aligned?.pose?.sourceFlags?.contains("visual-aligned") == true)
+        assertTrue(aligned?.pose?.sourceFlags?.contains("visual-reset") != true)
         assertEquals("local-enu", aligned?.pose?.frame)
     }
 
