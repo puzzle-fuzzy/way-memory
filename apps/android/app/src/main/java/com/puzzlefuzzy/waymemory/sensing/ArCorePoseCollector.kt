@@ -45,6 +45,11 @@ data class VisualPoseSample(
 )
 
 private const val AVAILABILITY_RETRY_DELAY_MS = 500L
+// ARCore exposes a metric relative pose here, but not a per-frame absolute
+// position covariance. Keep this prior conservative; the fusion layer can
+// still use the relative correction without claiming centimeter accuracy.
+private const val ARCORE_TRACKING_ACCURACY_PRIOR_M = 1.0f
+private const val ARCORE_TRACKING_CONFIDENCE_PRIOR = 0.65f
 
 /** Convert ARCore camera-world deltas into the app's X-right/Y-forward/Z-up frame. */
 internal fun arCoreDeltaToDisplayFrame(delta: FloatArray): FloatArray {
@@ -263,8 +268,8 @@ class ArCorePoseCollector(
                     xM = displayDelta[0],
                     yM = displayDelta[1],
                     zM = displayDelta[2],
-                    accuracyM = 0.15f,
-                    confidence = 0.9f,
+                    accuracyM = ARCORE_TRACKING_ACCURACY_PRIOR_M,
+                    confidence = ARCORE_TRACKING_CONFIDENCE_PRIOR,
                     trackingState = trackingState.name.lowercase(),
                     trackingReset = trackingReset,
                 )

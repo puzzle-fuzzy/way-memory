@@ -252,7 +252,12 @@ class PoseFusionEngine {
         if (sample.deviceTimestampNs <= 0L || (lastVisualTimestampNs > 0L && sample.deviceTimestampNs <= lastVisualTimestampNs)) return null
         val previousVisualTimestampNs = lastVisualTimestampNs
         lastVisualTimestampNs = sample.deviceTimestampNs
-        lastVisualAccuracyM = sample.accuracyM.takeIf { it.isFinite() }?.coerceIn(0.5f, 5f) ?: 1.5f
+        val visualAccuracyPrior = sample.accuracyM.takeIf { it.isFinite() }?.coerceIn(0.5f, 5f) ?: 1.5f
+        val visualConfidence = sample.confidence.takeIf { it.isFinite() }?.coerceIn(0.05f, 1f) ?: 0.35f
+        // A tracking state is not an absolute covariance. Widen the prior
+        // when the source reports lower quality so the fused route exposes
+        // uncertainty instead of presenting visual odometry as survey-grade.
+        lastVisualAccuracyM = (visualAccuracyPrior + (1f - visualConfidence) * 1.5f).coerceIn(0.5f, 5f)
         if (sample.trackingReset) {
             resetVisualReference(sample)
             return null
