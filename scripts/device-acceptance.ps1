@@ -9,7 +9,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$resolvedApk = (Resolve-Path (Join-Path $repo $ApkPath)).Path
+function Resolve-InputPath([string]$path, [string]$label) {
+    if (-not $path -or -not $path.Trim()) {
+        throw "$label must not be empty"
+    }
+    $candidate = if ([System.IO.Path]::IsPathRooted($path)) {
+        $path
+    } else {
+        Join-Path $repo $path
+    }
+    return (Resolve-Path -LiteralPath $candidate).Path
+}
+
+$resolvedApk = Resolve-InputPath $ApkPath "ApkPath"
 $displayApiBaseUrl = if ($ApiBaseUrl.Trim()) {
     $ApiBaseUrl.TrimEnd('/')
 } elseif ($env:WAY_MEMORY_API_URL) {
@@ -25,7 +37,7 @@ if ($RequireRelease) {
     if (-not $ReleaseManifestPath.Trim()) {
         throw "-RequireRelease needs -ReleaseManifestPath from build-android-release.ps1"
     }
-    $resolvedManifest = (Resolve-Path (Join-Path $repo $ReleaseManifestPath)).Path
+    $resolvedManifest = Resolve-InputPath $ReleaseManifestPath "ReleaseManifestPath"
     $releaseManifest = Get-Content -Raw -LiteralPath $resolvedManifest | ConvertFrom-Json
     if ($releaseManifest.format -ne "way-memory.android-release-manifest.v1" -or $releaseManifest.buildType -ne "release") {
         throw "The release manifest is not a signed way-memory release artifact: $resolvedManifest"

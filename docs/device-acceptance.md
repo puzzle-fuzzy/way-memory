@@ -33,8 +33,8 @@ The command requires an external release keystore through `WAY_MEMORY_RELEASE_KE
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1 `
   -RequirePhysical -RequireRelease `
   -ApiBaseUrl https://way-memory.yxswy.com `
-  -ApkPath artifacts/android-release/<commit>/way-memory-release.apk `
-  -ReleaseManifestPath artifacts/android-release/<commit>/ANDROID-RELEASE-MANIFEST.json
+  -ApkPath artifacts/android-release/<commit>-release/way-memory-release.apk `
+  -ReleaseManifestPath artifacts/android-release/<commit>-release/ANDROID-RELEASE-MANIFEST.json
 ```
 
 If the release keystore is not available yet, a sensor-only physical test may use a debug APK bound to the HTTPS service. It is valid for sensor/fusion evidence but is not a production release claim:
