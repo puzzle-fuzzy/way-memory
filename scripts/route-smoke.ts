@@ -239,7 +239,33 @@ try {
   if (localPoseAccepted.type !== "samples.accepted") throw new Error(`local-pose navigation sample failed: ${JSON.stringify(localPoseAccepted)}`);
   const localPoseSession = await requestJson(`/api/sessions/${navigationSessionId}`);
   if (localPoseSession.body.track?.length !== 1 || localPoseSession.body.navigation?.source !== "local-pose" || localPoseSession.body.navigation?.status !== "near-route" || localPoseSession.body.navigation?.nextNode?.nodeType !== "door" || typeof localPoseSession.body.navigation?.progressM !== "number") throw new Error(`local-pose navigation fallback failed: ${JSON.stringify(localPoseSession.body.navigation)}`);
-  navigator.send(JSON.stringify({
+  navigator.close();
+  const resumedNavigator = new WebSocket(`${baseUrl.replace("http", "ws")}/realtime?role=device&deviceId=route-navigation-device`);
+  await waitForOpen(resumedNavigator);
+  resumedNavigator.send(JSON.stringify({
+    type: "session.resume",
+    sessionId: navigationSessionId,
+    deviceId: "route-navigation-device",
+    sensors: [],
+  }));
+  const resumed = await nextMessage(resumedNavigator);
+  if (resumed.type !== "session.resumed" || resumed.session?.sessionId !== navigationSessionId || resumed.session?.navigation?.source !== "local-pose") throw new Error(`navigation session did not resume with local-pose anchor: ${JSON.stringify(resumed)}`);
+  resumedNavigator.send(JSON.stringify({
+    type: "samples",
+    sessionId: navigationSessionId,
+    samples: [{
+      sampleId: "route-navigation-local-pose-after-reconnect",
+      deviceTimestampNs: 3_000_000_000,
+      sensorType: "fused.pose",
+      values: [0.75, 0, 0.2],
+      pose: { deviceTimestampNs: 3_000_000_000, xM: 0.75, yM: 0, zM: 0.2, velocityXMps: 0.5, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.6, source: "fused", frame: "local-enu", sourceFlags: ["imu", "relative-only"], motionMode: "walking", stationary: false },
+    }],
+  }));
+  const resumedPoseAccepted = await nextMessage(resumedNavigator);
+  if (resumedPoseAccepted.type !== "samples.accepted") throw new Error(`local-pose sample after reconnect failed: ${JSON.stringify(resumedPoseAccepted)}`);
+  const resumedPoseSession = await requestJson(`/api/sessions/${navigationSessionId}`);
+  if (resumedPoseSession.body.navigation?.source !== "local-pose" || resumedPoseSession.body.navigation?.status !== "near-route" || resumedPoseSession.body.navigation?.nextNode?.nodeType !== "door") throw new Error(`local-pose anchor was lost after reconnect: ${JSON.stringify(resumedPoseSession.body.navigation)}`);
+  resumedNavigator.send(JSON.stringify({
     type: "samples",
     sessionId: navigationSessionId,
     samples: [{
@@ -250,11 +276,11 @@ try {
       location: { lat: 31.230405, lng: 121.470001, accuracyM: 4, altitudeM: 110.5 },
     }],
   }));
-  const verticalAccepted = await nextMessage(navigator);
+  const verticalAccepted = await nextMessage(resumedNavigator);
   if (verticalAccepted.type !== "samples.accepted") throw new Error("vertical navigation sample failed");
   const verticalSession = await requestJson(`/api/sessions/${navigationSessionId}`);
   if (verticalSession.body.navigation?.status !== "near-route" || (verticalSession.body.navigation?.altitudeDeltaM ?? 0) <= 5) throw new Error(`3D navigation projection failed: ${JSON.stringify(verticalSession.body.navigation)}`);
-  navigator.send(JSON.stringify({
+  resumedNavigator.send(JSON.stringify({
     type: "samples",
     sessionId: navigationSessionId,
     samples: [{
@@ -265,11 +291,11 @@ try {
       location: { lat: 31.2315, lng: 121.470001, accuracyM: 4 },
     }],
   }));
-  const offRouteAccepted = await nextMessage(navigator);
+  const offRouteAccepted = await nextMessage(resumedNavigator);
   if (offRouteAccepted.type !== "samples.accepted") throw new Error(`off-route sample failed: ${JSON.stringify(offRouteAccepted)}`);
   const offRouteSession = await requestJson(`/api/sessions/${navigationSessionId}`);
   if (offRouteSession.body.navigation?.status !== "off-route" || (offRouteSession.body.navigation?.distanceToRouteM ?? 0) <= 25) throw new Error(`off-route projection failed: ${JSON.stringify(offRouteSession.body.navigation)}`);
-  navigator.close();
+  resumedNavigator.close();
   const navigationStopped = await requestJson(`/api/sessions/${navigationSessionId}/stop`, { method: "POST" });
   if (navigationStopped.response.status !== 200 || navigationStopped.body.status !== "stopped") throw new Error("navigation session did not stop");
 
