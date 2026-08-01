@@ -2,12 +2,23 @@ package com.puzzlefuzzy.waymemory
 
 import com.puzzlefuzzy.waymemory.sensing.PoseFusionEngine
 import com.puzzlefuzzy.waymemory.sensing.VisualPoseSample
+import com.puzzlefuzzy.waymemory.sensing.arCoreDeltaToDisplayFrame
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PoseFusionEngineTest {
+    @Test
+    fun arCoreAxesMapToDisplayFrameWithoutSwappingHeight() {
+        assertArrayEquals(
+            floatArrayOf(2f, 3f, 4f),
+            arCoreDeltaToDisplayFrame(floatArrayOf(2f, 4f, -3f)),
+            0.0001f,
+        )
+    }
+
     @Test
     fun stationaryUpdatesZeroVelocityAndExposesFusedPose() {
         val engine = PoseFusionEngine()

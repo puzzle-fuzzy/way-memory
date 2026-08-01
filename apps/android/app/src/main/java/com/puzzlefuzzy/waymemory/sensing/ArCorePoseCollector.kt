@@ -46,6 +46,12 @@ data class VisualPoseSample(
 
 private const val AVAILABILITY_RETRY_DELAY_MS = 500L
 
+/** Convert ARCore camera-world deltas into the app's X-right/Y-forward/Z-up frame. */
+internal fun arCoreDeltaToDisplayFrame(delta: FloatArray): FloatArray {
+    require(delta.size >= 3) { "ARCore translation must contain three coordinates" }
+    return floatArrayOf(delta[0], -delta[2], delta[1])
+}
+
 /**
  * Optional ARCore visual-inertial pose source.
  *
@@ -251,11 +257,12 @@ class ArCorePoseCollector(
 
                 // ARCore: +X right, +Y up, -Z forward. Convert to a stable
                 // local display frame: X right, Y forward, Z up.
+                val displayDelta = arCoreDeltaToDisplayFrame(floatArrayOf(deltaX, deltaY, deltaZ))
                 val sample = VisualPoseSample(
                     deviceTimestampNs = frame.timestamp,
-                    xM = deltaX,
-                    yM = -deltaZ,
-                    zM = deltaY,
+                    xM = displayDelta[0],
+                    yM = displayDelta[1],
+                    zM = displayDelta[2],
                     accuracyM = 0.15f,
                     confidence = 0.9f,
                     trackingState = trackingState.name.lowercase(),
