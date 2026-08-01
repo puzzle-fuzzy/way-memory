@@ -900,6 +900,21 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
   return result;
 };
 
+const sensorInventoryKey = (sensor: SensorInventoryEntry) => `${sensor.sensorType}:${sensor.sensorId ?? "none"}`;
+
+const mergeSensorInventory = (
+  current: SensorInventoryEntry[],
+  incoming: SensorInventoryEntry[],
+): SensorInventoryEntry[] => {
+  const merged = current.slice(0, MAX_SENSOR_INVENTORY);
+  for (const sensor of incoming) {
+    const index = merged.findIndex((existing) => sensorInventoryKey(existing) === sensorInventoryKey(sensor));
+    if (index >= 0) merged[index] = sensor;
+    else if (merged.length < MAX_SENSOR_INVENTORY) merged.push(sensor);
+  }
+  return merged;
+};
+
 const haversineDistanceM = (left: { lat: number; lng: number }, right: { lat: number; lng: number }) => {
   const earthRadiusM = 6_371_000;
   const toRadians = (value: number) => value * Math.PI / 180;
@@ -1776,6 +1791,32 @@ const server = Bun.serve<RealtimeClient>({
         return;
       }
 
+      if (ws.data.role === "device" && message.type === "session.sensors") {
+        const session = getSession(message.sessionId ?? ws.data.sessionId ?? "");
+        if (
+          !session
+          || session.status !== "active"
+          || ws.data.sessionId !== session.sessionId
+          || !sessionBelongsTo(session, ws.data)
+          || !Array.isArray(message.sensors)
+          || message.sensors.length > MAX_SENSOR_INVENTORY
+        ) {
+          ws.send(JSON.stringify({ type: "error", error: "invalid_sensor_inventory" }));
+          return;
+        }
+        const incoming = normalizeSensorInventory(message.sensors);
+        if (incoming.length !== message.sensors.length) {
+          ws.send(JSON.stringify({ type: "error", error: "invalid_sensor_inventory" }));
+          return;
+        }
+        session.sensorInventory = mergeSensorInventory(session.sensorInventory, incoming);
+        markSessionDirty(session);
+        persistSession(session);
+        ws.send(JSON.stringify({ type: "session.sensors.accepted", sensorCount: session.sensorInventory.length }));
+        publishSession(server, session);
+        return;
+      }
+
       if (ws.data.role === "device" && message.type === "session.resume") {
         const session = getSession(message.sessionId ?? "");
         const deviceId = message.deviceId ?? ws.data.deviceId ?? "android-device";
@@ -1784,6 +1825,14 @@ const server = Bun.serve<RealtimeClient>({
           return;
         }
         cancelSessionResume(session.sessionId);
+        if (Array.isArray(message.sensors)) {
+          const incoming = normalizeSensorInventory(message.sensors);
+          if (incoming.length === message.sensors.length) {
+            session.sensorInventory = mergeSensorInventory(session.sensorInventory, incoming);
+            markSessionDirty(session);
+            persistSession(session);
+          }
+        }
         ws.data.sessionId = session.sessionId;
         device.connected = true;
         ws.send(JSON.stringify({ type: "session.resumed", session }));

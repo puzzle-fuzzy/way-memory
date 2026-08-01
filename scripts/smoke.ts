@@ -55,6 +55,23 @@ try {
       }
       await waitForMessage(dashboard);
       device.send(JSON.stringify({
+        type: "session.sensors",
+        sessionId: session.sessionId,
+        sensors: [
+          { sensorType: "android.sensor.accelerometer", sensorId: 7, name: "Smoke Accelerometer", maximumRange: 39.2, resolution: 0.01, transportMaxHz: 50, registered: true },
+          { sensorType: "android.sensor.protected", name: "Protected Sensor", transportMaxHz: 5, registered: false },
+          { sensorType: "android.sensor.dynamic", sensorId: 99, name: "Dynamic Sensor", maximumRange: 10, resolution: 0.1, dynamicSensor: true, transportMaxHz: 5, registered: true },
+        ],
+      }));
+      const [inventoryAccepted, inventoryUpdated] = await Promise.all([
+        waitForMessage(device),
+        waitForMessage(dashboard),
+      ]);
+      const updatedInventory = (inventoryUpdated as { type?: string; session?: { sensorInventory?: Array<{ sensorType: string; sensorId?: number }> } }).session?.sensorInventory;
+      if (inventoryAccepted.type !== "session.sensors.accepted" || inventoryUpdated.type !== "session.updated" || updatedInventory?.length !== 3 || !updatedInventory.some((sensor) => sensor.sensorType === "android.sensor.dynamic" && sensor.sensorId === 99)) {
+        throw new Error("dynamic sensor inventory update was not persisted and published")
+      }
+      device.send(JSON.stringify({
         type: "samples",
         sessionId: session.sessionId,
         samples: [

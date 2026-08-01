@@ -141,6 +141,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
                 availableSensorCount = availableSensorCount(),
                 readings = readings.values.toList(),
             )
+            uploader.updateSensorInventory(sensorInventory.toList())
         }
 
         override fun onDynamicSensorDisconnected(sensor: Sensor) {
@@ -163,6 +164,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
                 availableSensorCount = availableSensorCount(),
                 readings = readings.values.toList(),
             )
+            uploader.updateSensorInventory(sensorInventory.toList())
         }
     }
     private var lastStepCounter: Float? = null

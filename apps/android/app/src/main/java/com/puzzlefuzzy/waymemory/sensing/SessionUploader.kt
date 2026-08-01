@@ -142,6 +142,38 @@ internal fun buildSessionStartRequest(
     handoffToken: String? = null,
 ): SessionStartRequest = SessionStartRequest(deviceId, sensorInventory, client, mode, routeId, handoffToken)
 
+internal fun buildSensorInventoryUpdateMessage(
+    sessionId: String,
+    sensorInventory: List<SensorInventorySample>,
+): JSONObject = JSONObject()
+    .put("type", "session.sensors")
+    .put("sessionId", sessionId)
+    .put("sensors", sensorInventoryJson(sensorInventory))
+
+private fun sensorInventoryJson(sensorInventory: List<SensorInventorySample>): JSONArray = JSONArray().apply {
+    sensorInventory.forEach { sensor ->
+        put(JSONObject().apply {
+            put("sensorType", sensor.sensorType)
+            sensor.sensorId?.let { put("sensorId", it) }
+            put("name", sensor.name)
+            sensor.vendor?.let { put("vendor", it) }
+            sensor.version?.let { put("version", it) }
+            sensor.powerMa?.let { put("powerMa", it) }
+            sensor.maximumRange?.let { put("maximumRange", it) }
+            sensor.resolution?.let { put("resolution", it) }
+            sensor.minDelayUs?.let { put("minDelayUs", it) }
+            sensor.maxDelayUs?.let { put("maxDelayUs", it) }
+            sensor.fifoReservedEventCount?.let { put("fifoReservedEventCount", it) }
+            sensor.fifoMaxEventCount?.let { put("fifoMaxEventCount", it) }
+            sensor.reportingMode?.let { put("reportingMode", it) }
+            sensor.wakeUpSensor?.let { put("wakeUpSensor", it) }
+            sensor.dynamicSensor?.let { put("dynamicSensor", it) }
+            sensor.transportMaxHz?.let { put("transportMaxHz", it) }
+            put("registered", sensor.registered)
+        })
+    }
+}
+
 internal fun buildSamplesMessage(sessionId: String, batch: List<CollectedSample>): JSONObject = JSONObject()
     .put("type", "samples")
     .put("sessionId", sessionId)
@@ -228,29 +260,7 @@ private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
                 .put("apiBaseUrl", it.apiBaseUrl))
         }
     }
-    .put("sensors", JSONArray().apply {
-        sensorInventory.forEach { sensor ->
-            put(JSONObject().apply {
-                put("sensorType", sensor.sensorType)
-                sensor.sensorId?.let { put("sensorId", it) }
-                put("name", sensor.name)
-                sensor.vendor?.let { put("vendor", it) }
-                sensor.version?.let { put("version", it) }
-                sensor.powerMa?.let { put("powerMa", it) }
-                sensor.maximumRange?.let { put("maximumRange", it) }
-                sensor.resolution?.let { put("resolution", it) }
-                sensor.minDelayUs?.let { put("minDelayUs", it) }
-                sensor.maxDelayUs?.let { put("maxDelayUs", it) }
-                sensor.fifoReservedEventCount?.let { put("fifoReservedEventCount", it) }
-                sensor.fifoMaxEventCount?.let { put("fifoMaxEventCount", it) }
-                sensor.reportingMode?.let { put("reportingMode", it) }
-                sensor.wakeUpSensor?.let { put("wakeUpSensor", it) }
-                sensor.dynamicSensor?.let { put("dynamicSensor", it) }
-                sensor.transportMaxHz?.let { put("transportMaxHz", it) }
-                put("registered", sensor.registered)
-            })
-        }
-    })
+    .put("sensors", sensorInventoryJson(sensorInventory))
 
 class SessionUploader(
     private val baseUrl: String = BuildConfig.API_BASE_URL,
@@ -336,6 +346,14 @@ class SessionUploader(
                 )
             }
         }
+    }
+
+    /** Publish a bounded capability snapshot when a dynamic sensor changes state. */
+    fun updateSensorInventory(sensorInventory: List<SensorInventorySample>) {
+        this.sensorInventory = sensorInventory.take(MAX_SENSOR_INVENTORY)
+        val sessionId = activeSessionId ?: return
+        val currentSocket = socket ?: return
+        currentSocket.send(buildSensorInventoryUpdateMessage(sessionId, this.sensorInventory).toString())
     }
 
     fun stop() {
@@ -504,6 +522,7 @@ class SessionUploader(
                 .put("type", "session.resume")
                 .put("sessionId", activeSessionId)
                 .put("deviceId", deviceId)
+                .put("sensors", sensorInventoryJson(sensorInventory))
         }
         webSocket.send(message.toString())
     }

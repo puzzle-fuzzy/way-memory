@@ -3,6 +3,8 @@ package com.puzzlefuzzy.waymemory
 import com.puzzlefuzzy.waymemory.sensing.CollectedSample
 import com.puzzlefuzzy.waymemory.sensing.LocationSample
 import com.puzzlefuzzy.waymemory.sensing.buildSamplesMessage
+import com.puzzlefuzzy.waymemory.sensing.SensorInventorySample
+import com.puzzlefuzzy.waymemory.sensing.buildSensorInventoryUpdateMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -78,5 +80,26 @@ class SessionUploaderPayloadInstrumentedTest {
         assertEquals("tracking", metadata.getString("trackingState"))
         assertTrue(metadata.getBoolean("trackingReset"))
         assertEquals(0.9, metadata.getDouble("confidence"), 0.0001)
+    }
+
+    @Test
+    fun dynamicSensorInventoryUsesTheAuthenticatedSessionEnvelope() {
+        val message = buildSensorInventoryUpdateMessage(
+            sessionId = "session-1",
+            sensorInventory = listOf(
+                SensorInventorySample(
+                    sensorType = "android.sensor.dynamic",
+                    sensorId = 99,
+                    name = "Dynamic sensor",
+                    dynamicSensor = true,
+                    registered = true,
+                ),
+            ),
+        )
+
+        assertEquals("session.sensors", message.getString("type"))
+        assertEquals("session-1", message.getString("sessionId"))
+        assertEquals(1, message.getJSONArray("sensors").length())
+        assertTrue(message.getJSONArray("sensors").getJSONObject(0).getBoolean("dynamicSensor"))
     }
 }
