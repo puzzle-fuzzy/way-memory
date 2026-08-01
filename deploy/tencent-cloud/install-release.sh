@@ -28,6 +28,7 @@ RELEASE_DIR="$(cd -- "$RELEASE_DIR" && pwd -P)"
 [[ "$RELEASE_DIR" != "/" && "$RELEASE_DIR" != "/opt" && "$RELEASE_DIR" != "/var" ]] || fail "refusing a broad release directory"
 
 [[ -f "$RELEASE_DIR/RELEASE-MANIFEST.json" ]] || fail "RELEASE-MANIFEST.json is missing"
+[[ -f "$RELEASE_DIR/RELEASE-SHA256SUMS.txt" ]] || fail "RELEASE-SHA256SUMS.txt is missing"
 [[ -f "$RELEASE_DIR/api/way-memory-api.js" ]] || fail "bundled API is missing"
 [[ -d "$RELEASE_DIR/web" ]] || fail "built web directory is missing"
 [[ -f "$RELEASE_DIR/deploy/tencent-cloud/way-memory-api.production.service" ]] || fail "production systemd template is missing"
@@ -35,6 +36,8 @@ RELEASE_DIR="$(cd -- "$RELEASE_DIR" && pwd -P)"
 
 manifest_commit="$(grep -m1 '"sourceCommit"' "$RELEASE_DIR/RELEASE-MANIFEST.json" | sed -E 's/.*"sourceCommit"[[:space:]]*:[[:space:]]*"([0-9a-f]+)".*/\1/')"
 [[ "$manifest_commit" =~ ^[0-9a-f]{7,64}$ ]] || fail "release manifest has no valid source commit"
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is not installed"
+(cd "$RELEASE_DIR" && sha256sum --quiet -c RELEASE-SHA256SUMS.txt) || fail "release payload SHA-256 verification failed"
 
 [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE is missing"
 env_mode="$(stat -c '%a' "$ENV_FILE")"

@@ -88,7 +88,7 @@ $env:WAY_MEMORY_RELEASE_DIR = ".release/way-memory"
 bun run release:build
 ```
 
-The generated directory contains `web/`, the Bun-bundled `api/way-memory-api.js`, the authenticated systemd/HTTPS Nginx templates and guarded `install-release.sh` under `deploy/tencent-cloud/`, plus `RELEASE-MANIFEST.json` with the source commit and SHA-256 for every payload file. The bundle deliberately excludes `.env` files, database data, certificates, private keys, Android signing material, and user capture data. Copy only this generated directory to a staging location on the Tencent Cloud host, review the protected environment file independently, and compare the manifest before restarting the service.
+The generated directory contains `web/`, the Bun-bundled `api/way-memory-api.js`, the authenticated systemd/HTTPS Nginx templates and guarded `install-release.sh` under `deploy/tencent-cloud/`, plus `RELEASE-MANIFEST.json` and `RELEASE-SHA256SUMS.txt` with the source commit and SHA-256 for every payload file. The bundle deliberately excludes `.env` files, database data, certificates, private keys, Android signing material, and user capture data. Copy only this generated directory to a staging location on the Tencent Cloud host, review the protected environment file independently, and compare the manifest before restarting the service.
 
 The release bundle is a packaging step, not proof of a public deployment. The public proof still requires DNS, ACME, Nginx, authenticated WebSocket, cross-network route smoke, and a physical Android device matrix to pass.
 

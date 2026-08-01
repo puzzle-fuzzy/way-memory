@@ -120,6 +120,11 @@ const manifest = {
   files,
 };
 await writeFile(join(releaseRoot, "RELEASE-MANIFEST.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+await writeFile(
+  join(releaseRoot, "RELEASE-SHA256SUMS.txt"),
+  `${files.map((file) => `${file.sha256}  ${file.path}`).join("\n")}\n`,
+  "utf8",
+);
 
 console.log(`Release bundle ready: ${releaseRoot}`);
 console.log(`Manifest: ${join(releaseRoot, "RELEASE-MANIFEST.json")}`);
