@@ -31,10 +31,32 @@ function sessionListView(session: ObservationSession): ObservationSession {
     sensorInventory: [],
     sensorStats: [],
     latestSensors: [],
-    locationPointCount: session.track.length,
-    relativePointCount: session.relativeTrack.length,
-    posePointCount: session.poseTrack.length,
-    correctedPosePointCount: session.correctedPoseTrack?.length ?? session.poseTrack.length,
+    locationPointCount: session.locationPointCount ?? session.track.length,
+    relativePointCount: session.relativePointCount ?? session.relativeTrack.length,
+    posePointCount: session.posePointCount ?? session.poseTrack.length,
+    correctedPosePointCount: session.correctedPosePointCount ?? session.correctedPoseTrack?.length ?? session.poseTrack.length,
+  };
+}
+
+function mergeSessionUpdate(current: ObservationSession, incoming: ObservationSession): ObservationSession {
+  return {
+    ...current,
+    ...incoming,
+    // session.updated is also used for lightweight lifecycle/metadata updates.
+    // Never let its intentionally empty arrays erase a live trajectory already
+    // assembled from session.delta messages.
+    track: incoming.track.length ? incoming.track : current.track,
+    relativeTrack: incoming.relativeTrack.length ? incoming.relativeTrack : current.relativeTrack,
+    poseTrack: incoming.poseTrack.length ? incoming.poseTrack : current.poseTrack,
+    correctedPoseTrack: incoming.correctedPoseTrack?.length ? incoming.correctedPoseTrack : current.correctedPoseTrack,
+    motionEvents: incoming.motionEvents.length ? incoming.motionEvents : current.motionEvents,
+    sensorInventory: incoming.sensorInventory.length ? incoming.sensorInventory : current.sensorInventory,
+    sensorStats: incoming.sensorStats.length ? incoming.sensorStats : current.sensorStats,
+    latestSensors: incoming.latestSensors.length ? incoming.latestSensors : current.latestSensors,
+    locationPointCount: incoming.locationPointCount ?? current.locationPointCount,
+    relativePointCount: incoming.relativePointCount ?? current.relativePointCount,
+    posePointCount: incoming.posePointCount ?? current.posePointCount,
+    correctedPosePointCount: incoming.correctedPosePointCount ?? current.correctedPosePointCount,
   };
 }
 
@@ -100,6 +122,10 @@ export function useRealtimeSession() {
       latestAltitudeM: delta.latestAltitudeM ?? current.latestAltitudeM,
       altitudeSource: delta.altitudeSource ?? current.altitudeSource,
       latestRelativePosition: delta.latestRelativePosition ?? current.latestRelativePosition,
+      locationPointCount: delta.locationPointCount,
+      relativePointCount: delta.relativePointCount,
+      posePointCount: delta.posePointCount,
+      correctedPosePointCount: delta.correctedPosePointCount,
       track: [...current.track, ...delta.trackPoints].slice(-500),
       relativeTrack: [...current.relativeTrack, ...delta.relativePoints].slice(-500),
       poseTrack: [...current.poseTrack, ...delta.posePoints].slice(-1200),
@@ -117,6 +143,38 @@ export function useRealtimeSession() {
       latestSensors: delta.latestSensors,
       navigation: delta.navigation ?? current.navigation,
     });
+
+    const summaryIndex = availableSessions.value.findIndex((item) => item.sessionId === delta.sessionId);
+    if (summaryIndex >= 0) {
+      const summary = availableSessions.value[summaryIndex];
+      availableSessions.value[summaryIndex] = {
+        ...summary,
+        status: delta.status,
+        lastReceivedAt: delta.lastReceivedAt ?? summary.lastReceivedAt,
+        lastSampleAt: delta.lastSampleAt ?? summary.lastSampleAt,
+        sampleCount: delta.sampleCount,
+        rawSampleCount: delta.rawSampleCount,
+        droppedSampleCount: delta.droppedSampleCount,
+        outOfOrderSampleCount: delta.outOfOrderSampleCount,
+        locationPointCount: delta.locationPointCount,
+        relativePointCount: delta.relativePointCount,
+        posePointCount: delta.posePointCount,
+        correctedPosePointCount: delta.correctedPosePointCount,
+        latestLocation: delta.latestLocation ?? summary.latestLocation,
+        latestPose: delta.latestPose ?? summary.latestPose,
+        motionMode: delta.motionMode,
+        closure: delta.closure,
+        navigation: delta.navigation ?? summary.navigation,
+      };
+    }
+  }
+
+  function queueSessionSnapshot(nextSession: ObservationSession) {
+    const current = pendingSession ?? latestSession.value;
+    // A slow GET can return an older snapshot than a WebSocket delta that was
+    // received while the request was in flight. Do not rewind the live view.
+    if (current && current.sessionId === nextSession.sessionId && current.sampleCount > nextSession.sampleCount) return;
+    queueSessionUpdate(nextSession);
   }
 
   async function refreshSnapshot() {
@@ -134,7 +192,8 @@ export function useRealtimeSession() {
         ? sessions.find((item) => item.status === "active") ?? sessions[0]
         : sessions.find((item) => item.sessionId === selectedSessionId.value);
       if (preferred) {
-        queueSessionUpdate(preferred);
+        const current = pendingSession ?? latestSession.value;
+        if (!current || current.sessionId !== preferred.sessionId) queueSessionUpdate(preferred);
         void loadSessionSnapshot(preferred.sessionId);
       }
     } catch {
@@ -146,7 +205,7 @@ export function useRealtimeSession() {
     try {
       const response = await fetch(endpoint(`/api/sessions/${encodeURIComponent(sessionId)}`), { cache: "no-store", headers: requestHeaders() });
       if (!response.ok) return;
-      queueSessionUpdate(await response.json() as ObservationSession);
+      queueSessionSnapshot(await response.json() as ObservationSession);
     } catch {
       // The compact session list remains usable while a large snapshot is loading.
     }
@@ -163,7 +222,7 @@ export function useRealtimeSession() {
         return;
       }
       if (!response.ok) throw new Error(`API ${response.status}`);
-      queueSessionUpdate(await response.json() as ObservationSession);
+      queueSessionSnapshot(await response.json() as ObservationSession);
     } catch {
       await refreshSnapshot();
     }
@@ -219,8 +278,17 @@ export function useRealtimeSession() {
       try {
         const message = JSON.parse(String(event.data)) as { type?: string; session?: ObservationSession };
         if (message.type === "session.updated" && message.session) {
-          availableSessions.value = [sessionListView(message.session), ...availableSessions.value.filter((item) => item.sessionId !== message.session?.sessionId)];
-          if (followingLive.value) queueSessionUpdate(message.session);
+          const summary = sessionListView(message.session);
+          availableSessions.value = [summary, ...availableSessions.value.filter((item) => item.sessionId !== summary.sessionId)];
+          if (followingLive.value) {
+            const current = pendingSession ?? latestSession.value;
+            if (current && current.sessionId === message.session.sessionId) {
+              queueSessionUpdate(mergeSessionUpdate(current, message.session));
+            } else {
+              queueSessionUpdate(message.session);
+              void loadSessionSnapshot(message.session.sessionId);
+            }
+          }
         }
         if (message.type === "session.delta") applySessionDelta(message as SessionDelta);
       } catch {

@@ -346,6 +346,11 @@ export interface SessionDelta {
   latestAltitudeM?: number;
   altitudeSource?: ObservationSession["altitudeSource"];
   latestRelativePosition?: ObservationSession["latestRelativePosition"];
+  /** Absolute retained/derived point counts. The dashboard must not infer these from a delta. */
+  locationPointCount: number;
+  relativePointCount: number;
+  posePointCount: number;
+  correctedPosePointCount: number;
   trackPoints: TrackPoint[];
   relativePoints: RelativeMotionPoint[];
   posePoints: PoseEstimate[];
