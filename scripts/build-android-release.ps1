@@ -1,12 +1,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^https://')]
     [string]$ApiBaseUrl,
     [ValidateSet("debug", "release")]
     [string]$BuildType = "release",
     [string]$OutputRoot = "artifacts\android-release",
-    [string]$JavaHome = ""
+    [string]$JavaHome = "",
+    [switch]$AllowLocalHttp
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,7 +20,12 @@ if ($resolvedOutputRoot -eq $repo) {
 }
 
 $apiUri = [Uri]$ApiBaseUrl.TrimEnd("/")
-if ($apiUri.Scheme -ne "https") { throw "Release builds require an HTTPS API URL" }
+if ($apiUri.Scheme -ne "https") {
+    $localDebugHost = $apiUri.Host -in @("10.0.2.2", "127.0.0.1", "localhost", "::1")
+    if (-not $AllowLocalHttp -or $BuildType -ne "debug" -or $apiUri.Scheme -ne "http" -or -not $localDebugHost) {
+        throw "Non-HTTPS API URLs are allowed only for an explicit Debug emulator/local build: -AllowLocalHttp with http://10.0.2.2, localhost, 127.0.0.1, or ::1"
+    }
+}
 $apiOrigin = $apiUri.GetLeftPart([UriPartial]::Authority)
 
 if ($BuildType -eq "release") {

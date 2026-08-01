@@ -20,6 +20,15 @@ The `-PwayMemoryApiUrl` value is important: `10.0.2.2` is only the Android emula
 
 This matrix uses a debug APK; only the debug variant permits HTTP/WS for a trusted LAN or emulator test network. A release build refuses an `http://` API URL and does not enable Android cleartext traffic; production must use an HTTPS domain and WSS.
 
+For the host-only emulator protocol test, the release helper permits HTTP only when the opt-in flag and Debug build are both explicit:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android-release.ps1 `
+  -BuildType debug -AllowLocalHttp -ApiBaseUrl http://10.0.2.2:8787
+```
+
+This flag must not be used for a physical phone; `-RequirePhysical` still requires an HTTPS API origin.
+
 For the final physical-device gate, build and record an exact release artifact first:
 
 ```powershell

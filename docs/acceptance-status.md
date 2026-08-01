@@ -19,6 +19,7 @@
 - 导航实现提交：`896c785`；本轮闭环距离与恢复证据修复提交：`42a5850`（均已推送到 `origin/main`）。
 - Android 隔离全量门禁通过：5 项仪器测试、单元测试、Debug/Release 构建。
 - 服务端门禁通过：实时 WebSocket、重启持久化、动态传感器清单、鉴权/角色隔离、原始回放、幂等、重连、生命周期、保留策略、闭环、路线交接和 10 个合成场景验收；闭环累计距离和 `process-recovery`/`network-interruption` 报告契约已覆盖。
+- 本机模拟器协议链路已实测：17 个可用传感器、7 个 GPS 点、204 个 Pose 点、13,668 个样本，WebSocket 上传成功；模拟器不支持 ARCore，且该证据不计入实体手机传感器验收。
 - 与该导航实现兼容的 Debug APK SHA-256：`776975c73f476ece949e06397e864000cfccfd9309bbb22c5fe94d0c9cfd3736`；它已在 `emulator-5554` 安装启动，但模拟器证据仅覆盖协议和生命周期，不计入真实传感器验收。
 - 公网预检仍未通过：`way-memory.yxswy.com` 没有有效 A 记录，HTTP 入口返回 `502`；腾讯云临时发布包的 `--check-only` 也因缺少受保护的 `/etc/way-memory/way-memory.env` 而拒绝继续。未执行生产重启。
 
