@@ -29,6 +29,12 @@ class SessionUploaderPayloadTest {
                     sensorType = "android.sensor.accelerometer",
                     sensorId = 7,
                     name = "Accelerometer",
+                    maximumRange = 39.2f,
+                    resolution = 0.01f,
+                    fifoReservedEventCount = 16,
+                    fifoMaxEventCount = 128,
+                    wakeUpSensor = false,
+                    dynamicSensor = false,
                     transportMaxHz = 50,
                     registered = true,
                 ),
@@ -44,6 +50,12 @@ class SessionUploaderPayloadTest {
         assertEquals("device-1", request.deviceId)
         assertEquals(2, request.sensorInventory.size)
         assertEquals(7, request.sensorInventory[0].sensorId)
+        assertEquals(39.2f, request.sensorInventory[0].maximumRange)
+        assertEquals(0.01f, request.sensorInventory[0].resolution)
+        assertEquals(16, request.sensorInventory[0].fifoReservedEventCount)
+        assertEquals(128, request.sensorInventory[0].fifoMaxEventCount)
+        assertEquals(false, request.sensorInventory[0].wakeUpSensor)
+        assertEquals(false, request.sensorInventory[0].dynamicSensor)
         assertEquals(50, request.sensorInventory[0].transportMaxHz)
         assertEquals(false, request.sensorInventory[1].registered)
     }

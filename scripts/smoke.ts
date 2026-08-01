@@ -44,13 +44,13 @@ try {
           apiBaseUrl: "http://127.0.0.1:8787",
         },
         sensors: [
-          { sensorType: "android.sensor.accelerometer", sensorId: 7, name: "Smoke Accelerometer", vendor: "test", version: 1, minDelayUs: 10_000, transportMaxHz: 50, registered: true },
+          { sensorType: "android.sensor.accelerometer", sensorId: 7, name: "Smoke Accelerometer", vendor: "test", version: 1, maximumRange: 39.2, resolution: 0.01, minDelayUs: 10_000, fifoReservedEventCount: 16, fifoMaxEventCount: 128, reportingMode: 0, wakeUpSensor: false, dynamicSensor: false, transportMaxHz: 50, registered: true },
           { sensorType: "android.sensor.protected", name: "Protected Sensor", transportMaxHz: 5, registered: false },
         ],
       }));
       const started = await waitForMessage(device);
-      const session = started.session as { sessionId: string; sensorInventory?: Array<{ sensorType: string; sensorId?: number; registered: boolean; transportMaxHz?: number }>; client?: { applicationId: string; apiBaseUrl: string } };
-      if (started.type !== "session.started" || session.client?.applicationId !== "com.puzzlefuzzy.waymemory" || session.client.apiBaseUrl !== "http://127.0.0.1:8787" || session.sensorInventory?.length !== 2 || session.sensorInventory[0]?.sensorId !== 7 || session.sensorInventory[0]?.transportMaxHz !== 50 || session.sensorInventory[1]?.registered !== false) {
+      const session = started.session as { sessionId: string; sensorInventory?: Array<{ sensorType: string; sensorId?: number; maximumRange?: number; resolution?: number; fifoReservedEventCount?: number; fifoMaxEventCount?: number; wakeUpSensor?: boolean; dynamicSensor?: boolean; registered: boolean; transportMaxHz?: number }>; client?: { applicationId: string; apiBaseUrl: string } };
+      if (started.type !== "session.started" || session.client?.applicationId !== "com.puzzlefuzzy.waymemory" || session.client.apiBaseUrl !== "http://127.0.0.1:8787" || session.sensorInventory?.length !== 2 || session.sensorInventory[0]?.sensorId !== 7 || session.sensorInventory[0]?.maximumRange !== 39.2 || session.sensorInventory[0]?.resolution !== 0.01 || session.sensorInventory[0]?.fifoReservedEventCount !== 16 || session.sensorInventory[0]?.fifoMaxEventCount !== 128 || session.sensorInventory[0]?.wakeUpSensor !== false || session.sensorInventory[0]?.dynamicSensor !== false || session.sensorInventory[0]?.transportMaxHz !== 50 || session.sensorInventory[1]?.registered !== false) {
         throw new Error("sensor inventory was not preserved")
       }
       await waitForMessage(dashboard);

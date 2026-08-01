@@ -104,9 +104,15 @@ data class SensorInventorySample(
     val vendor: String? = null,
     val version: Int? = null,
     val powerMa: Float? = null,
+    val maximumRange: Float? = null,
+    val resolution: Float? = null,
     val minDelayUs: Int? = null,
     val maxDelayUs: Int? = null,
+    val fifoReservedEventCount: Int? = null,
+    val fifoMaxEventCount: Int? = null,
     val reportingMode: Int? = null,
+    val wakeUpSensor: Boolean? = null,
+    val dynamicSensor: Boolean? = null,
     val transportMaxHz: Int? = null,
     val registered: Boolean,
 )
@@ -231,9 +237,15 @@ private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
                 sensor.vendor?.let { put("vendor", it) }
                 sensor.version?.let { put("version", it) }
                 sensor.powerMa?.let { put("powerMa", it) }
+                sensor.maximumRange?.let { put("maximumRange", it) }
+                sensor.resolution?.let { put("resolution", it) }
                 sensor.minDelayUs?.let { put("minDelayUs", it) }
                 sensor.maxDelayUs?.let { put("maxDelayUs", it) }
+                sensor.fifoReservedEventCount?.let { put("fifoReservedEventCount", it) }
+                sensor.fifoMaxEventCount?.let { put("fifoMaxEventCount", it) }
                 sensor.reportingMode?.let { put("reportingMode", it) }
+                sensor.wakeUpSensor?.let { put("wakeUpSensor", it) }
+                sensor.dynamicSensor?.let { put("dynamicSensor", it) }
                 sensor.transportMaxHz?.let { put("transportMaxHz", it) }
                 put("registered", sensor.registered)
             })

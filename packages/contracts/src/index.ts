@@ -255,9 +255,15 @@ export interface SensorInventoryEntry {
   vendor?: string;
   version?: number;
   powerMa?: number;
+  maximumRange?: number;
+  resolution?: number;
   minDelayUs?: number;
   maxDelayUs?: number;
+  fifoReservedEventCount?: number;
+  fifoMaxEventCount?: number;
   reportingMode?: number;
+  wakeUpSensor?: boolean;
+  dynamicSensor?: boolean;
   transportMaxHz?: number;
   registered: boolean;
 }

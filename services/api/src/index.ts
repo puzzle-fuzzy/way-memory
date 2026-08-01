@@ -850,18 +850,30 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
     const vendor = item.vendor === undefined ? undefined : typeof item.vendor === "string" ? item.vendor.trim().slice(0, 128) : null;
     const version = item.version === undefined ? undefined : finiteNumber(item.version);
     const powerMa = item.powerMa === undefined ? undefined : finiteNumber(item.powerMa);
+    const maximumRange = item.maximumRange === undefined ? undefined : finiteNumber(item.maximumRange);
+    const resolution = item.resolution === undefined ? undefined : finiteNumber(item.resolution);
     const minDelayUs = item.minDelayUs === undefined ? undefined : finiteNumber(item.minDelayUs);
     const maxDelayUs = item.maxDelayUs === undefined ? undefined : finiteNumber(item.maxDelayUs);
+    const fifoReservedEventCount = item.fifoReservedEventCount === undefined ? undefined : finiteNumber(item.fifoReservedEventCount);
+    const fifoMaxEventCount = item.fifoMaxEventCount === undefined ? undefined : finiteNumber(item.fifoMaxEventCount);
     const reportingMode = item.reportingMode === undefined ? undefined : finiteNumber(item.reportingMode);
+    const wakeUpSensor = item.wakeUpSensor === undefined ? undefined : item.wakeUpSensor;
+    const dynamicSensor = item.dynamicSensor === undefined ? undefined : item.dynamicSensor;
     const transportMaxHz = item.transportMaxHz === undefined ? undefined : finiteNumber(item.transportMaxHz);
     if (
       vendor === null
       || (sensorId !== undefined && (sensorId === null || !Number.isInteger(sensorId) || sensorId < 0 || sensorId > 1_000_000))
       || (version !== undefined && (version === null || !Number.isInteger(version) || version < 0 || version > 1_000_000))
       || (powerMa !== undefined && (powerMa === null || powerMa < 0 || powerMa > 100_000))
+      || (maximumRange !== undefined && (maximumRange === null || maximumRange < 0 || maximumRange > 1_000_000_000))
+      || (resolution !== undefined && (resolution === null || resolution < 0 || resolution > 1_000_000_000))
       || (minDelayUs !== undefined && (minDelayUs === null || !Number.isInteger(minDelayUs) || minDelayUs < 0 || minDelayUs > 1_000_000_000))
       || (maxDelayUs !== undefined && (maxDelayUs === null || !Number.isInteger(maxDelayUs) || maxDelayUs < 0 || maxDelayUs > 1_000_000_000))
+      || (fifoReservedEventCount !== undefined && (fifoReservedEventCount === null || !Number.isInteger(fifoReservedEventCount) || fifoReservedEventCount < 0 || fifoReservedEventCount > 1_000_000_000))
+      || (fifoMaxEventCount !== undefined && (fifoMaxEventCount === null || !Number.isInteger(fifoMaxEventCount) || fifoMaxEventCount < 0 || fifoMaxEventCount > 1_000_000_000))
       || (reportingMode !== undefined && (reportingMode === null || !Number.isInteger(reportingMode) || reportingMode < 0 || reportingMode > 16))
+      || (wakeUpSensor !== undefined && typeof wakeUpSensor !== "boolean")
+      || (dynamicSensor !== undefined && typeof dynamicSensor !== "boolean")
       || (transportMaxHz !== undefined && (transportMaxHz === null || !Number.isInteger(transportMaxHz) || transportMaxHz < 1 || transportMaxHz > 1_000))
     ) continue;
     result.push({
@@ -871,9 +883,15 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
       ...(vendor ? { vendor } : {}),
       ...(version === undefined || version === null ? {} : { version }),
       ...(powerMa === undefined || powerMa === null ? {} : { powerMa }),
+      ...(maximumRange === undefined || maximumRange === null ? {} : { maximumRange }),
+      ...(resolution === undefined || resolution === null ? {} : { resolution }),
       ...(minDelayUs === undefined || minDelayUs === null ? {} : { minDelayUs }),
       ...(maxDelayUs === undefined || maxDelayUs === null ? {} : { maxDelayUs }),
+      ...(fifoReservedEventCount === undefined || fifoReservedEventCount === null ? {} : { fifoReservedEventCount }),
+      ...(fifoMaxEventCount === undefined || fifoMaxEventCount === null ? {} : { fifoMaxEventCount }),
       ...(reportingMode === undefined || reportingMode === null ? {} : { reportingMode }),
+      ...(wakeUpSensor === undefined ? {} : { wakeUpSensor }),
+      ...(dynamicSensor === undefined ? {} : { dynamicSensor }),
       ...(transportMaxHz === undefined || transportMaxHz === null ? {} : { transportMaxHz }),
       registered: item.registered,
     });
