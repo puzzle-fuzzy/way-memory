@@ -630,6 +630,7 @@ const normalizeSensorType = (sensorType: string) => {
     rotation_vector: "rotation-vector",
     linear_acceleration: "linear-acceleration",
     visual_pose: "arcore.visual-pose",
+    visual_status: "arcore.visual-status",
   }[normalized] ?? normalized;
 };
 
