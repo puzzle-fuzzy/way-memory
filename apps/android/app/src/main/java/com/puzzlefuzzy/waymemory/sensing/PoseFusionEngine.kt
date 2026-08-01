@@ -30,6 +30,7 @@ class PoseFusionEngine {
     private var lastGnssTargetEastM = 0f
     private var lastGnssTargetNorthM = 0f
     private var lastGnssTargetAltitudeM = 0f
+    private var gnssOutlierPending = false
     private var lastMotionTimestampNs = 0L
     private var lastEmitTimestampNs = 0L
     private var lastPressureTimestampNs = 0L
@@ -84,6 +85,7 @@ class PoseFusionEngine {
         lastGnssTargetEastM = 0f
         lastGnssTargetNorthM = 0f
         lastGnssTargetAltitudeM = 0f
+        gnssOutlierPending = false
         lastMotionTimestampNs = 0L
         lastEmitTimestampNs = 0L
         lastPressureTimestampNs = 0L
@@ -201,6 +203,25 @@ class PoseFusionEngine {
             else -> position[2]
         }
         val measuredAccuracy = (accuracyM ?: 25f).coerceIn(1f, 100f)
+        val elapsedGnssNs = timestampNs - lastGnssTimestampNs
+        if (lastGnssTimestampNs > 0L && elapsedGnssNs in 100_000_000L..10_000_000_000L) {
+            val elapsedSeconds = elapsedGnssNs / 1_000_000_000f
+            val horizontalJumpM = hypot(
+                (targetEast - lastGnssTargetEastM).toDouble(),
+                (targetNorth - lastGnssTargetNorthM).toDouble(),
+            ).toFloat()
+            val maxPlausibleJumpM = maxOf(
+                MAX_GNSS_JUMP_M,
+                lastGnssAccuracyM + measuredAccuracy + elapsedSeconds * MAX_WALKING_SPEED_MPS,
+            )
+            if (!horizontalJumpM.isFinite() || horizontalJumpM > maxPlausibleJumpM) {
+                // Keep this observation available to replay/audit through the
+                // pose timestamp, but do not advance the accepted GNSS
+                // reference or move the fused route toward an outlier.
+                gnssOutlierPending = true
+                return buildUpdate(timestampNs, force = true)
+            }
+        }
         val gain = when {
             measuredAccuracy <= 5f -> 0.55f
             measuredAccuracy <= 15f -> 0.32f
@@ -215,7 +236,6 @@ class PoseFusionEngine {
             stepTrackY += position[1] - previousPosition[1]
         }
 
-        val elapsedGnssNs = timestampNs - lastGnssTimestampNs
         if (lastGnssTimestampNs > 0L && elapsedGnssNs in 100_000_000L..5_000_000_000L) {
             val elapsedSeconds = elapsedGnssNs / 1_000_000_000f
             val gnssVelocity = floatArrayOf(
@@ -579,10 +599,16 @@ class PoseFusionEngine {
             gnssFresh -> 0.02f
             else -> 0.12f
         }
-        val accuracy = (baseAccuracy + positionMagnitude * driftPenalty + if (pressureFresh) 0.3f else 1.2f).coerceAtMost(50f)
+        val accuracy = (
+            baseAccuracy
+                + positionMagnitude * driftPenalty
+                + if (pressureFresh) 0.3f else 1.2f
+                + if (gnssOutlierPending) 10f else 0f
+        ).coerceAtMost(50f)
         val sourceFlags = buildList {
             if (hasImu) add("imu")
             if (gnssFresh) add("gnss") else if (hasGnss) add("gnss-stale")
+            if (gnssOutlierPending) add("gnss-rejected")
             if (pressureFresh) add("barometer") else if (hasBarometer) add("barometer-stale")
             if (visualFresh) add("visual") else if (hasVisual) add("visual-stale")
             if (stepFresh) add("step-pdr") else if (hasStepTrack) add("step-pdr-stale")
@@ -593,6 +619,7 @@ class PoseFusionEngine {
             if (isEmpty()) add("unknown")
         }
         visualResetPending = false
+        gnssOutlierPending = false
         val confidence = (1f - accuracy / 50f).coerceIn(0.05f, 0.98f)
         return PoseUpdate(
             pose = PoseEstimateSample(
@@ -688,6 +715,8 @@ class PoseFusionEngine {
         private const val STEP_LENGTH_M = 0.65f
         private const val MAX_STEPS_PER_EVENT = 8
         private const val MAX_VISUAL_SPEED_MPS = 12f
+        private const val MAX_GNSS_JUMP_M = 120f
+        private const val MAX_WALKING_SPEED_MPS = 15f
         private const val MIN_VISUAL_ALIGNMENT_DISTANCE_M = 0.35f
         private const val MIN_INERTIAL_ALIGNMENT_DISTANCE_M = 0.10f
     }

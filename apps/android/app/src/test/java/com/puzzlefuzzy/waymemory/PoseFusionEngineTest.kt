@@ -68,6 +68,19 @@ class PoseFusionEngineTest {
     }
 
     @Test
+    fun implausibleGnssJumpDoesNotTeleportTheFusedPose() {
+        val engine = PoseFusionEngine()
+        val first = engine.updateGnss(31.230000, 121.470000, 4f, null, 1_000_000_000L)
+        val rejected = engine.updateGnss(31.240000, 121.470000, 4f, null, 2_000_000_000L)
+
+        assertNotNull(first)
+        assertNotNull(rejected)
+        assertTrue(rejected?.pose?.sourceFlags?.contains("gnss-rejected") == true)
+        assertTrue(kotlin.math.abs(rejected?.pose?.xM ?: 1f) < 1f)
+        assertTrue(kotlin.math.abs(rejected?.pose?.yM ?: 1f) < 1f)
+    }
+
+    @Test
     fun lateGnssAltitudeEstablishesAContinuousRelativeHeightReference() {
         val engine = PoseFusionEngine()
         engine.updateGnss(31.230000, 121.470000, 5f, null, 1_000_000_000L)
