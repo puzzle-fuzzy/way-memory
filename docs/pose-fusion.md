@@ -17,7 +17,7 @@ Raw sensor samples are still validated by the server and only the latest 1,024 n
 
 The Android client combines:
 
-1. IMU acceleration transformed by the best available rotation vector;
+1. IMU acceleration transformed by the best available rotation vector. Android rotation sources are selected by priority (`rotation-vector`, then `game-rotation-vector`, then `geomagnetic-rotation-vector`) rather than by whichever callback arrived last; a lower-priority source can take over only after the preferred source is stale;
 2. GNSS position and accuracy when precise location is available;
 3. barometric relative altitude and vertical speed;
 4. optional ARCore session-local visual-inertial pose;
