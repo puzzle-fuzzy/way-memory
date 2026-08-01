@@ -13,6 +13,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -131,6 +132,39 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     private var hasMagneticField = false
     private var hasLinearAccelerationSensor = false
     private var stepDetectorRegistered = false
+    private val dynamicSensorCallback = object : SensorManager.DynamicSensorCallback() {
+        override fun onDynamicSensorConnected(sensor: Sensor) {
+            if (!state.value.collecting) return
+            val handler = sensorHandler ?: return
+            registerSensor(sensor, handler)
+            state.value = state.value.copy(
+                availableSensorCount = availableSensorCount(),
+                readings = readings.values.toList(),
+            )
+        }
+
+        override fun onDynamicSensorDisconnected(sensor: Sensor) {
+            if (!state.value.collecting) return
+            val key = sensorKey(sensor)
+            registeredSensorKeys.remove(key)
+            readings[key]?.let { reading ->
+                readings[key] = reading.copy(
+                    state = SensorState.UNAVAILABLE,
+                    detail = "Dynamic sensor disconnected",
+                )
+            }
+            val inventoryIndex = sensorInventory.indexOfFirst {
+                it.sensorType == sensorWireType(sensor) && it.sensorId == sensor.id.takeIf { id -> id >= 0 }
+            }
+            if (inventoryIndex >= 0) {
+                sensorInventory[inventoryIndex] = sensorInventory[inventoryIndex].copy(registered = false)
+            }
+            state.value = state.value.copy(
+                availableSensorCount = availableSensorCount(),
+                readings = readings.values.toList(),
+            )
+        }
+    }
     private var lastStepCounter: Float? = null
     private var gravityInitialized = false
     private var lastLinearAccelerationTimestampNs = 0L
@@ -173,7 +207,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         state.value = state.value.copy(error = null)
     }
 
-    fun availableSensorCount(): Int = sensorManager.getSensorList(Sensor.TYPE_ALL).size
+    fun availableSensorCount(): Int = discoveredSensors().size
 
     fun hasPreciseLocationPermission(): Boolean = ContextCompat.checkSelfPermission(
         appContext,
@@ -207,7 +241,10 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         fusionReady = !recoveringSession
         val callbackHandler = ensureSensorHandler()
         hasLinearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) != null
-        sensorManager.getSensorList(Sensor.TYPE_ALL).forEach { sensor ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            runCatching { sensorManager.registerDynamicSensorCallback(dynamicSensorCallback, callbackHandler) }
+        }
+        discoveredSensors().forEach { sensor ->
             registerSensor(sensor, callbackHandler)
         }
 
@@ -236,6 +273,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
     fun stop() {
         sensorManager.unregisterListener(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            runCatching { sensorManager.unregisterDynamicSensorCallback(dynamicSensorCallback) }
+        }
         locationManager.removeUpdates(this)
         sensorThread?.quitSafely()
         sensorThread = null
@@ -276,7 +316,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             sensorManager.registerListener(this, sensor, delay, callbackHandler)
         }.getOrDefault(false)
         if (sensor.type == Sensor.TYPE_STEP_DETECTOR && registered) stepDetectorRegistered = true
-        sensorInventory += SensorInventorySample(
+        val inventoryEntry = SensorInventorySample(
             sensorType = sensorWireType(sensor),
             sensorId = sensor.id.takeIf { it >= 0 },
             name = sensor.name.take(128),
@@ -295,11 +335,23 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             transportMaxHz = transportLimiter.maxHz(sensorWireType(sensor)),
             registered = registered,
         )
+        val inventoryIndex = sensorInventory.indexOfFirst {
+            it.sensorType == inventoryEntry.sensorType && it.sensorId == inventoryEntry.sensorId
+        }
+        if (inventoryIndex >= 0) sensorInventory[inventoryIndex] = inventoryEntry else sensorInventory += inventoryEntry
         readings[key] = if (registered) {
             SensorReading(label, SensorState.LIMITED, "Waiting for data")
         } else {
             SensorReading(label, SensorState.UNAVAILABLE, "Registration denied by device or permission")
         }
+    }
+
+    private fun discoveredSensors(): List<Sensor> {
+        val sensors = sensorManager.getSensorList(Sensor.TYPE_ALL).toMutableList()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            sensors += sensorManager.getDynamicSensorList(Sensor.TYPE_ALL)
+        }
+        return sensors.distinctBy(::sensorKey)
     }
 
     @SuppressLint("MissingPermission")
@@ -658,6 +710,9 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
 
     private fun onCaptureBlocked(message: String) {
         sensorManager.unregisterListener(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            runCatching { sensorManager.unregisterDynamicSensorCallback(dynamicSensorCallback) }
+        }
         locationManager.removeUpdates(this)
         sensorThread?.quitSafely()
         sensorThread = null
