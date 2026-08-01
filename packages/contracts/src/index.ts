@@ -230,6 +230,8 @@ export interface SensorSample {
 export interface LiveSensorSnapshot {
   sensorType: string;
   values: number[];
+  /** Bounded primitive diagnostics for low-latency device health display. */
+  metadata?: Record<string, number | string | boolean>;
   sensorAccuracy?: number;
   accuracy?: number;
   sampleCount: number;

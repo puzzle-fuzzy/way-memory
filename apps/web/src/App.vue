@@ -293,6 +293,13 @@ const formatTime = (value?: string) => {
 };
 
 const formatSensorValues = (sensor: LiveSensorSnapshot) => {
+  if (sensor.sensorType === "arcore.visual-status") {
+    const metadata = sensor.metadata ?? {};
+    const trackingState = typeof metadata.trackingState === "string" ? metadata.trackingState : "unknown";
+    const failureReason = typeof metadata.failureReason === "string" ? metadata.failureReason : "";
+    const detail = typeof metadata.detail === "string" ? metadata.detail : "";
+    return [trackingState, failureReason, detail, `${sensor.sampleCount} 个状态样本`].filter(Boolean).join(" · ");
+  }
   if (sensor.sensorType === "gnss") {
     return typeof sensor.accuracy === "number" ? `精度 ${sensor.accuracy.toFixed(1)}m` : "已收到定位";
   }
@@ -308,6 +315,7 @@ const sensorNames: Record<string, string> = {
   barometer: "气压计",
   gnss: "GNSS 定位",
   "rotation-vector": "旋转向量",
+  "arcore.visual-status": "ARCore 视觉状态",
 };
 
 const sensorIcons: Record<string, string> = {
@@ -318,6 +326,7 @@ const sensorIcons: Record<string, string> = {
   barometer: "◒",
   gnss: "⌖",
   "rotation-vector": "◌",
+  "arcore.visual-status": "◉",
 };
 
 const sensors = computed(() => (session.value?.latestSensors ?? []).map((sensor) => ({

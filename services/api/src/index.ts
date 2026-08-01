@@ -969,6 +969,7 @@ const upsertSensor = (
   const snapshot: LiveSensorSnapshot = {
     sensorType,
     values: sample.values.slice(0, 16),
+    ...(sample.metadata ? { metadata: sample.metadata } : {}),
     sensorAccuracy: sample.sensorAccuracy,
     accuracy: sample.accuracy ?? sample.location?.accuracyM,
     sampleCount: 1,

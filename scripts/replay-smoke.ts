@@ -72,6 +72,11 @@ try {
   if (sourceRaw.response.status !== 200 || sourceVisualSample?.metadata?.trackingReset !== true || sourceVisualStatus?.metadata?.trackingState !== "paused" || sourceVisualStatus.pose !== undefined || sourceVisualStatus.relativePosition !== undefined || sourceVisualStatus.motionEvent !== undefined) {
     throw new Error(`source visual metadata was not retained: ${JSON.stringify(sourceRaw.body)}`);
   }
+  const sourceSnapshot = await request(`/api/sessions/${source.sessionId}`, undefined, dashboardToken);
+  const sourceVisualStatusSnapshot = sourceSnapshot.body?.latestSensors?.find((sample: { sensorType?: string }) => sample.sensorType === "arcore.visual-status");
+  if (sourceVisualStatusSnapshot?.metadata?.trackingState !== "paused" || sourceVisualStatusSnapshot?.metadata?.failureReason !== "INSUFFICIENT_FEATURES") {
+    throw new Error(`visual status was not promoted to the live sensor snapshot: ${JSON.stringify(sourceSnapshot.body)}`);
+  }
   const stopResult = await request(`/api/sessions/${source.sessionId}/stop`, { method: "POST" }, deviceToken);
   if (stopResult.response.status !== 200) throw new Error(`source stop failed: ${JSON.stringify(stopResult.body)}`);
   const replay = Bun.spawn(["bun", "run", "scripts/replay-session.ts", source.sessionId], {
