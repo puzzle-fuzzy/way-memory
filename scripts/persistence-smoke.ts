@@ -58,6 +58,7 @@ try {
         deviceTimestampNs: 1,
         sensorType: "arcore.visual-pose",
         values: [0, 0, 0],
+        metadata: { trackingState: "tracking", trackingReset: true, confidence: 0.9 },
         pose: {
           deviceTimestampNs: 1,
           xM: 0,
@@ -85,8 +86,8 @@ try {
   await waitForHealth();
   const sessions = await requestJson("/api/sessions") as Array<{ sessionId: string; status: string; posePointCount?: number }>;
   const restored = sessions.find((item) => item.sessionId === session.sessionId);
-  const raw = await requestJson(`/api/sessions/${session.sessionId}/raw`) as { retainedSamples: number };
-  if (!restored || restored.status !== "stopped" || restored.posePointCount !== 1 || raw.retainedSamples !== 1) {
+  const raw = await requestJson(`/api/sessions/${session.sessionId}/raw`) as { retainedSamples: number; samples?: Array<{ metadata?: { trackingReset?: boolean } }> };
+  if (!restored || restored.status !== "stopped" || restored.posePointCount !== 1 || raw.retainedSamples !== 1 || raw.samples?.[0]?.metadata?.trackingReset !== true) {
     throw new Error("persistence assertion failed");
   }
   console.log("Persistence smoke passed", { sessionId: session.sessionId, posePoints: restored.posePointCount, raw: raw.retainedSamples });
