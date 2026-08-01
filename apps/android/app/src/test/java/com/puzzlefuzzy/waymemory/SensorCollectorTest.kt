@@ -1,11 +1,32 @@
 package com.puzzlefuzzy.waymemory
 
 import com.puzzlefuzzy.waymemory.sensing.shouldAcceptRotationSource
+import com.puzzlefuzzy.waymemory.sensing.transformDeviceAcceleration
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SensorCollectorTest {
+    @Test
+    fun transformsAccelerationWithTheWorldRotationMatrix() {
+        assertArrayEquals(
+            floatArrayOf(0f, 1f, 0f),
+            transformDeviceAcceleration(
+                floatArrayOf(0f, -1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f),
+                listOf(1f, 0f, 0f),
+            ),
+            0f,
+        )
+    }
+
+    @Test
+    fun rejectsInvalidAccelerationFrames() {
+        assertNull(transformDeviceAcceleration(FloatArray(9), listOf(1f, Float.NaN, 3f)))
+        assertNull(transformDeviceAcceleration(FloatArray(8), listOf(1f, 2f, 3f)))
+    }
+
     @Test
     fun lowerPrioritySourceCannotReplaceFreshPreferredSource() {
         assertFalse(

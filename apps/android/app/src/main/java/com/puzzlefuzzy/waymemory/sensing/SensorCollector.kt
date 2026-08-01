@@ -27,6 +27,20 @@ import kotlin.math.sqrt
 
 private const val ROTATION_SOURCE_FRESHNESS_NS = 750_000_000L
 
+/** Transform a device-frame acceleration vector into the rotation matrix's world frame. */
+internal fun transformDeviceAcceleration(
+    rotationMatrix: FloatArray,
+    deviceAcceleration: List<Float>,
+): FloatArray? {
+    if (rotationMatrix.size < 9 || deviceAcceleration.size < 3) return null
+    if (rotationMatrix.take(9).any { !it.isFinite() } || deviceAcceleration.take(3).any { !it.isFinite() }) return null
+    return floatArrayOf(
+        rotationMatrix[0] * deviceAcceleration[0] + rotationMatrix[1] * deviceAcceleration[1] + rotationMatrix[2] * deviceAcceleration[2],
+        rotationMatrix[3] * deviceAcceleration[0] + rotationMatrix[4] * deviceAcceleration[1] + rotationMatrix[5] * deviceAcceleration[2],
+        rotationMatrix[6] * deviceAcceleration[0] + rotationMatrix[7] * deviceAcceleration[1] + rotationMatrix[8] * deviceAcceleration[2],
+    )
+}
+
 /**
  * Decide whether a rotation-vector callback may replace the currently selected
  * source. The rule is pure so callback ordering and source failover can be
@@ -661,12 +675,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         .take(64)
 
     private fun integrateMotion(timestampNs: Long, deviceAcceleration: List<Float>): PoseUpdate? {
-        if (!hasRotationMatrix || deviceAcceleration.size < 3) return null
-        val worldAcceleration = floatArrayOf(
-            rotationMatrix[0] * deviceAcceleration[0] + rotationMatrix[1] * deviceAcceleration[1] + rotationMatrix[2] * deviceAcceleration[2],
-            rotationMatrix[3] * deviceAcceleration[0] + rotationMatrix[4] * deviceAcceleration[1] + rotationMatrix[5] * deviceAcceleration[2],
-            rotationMatrix[6] * deviceAcceleration[0] + rotationMatrix[7] * deviceAcceleration[1] + rotationMatrix[8] * deviceAcceleration[2],
-        )
+        if (!hasRotationMatrix) return null
+        val worldAcceleration = transformDeviceAcceleration(rotationMatrix, deviceAcceleration) ?: return null
         return poseFusion.updateImu(timestampNs, worldAcceleration, angularRateMagnitude)
     }
 
