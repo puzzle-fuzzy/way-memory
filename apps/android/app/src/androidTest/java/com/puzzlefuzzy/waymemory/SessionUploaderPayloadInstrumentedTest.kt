@@ -37,6 +37,7 @@ class SessionUploaderPayloadInstrumentedTest {
                 CollectedSample(
                     deviceTimestampNs = 20,
                     sensorType = "arcore.visual-pose",
+                    sensorId = 42,
                     values = listOf(0f, 0f, 0f),
                     metadata = mapOf(
                         "trackingState" to "tracking",
@@ -48,6 +49,7 @@ class SessionUploaderPayloadInstrumentedTest {
         )
 
         val metadata = payload.getJSONArray("samples").getJSONObject(0).getJSONObject("metadata")
+        assertEquals(42, payload.getJSONArray("samples").getJSONObject(0).getInt("sensorId"))
         assertEquals("tracking", metadata.getString("trackingState"))
         assertTrue(metadata.getBoolean("trackingReset"))
         assertEquals(0.9, metadata.getDouble("confidence"), 0.0001)

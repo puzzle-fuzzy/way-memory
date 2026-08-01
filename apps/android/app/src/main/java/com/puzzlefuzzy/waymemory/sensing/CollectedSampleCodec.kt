@@ -24,6 +24,7 @@ internal object CollectedSampleCodec : SampleCodec {
         put("sampleId", sampleId)
         put("deviceTimestampNs", deviceTimestampNs)
         put("sensorType", sensorType)
+        sensorId?.let { put("sensorId", it) }
         put("values", JSONArray(values))
         if (metadata.isNotEmpty()) {
             put("metadata", JSONObject().apply {
@@ -88,6 +89,7 @@ internal object CollectedSampleCodec : SampleCodec {
         sampleId = optString("sampleId").takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
         deviceTimestampNs = getLong("deviceTimestampNs"),
         sensorType = getString("sensorType"),
+        sensorId = optIntOrNull("sensorId"),
         values = optJSONArray("values").toFloatList(),
         metadata = optJSONObject("metadata")?.toAnyMap() ?: emptyMap(),
         sensorAccuracy = optIntOrNull("sensorAccuracy"),

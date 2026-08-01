@@ -788,9 +788,14 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
   const sampleId = value.sampleId === undefined ? undefined : typeof value.sampleId === "string" ? value.sampleId.trim() : null;
   if (sampleId === null || (sampleId !== undefined && (!sampleId || sampleId.length > MAX_SAMPLE_ID_LENGTH))) return null;
   const sensorType = normalizeSensorType(value.sensorType.trim());
+  const sensorId = value.sensorId === undefined ? undefined : finiteNumber(value.sensorId);
   const deviceTimestampNs = finiteNumber(value.deviceTimestampNs);
   const rawValues = value.values;
-  if (!sensorType || sensorType.length > 64 || deviceTimestampNs === null || !Number.isSafeInteger(deviceTimestampNs) || deviceTimestampNs <= 0) return null;
+  if (
+    !sensorType || sensorType.length > 64
+    || (sensorId !== undefined && (sensorId === null || !Number.isInteger(sensorId) || sensorId < 0 || sensorId > 1_000_000))
+    || deviceTimestampNs === null || !Number.isSafeInteger(deviceTimestampNs) || deviceTimestampNs <= 0
+  ) return null;
   if (!Array.isArray(rawValues) || rawValues.length > MAX_SENSOR_VALUES) return null;
   const values = rawValues.map(finiteNumber);
   if (values.some((item) => item === null)) return null;
@@ -812,6 +817,7 @@ const normalizeSensorSample = (value: unknown): SensorSample | null => {
     ...(sampleId ? { sampleId } : {}),
     deviceTimestampNs,
     sensorType,
+    ...(sensorId === undefined || sensorId === null ? {} : { sensorId }),
     values: values as number[],
     ...(metadata === undefined || metadata === null ? {} : { metadata }),
     ...(sensorAccuracy === undefined || sensorAccuracy === null ? {} : { sensorAccuracy }),
@@ -829,6 +835,7 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
   for (const item of value) {
     if (!isRecord(item) || typeof item.sensorType !== "string" || typeof item.name !== "string" || typeof item.registered !== "boolean") continue;
     const sensorType = item.sensorType.trim().slice(0, 64);
+    const sensorId = item.sensorId === undefined ? undefined : finiteNumber(item.sensorId);
     const name = item.name.trim().slice(0, 128);
     if (!sensorType || !name) continue;
     const vendor = item.vendor === undefined ? undefined : typeof item.vendor === "string" ? item.vendor.trim().slice(0, 128) : null;
@@ -840,6 +847,7 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
     const transportMaxHz = item.transportMaxHz === undefined ? undefined : finiteNumber(item.transportMaxHz);
     if (
       vendor === null
+      || (sensorId !== undefined && (sensorId === null || !Number.isInteger(sensorId) || sensorId < 0 || sensorId > 1_000_000))
       || (version !== undefined && (version === null || !Number.isInteger(version) || version < 0 || version > 1_000_000))
       || (powerMa !== undefined && (powerMa === null || powerMa < 0 || powerMa > 100_000))
       || (minDelayUs !== undefined && (minDelayUs === null || !Number.isInteger(minDelayUs) || minDelayUs < 0 || minDelayUs > 1_000_000_000))
@@ -849,6 +857,7 @@ const normalizeSensorInventory = (value: unknown): SensorInventoryEntry[] => {
     ) continue;
     result.push({
       sensorType,
+      ...(sensorId === undefined || sensorId === null ? {} : { sensorId }),
       name,
       ...(vendor ? { vendor } : {}),
       ...(version === undefined || version === null ? {} : { version }),

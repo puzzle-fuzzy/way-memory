@@ -202,6 +202,8 @@ export interface SensorSample {
   sampleId?: string;
   deviceTimestampNs: number;
   sensorType: string;
+  /** Android Sensor.getId() when the sample came from a concrete hardware stream. */
+  sensorId?: number;
   values: number[];
   /** Bounded primitive diagnostics retained for deterministic raw replay. */
   metadata?: Record<string, number | string | boolean>;
@@ -243,6 +245,8 @@ export interface SensorSampleStats {
 
 export interface SensorInventoryEntry {
   sensorType: string;
+  /** Android Sensor.getId(), retained so same-type physical sensors remain distinguishable. */
+  sensorId?: number;
   name: string;
   vendor?: string;
   version?: number;

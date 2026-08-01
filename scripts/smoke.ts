@@ -44,13 +44,13 @@ try {
           apiBaseUrl: "http://127.0.0.1:8787",
         },
         sensors: [
-          { sensorType: "android.sensor.accelerometer", name: "Smoke Accelerometer", vendor: "test", version: 1, minDelayUs: 10_000, transportMaxHz: 50, registered: true },
+          { sensorType: "android.sensor.accelerometer", sensorId: 7, name: "Smoke Accelerometer", vendor: "test", version: 1, minDelayUs: 10_000, transportMaxHz: 50, registered: true },
           { sensorType: "android.sensor.protected", name: "Protected Sensor", transportMaxHz: 5, registered: false },
         ],
       }));
       const started = await waitForMessage(device);
-      const session = started.session as { sessionId: string; sensorInventory?: Array<{ sensorType: string; registered: boolean; transportMaxHz?: number }>; client?: { applicationId: string; apiBaseUrl: string } };
-      if (started.type !== "session.started" || session.client?.applicationId !== "com.puzzlefuzzy.waymemory" || session.client.apiBaseUrl !== "http://127.0.0.1:8787" || session.sensorInventory?.length !== 2 || session.sensorInventory[0]?.transportMaxHz !== 50 || session.sensorInventory[1]?.registered !== false) {
+      const session = started.session as { sessionId: string; sensorInventory?: Array<{ sensorType: string; sensorId?: number; registered: boolean; transportMaxHz?: number }>; client?: { applicationId: string; apiBaseUrl: string } };
+      if (started.type !== "session.started" || session.client?.applicationId !== "com.puzzlefuzzy.waymemory" || session.client.apiBaseUrl !== "http://127.0.0.1:8787" || session.sensorInventory?.length !== 2 || session.sensorInventory[0]?.sensorId !== 7 || session.sensorInventory[0]?.transportMaxHz !== 50 || session.sensorInventory[1]?.registered !== false) {
         throw new Error("sensor inventory was not preserved")
       }
       await waitForMessage(dashboard);
@@ -58,7 +58,7 @@ try {
         type: "samples",
         sessionId: session.sessionId,
         samples: [
-          { deviceTimestampNs: 1, sensorType: "accelerometer", values: [0, 0, 9.8], relativePosition: { xM: 0, yM: 0, zM: 0, accuracyM: 2 }, pose: { deviceTimestampNs: 1, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 2, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu"], motionMode: "stationary", stationary: true } },
+          { deviceTimestampNs: 1, sensorType: "accelerometer", sensorId: 42, values: [0, 0, 9.8], relativePosition: { xM: 0, yM: 0, zM: 0, accuracyM: 2 }, pose: { deviceTimestampNs: 1, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 2, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu"], motionMode: "stationary", stationary: true } },
           { deviceTimestampNs: 2, sensorType: "android.sensor.pressure", values: [1013.25], relativePosition: { xM: 0.2, yM: 0.1, zM: 0.05, accuracyM: 2 }, pose: { deviceTimestampNs: 2, xM: 0.2, yM: 0.1, zM: 0.05, velocityXMps: 0.2, velocityYMps: 0.1, velocityZMps: 0, accuracyM: 2.2, confidence: 0.88, source: "fused", frame: "local-enu", sourceFlags: ["imu", "barometer"], motionMode: "walking", stationary: false }, motionEvent: { eventId: "smoke-elevator", deviceTimestampNs: 2, type: "elevator-candidate", confidence: 0.7, details: { barometerVerticalSpeedMps: 0.4 } } },
           { deviceTimestampNs: 3, sensorType: "android.sensor.pressure", values: [1012.5] },
           { deviceTimestampNs: 7, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4 } },
@@ -128,8 +128,8 @@ try {
       ) {
         throw new Error("Cross-batch late route sample was not isolated");
       }
-      const rawReplay = await (await fetch(`http://127.0.0.1:8787/api/sessions/${session.sessionId}/raw`)).json() as { totalSamples: number; retainedSamples: number; maxRetainedSamples: number };
-      if (rawReplay.totalSamples !== 9 || rawReplay.retainedSamples !== 9 || rawReplay.maxRetainedSamples !== 1024) throw new Error("Unexpected raw replay buffer");
+      const rawReplay = await (await fetch(`http://127.0.0.1:8787/api/sessions/${session.sessionId}/raw`)).json() as { totalSamples: number; retainedSamples: number; maxRetainedSamples: number; samples?: Array<{ sensorId?: number; deviceTimestampNs: number }> };
+      if (rawReplay.totalSamples !== 9 || rawReplay.retainedSamples !== 9 || rawReplay.maxRetainedSamples !== 1024 || rawReplay.samples?.find((sample) => sample.deviceTimestampNs === 1)?.sensorId !== 42) throw new Error("Unexpected raw replay buffer or sensor identity");
       const listedSessions = await (await fetch("http://127.0.0.1:8787/api/sessions")).json() as Array<{ sessionId: string; track: unknown[]; poseTrack: unknown[]; rawSampleCount: number; posePointCount?: number }>;
       const listed = listedSessions.find((item) => item.sessionId === session.sessionId);
       if (!listed || listed.track.length !== 0 || listed.poseTrack.length !== 0 || listed.rawSampleCount !== 9 || listed.posePointCount !== 2) throw new Error("Session list was not compact");

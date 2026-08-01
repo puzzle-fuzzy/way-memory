@@ -31,6 +31,7 @@ data class CollectedSample(
     val sampleId: String = UUID.randomUUID().toString(),
     val deviceTimestampNs: Long,
     val sensorType: String,
+    val sensorId: Int? = null,
     val values: List<Float> = emptyList(),
     val metadata: Map<String, Any?> = emptyMap(),
     val sensorAccuracy: Int? = null,
@@ -97,6 +98,7 @@ data class SessionLifecycleEvent(
 
 data class SensorInventorySample(
     val sensorType: String,
+    val sensorId: Int? = null,
     val name: String,
     val vendor: String? = null,
     val version: Int? = null,
@@ -223,6 +225,7 @@ private fun SessionStartRequest.toJson(): JSONObject = JSONObject()
         sensorInventory.forEach { sensor ->
             put(JSONObject().apply {
                 put("sensorType", sensor.sensorType)
+                sensor.sensorId?.let { put("sensorId", it) }
                 put("name", sensor.name)
                 sensor.vendor?.let { put("vendor", it) }
                 sensor.version?.let { put("version", it) }

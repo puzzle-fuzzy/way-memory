@@ -202,6 +202,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         if (sensor.type == Sensor.TYPE_STEP_DETECTOR && registered) stepDetectorRegistered = true
         sensorInventory += SensorInventorySample(
             sensorType = sensorWireType(sensor),
+            sensorId = sensor.id.takeIf { it >= 0 },
             name = sensor.name.take(128),
             vendor = sensor.vendor.takeIf { it.isNotBlank() }?.take(128),
             version = sensor.version,
@@ -325,6 +326,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
                 CollectedSample(
                     deviceTimestampNs = event.timestamp,
                     sensorType = wireType,
+                    sensorId = event.sensor.id.takeIf { it >= 0 },
                     values = values,
                     sensorAccuracy = event.accuracy.takeIf { it >= 0 },
                     relativePosition = if (poseAccepted) poseUpdate?.pose?.toRelativePosition() else null,

@@ -3,6 +3,7 @@ dist/
 build/
 .gradle-cache/
 .gradle-test/
+.gradle-test*/
 **/.kotlin/
 .tmp-build/
 .tmp-*-build/

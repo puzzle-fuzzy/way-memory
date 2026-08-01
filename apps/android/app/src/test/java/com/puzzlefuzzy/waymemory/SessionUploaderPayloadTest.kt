@@ -27,6 +27,7 @@ class SessionUploaderPayloadTest {
             sensorInventory = listOf(
                 SensorInventorySample(
                     sensorType = "android.sensor.accelerometer",
+                    sensorId = 7,
                     name = "Accelerometer",
                     transportMaxHz = 50,
                     registered = true,
@@ -42,6 +43,7 @@ class SessionUploaderPayloadTest {
 
         assertEquals("device-1", request.deviceId)
         assertEquals(2, request.sensorInventory.size)
+        assertEquals(7, request.sensorInventory[0].sensorId)
         assertEquals(50, request.sensorInventory[0].transportMaxHz)
         assertEquals(false, request.sensorInventory[1].registered)
     }
