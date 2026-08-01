@@ -1,6 +1,7 @@
 package com.puzzlefuzzy.waymemory
 
 import com.puzzlefuzzy.waymemory.sensing.CollectedSample
+import com.puzzlefuzzy.waymemory.sensing.LocationSample
 import com.puzzlefuzzy.waymemory.sensing.buildSamplesMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -11,6 +12,30 @@ import org.json.JSONObject
 
 @RunWith(AndroidJUnit4::class)
 class SessionUploaderPayloadInstrumentedTest {
+    @Test
+    fun locationProviderSurvivesTheAndroidJsonCodec() {
+        val payload = buildSamplesMessage(
+            sessionId = "session-gps-provider",
+            batch = listOf(
+                CollectedSample(
+                    deviceTimestampNs = 30,
+                    sensorType = "location",
+                    values = emptyList(),
+                    location = LocationSample(
+                        lat = 31.2304,
+                        lng = 121.4737,
+                        accuracyM = 4f,
+                        provider = "gps",
+                    ),
+                ),
+            ),
+        )
+
+        val location = payload.getJSONArray("samples").getJSONObject(0).getJSONObject("location")
+        assertEquals("gps", location.getString("provider"))
+        assertEquals(31.2304, location.getDouble("lat"), 0.000001)
+    }
+
     @Test
     fun sampleUploadUsesObjectsInsteadOfJsonStrings() {
         val payload = buildSamplesMessage(

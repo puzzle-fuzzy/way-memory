@@ -1,6 +1,7 @@
 package com.puzzlefuzzy.waymemory
 
 import com.puzzlefuzzy.waymemory.sensing.shouldAcceptRotationSource
+import com.puzzlefuzzy.waymemory.sensing.isPrimaryLocationProvider
 import com.puzzlefuzzy.waymemory.sensing.transformDeviceAcceleration
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
@@ -9,6 +10,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SensorCollectorTest {
+    @Test
+    fun networkFixIsDiagnosticWhenGpsProviderExists() {
+        assertTrue(isPrimaryLocationProvider("gps", gpsProviderAvailable = true))
+        assertFalse(isPrimaryLocationProvider("network", gpsProviderAvailable = true))
+    }
+
+    @Test
+    fun networkFixCanBeFallbackWhenGpsProviderDoesNotExist() {
+        assertTrue(isPrimaryLocationProvider("network", gpsProviderAvailable = false))
+    }
+
     @Test
     fun transformsAccelerationWithTheWorldRotationMatrix() {
         assertArrayEquals(

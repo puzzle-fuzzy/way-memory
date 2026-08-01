@@ -47,6 +47,7 @@ data class LocationSample(
     val lng: Double,
     val accuracyM: Float? = null,
     val altitudeM: Double? = null,
+    val provider: String? = null,
 )
 
 data class RelativePositionSample(

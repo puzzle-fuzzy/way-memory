@@ -28,6 +28,7 @@ export interface TrackPoint {
   source: "gnss" | "fused" | "visual" | "manual";
   altitudeM?: number;
   altitudeSource?: "gnss" | "barometer";
+  locationProvider?: string;
 }
 
 export interface RelativeMotionPoint {
@@ -214,6 +215,7 @@ export interface SensorSample {
     lng: number;
     accuracyM?: number;
     altitudeM?: number;
+    provider?: string;
   };
   relativePosition?: {
     xM: number;

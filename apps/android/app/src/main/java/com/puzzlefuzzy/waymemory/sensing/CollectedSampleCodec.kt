@@ -41,6 +41,7 @@ internal object CollectedSampleCodec : SampleCodec {
                 put("lng", it.lng)
                 it.accuracyM?.let { value -> put("accuracyM", value) }
                 it.altitudeM?.let { value -> put("altitudeM", value) }
+                it.provider?.let { value -> put("provider", value) }
             })
         }
         relativePosition?.let {
@@ -100,6 +101,7 @@ internal object CollectedSampleCodec : SampleCodec {
                 lng = it.getDouble("lng"),
                 accuracyM = it.optFloatOrNull("accuracyM"),
                 altitudeM = it.optDoubleOrNull("altitudeM"),
+                provider = it.optString("provider").takeIf { value -> value.isNotBlank() },
             )
         },
         relativePosition = optJSONObject("relativePosition")?.let {

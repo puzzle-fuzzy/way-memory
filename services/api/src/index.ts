@@ -646,13 +646,18 @@ const normalizeLocation = (value: unknown): SensorSample["location"] | null => {
   if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   const accuracyM = value.accuracyM === undefined ? undefined : finiteNumber(value.accuracyM);
   const altitudeM = value.altitudeM === undefined ? undefined : finiteNumber(value.altitudeM);
+  const provider = value.provider === undefined
+    ? undefined
+    : typeof value.provider === "string" ? value.provider.trim().slice(0, 32) : null;
   if (value.accuracyM !== undefined && (accuracyM === null || accuracyM < 0 || accuracyM > 10_000)) return null;
   if (value.altitudeM !== undefined && altitudeM === null) return null;
+  if (provider === null || (provider !== undefined && !provider)) return null;
   return {
     lat,
     lng,
     ...(accuracyM === undefined || accuracyM === null ? {} : { accuracyM }),
     ...(altitudeM === undefined || altitudeM === null ? {} : { altitudeM }),
+    ...(provider === undefined || provider === null ? {} : { provider }),
   };
 };
 
@@ -1006,6 +1011,7 @@ const toTrackPoint = (session: ObservationSession, location: NonNullable<SensorS
     confidence: clamp(1 - accuracyM / 50, 0, 1),
     source: "fused",
     ...(typeof altitudeM === "number" && altitudeSource ? { altitudeM, altitudeSource } : {}),
+    ...(location.provider ? { locationProvider: location.provider } : {}),
   };
 };
 

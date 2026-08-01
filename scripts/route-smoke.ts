@@ -85,7 +85,7 @@ try {
     type: "samples",
     sessionId,
     samples: [
-      { sampleId: "route-sample-1", deviceTimestampNs: 100, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4, altitudeM: 100 }, pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
+      { sampleId: "route-sample-1", deviceTimestampNs: 100, sensorType: "location", values: [], location: { lat: 31.2304, lng: 121.47, accuracyM: 4, altitudeM: 100, provider: "gps" }, pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
       { sampleId: "route-sample-2", deviceTimestampNs: 200, sensorType: "location", values: [], location: { lat: 31.23041, lng: 121.47, accuracyM: 4, altitudeM: 101 }, pose: { deviceTimestampNs: 200, xM: 1, yM: 0, zM: 0, velocityXMps: 1, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["imu", "gnss"], motionMode: "walking", stationary: false } },
     ],
   }));
@@ -100,7 +100,7 @@ try {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ sessionId }),
   });
-  if (attached.response.status !== 200 || attached.body.observations !== 1 || attached.body.referenceSessionId !== sessionId || attached.body.track.length !== 2 || attached.body.poseTrack.length !== 2) throw new Error(`route observation attach failed: ${JSON.stringify(attached.body)}`);
+  if (attached.response.status !== 200 || attached.body.observations !== 1 || attached.body.referenceSessionId !== sessionId || attached.body.track.length !== 2 || attached.body.track[0]?.locationProvider !== "gps" || attached.body.poseTrack.length !== 2) throw new Error(`route observation attach failed: ${JSON.stringify(attached.body)}`);
   const repeated = await requestJson(`/api/routes/${routeId}/observations`, {
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -62,6 +62,14 @@ internal fun shouldAcceptRotationSource(
     return true
 }
 
+/**
+ * Network location is useful as a diagnostic/fallback only. When a GPS
+ * provider exists, allowing a network fix to establish the route origin can
+ * create a false jump when the first satellite fix arrives later.
+ */
+internal fun isPrimaryLocationProvider(provider: String?, gpsProviderAvailable: Boolean): Boolean =
+    provider?.equals("gps", ignoreCase = true) == true || !gpsProviderAvailable
+
 class SensorCollector(context: Context) : SensorEventListener, LocationListener {
     private val appContext = context.applicationContext
     private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -87,6 +95,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         onStatus = ::onVisualStatus,
     )
     private var lastPublishedLocation: Location? = null
+    private var gpsProviderAvailable = false
     private val rotationMatrix = FloatArray(9)
     private val gravity = FloatArray(3)
     private val magneticField = FloatArray(3)
@@ -158,6 +167,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         sensorInventory.clear()
         registeredSensorKeys.clear()
         lastPublishedLocation = null
+        gpsProviderAvailable = false
         totalCollectedSamples = 0L
         lastSensorUiPublishMs = 0L
         lastPoseUiPublishMs = 0L
@@ -270,6 +280,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             updateError("请打开系统定位服务")
             return
         }
+        gpsProviderAvailable = providers.any { it == LocationManager.GPS_PROVIDER }
         var subscribed = 0
         providers.forEach { provider ->
             runCatching {
@@ -291,7 +302,8 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         val nowNs = SystemClock.elapsedRealtimeNanos()
         providers.mapNotNull { provider ->
             runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
-        }.maxByOrNull { it.elapsedRealtimeNanos }
+        }.filter { isPrimaryLocationProvider(it.provider, gpsProviderAvailable) }
+            .maxByOrNull { it.elapsedRealtimeNanos }
             ?.takeIf { it.elapsedRealtimeNanos > 0 && nowNs - it.elapsedRealtimeNanos <= 30_000_000_000L }
             ?.let(::onLocationChanged)
     }
@@ -479,6 +491,10 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
     }
 
     override fun onLocationChanged(location: Location) {
+        if (!isPrimaryLocationProvider(location.provider, gpsProviderAvailable)) {
+            enqueueNetworkLocationDiagnostic(location)
+            return
+        }
         if (!shouldPublishLocation(location)) return
         lastPublishedLocation = Location(location)
         val timestampNs = location.elapsedRealtimeNanos.takeIf { it > 0L }
@@ -508,6 +524,7 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
                     lng = location.longitude,
                     accuracyM = location.accuracy.takeIf { location.hasAccuracy() },
                     altitudeM = location.altitude.takeIf { location.hasAltitude() },
+                    provider = location.provider,
                 ),
                 relativePosition = poseUpdate?.pose?.toRelativePosition(),
                 pose = poseUpdate?.pose,
@@ -515,6 +532,27 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
             ),
         )
         poseUpdate?.let(::publishPose)
+    }
+
+    private fun enqueueNetworkLocationDiagnostic(location: Location) {
+        if (!location.latitude.isFinite() || !location.longitude.isFinite()) return
+        val accuracy = location.accuracy.takeIf { location.hasAccuracy() && it.isFinite() && it >= 0f }
+        uploader.enqueue(
+            CollectedSample(
+                deviceTimestampNs = location.elapsedRealtimeNanos.takeIf { it > 0L }
+                    ?: SystemClock.elapsedRealtimeNanos(),
+                sensorType = "location.network",
+                values = listOf(
+                    location.latitude.toFloat(),
+                    location.longitude.toFloat(),
+                    accuracy ?: -1f,
+                ),
+                metadata = mapOf(
+                    "provider" to (location.provider ?: "network"),
+                    "primary" to false,
+                ),
+            ),
+        )
     }
 
     private fun shouldPublishLocation(location: Location): Boolean {
@@ -546,8 +584,14 @@ class SensorCollector(context: Context) : SensorEventListener, LocationListener 
         return true
     }
 
-    override fun onProviderEnabled(provider: String) = Unit
-    override fun onProviderDisabled(provider: String) = updateError("Location provider disabled: $provider")
+    override fun onProviderEnabled(provider: String) {
+        if (provider == LocationManager.GPS_PROVIDER) gpsProviderAvailable = true
+    }
+
+    override fun onProviderDisabled(provider: String) {
+        if (provider == LocationManager.GPS_PROVIDER) gpsProviderAvailable = false
+        updateError("Location provider disabled: $provider")
+    }
     @Deprecated("Required by the legacy LocationListener contract")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 
