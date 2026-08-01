@@ -34,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps
   -RequirePhysical -RequireRelease `
   -ApiBaseUrl https://way-memory.yxswy.com `
   -ApkPath artifacts/android-release/<commit>-release/way-memory-release.apk `
-  -ReleaseManifestPath artifacts/android-release/<commit>-release/ANDROID-RELEASE-MANIFEST.json
+  -ArtifactManifestPath artifacts/android-release/<commit>-release/ANDROID-RELEASE-MANIFEST.json
 ```
 
 If the release keystore is not available yet, a sensor-only physical test may use a debug APK bound to the HTTPS service. It is valid for sensor/fusion evidence but is not a production release claim:
@@ -59,10 +59,13 @@ For the actual sensor gate, require a physical phone explicitly. The script labe
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/device-acceptance.ps1 `
-  -RequirePhysical -ApiBaseUrl https://way-memory.yxswy.com
+  -RequirePhysical `
+  -ApiBaseUrl https://way-memory.yxswy.com `
+  -ApkPath artifacts\android-release\<commit>-debug\way-memory-debug.apk `
+  -ArtifactManifestPath artifacts\android-release\<commit>-debug\ANDROID-RELEASE-MANIFEST.json
 ```
 
-The script only installs and launches the APK. It does not grant permissions silently and does not fabricate route data.
+The physical gate requires the artifact manifest and verifies its API origin and SHA-256 before installation. The script only installs and launches the APK. It does not grant permissions silently and does not fabricate route data.
 When `-RequirePhysical` is used, the script also refuses a non-HTTPS API URL so a real phone cannot accidentally upload private routes to the anonymous HTTP test deployment.
 
 ## Capture matrix

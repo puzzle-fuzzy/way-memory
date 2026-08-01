@@ -3,7 +3,8 @@ param(
     [string]$Serial = "",
     [switch]$RequirePhysical,
     [switch]$RequireRelease,
-    [string]$ReleaseManifestPath = "",
+    [Alias("ReleaseManifestPath")]
+    [string]$ArtifactManifestPath = "",
     [string]$ApiBaseUrl = ""
 )
 
@@ -34,13 +35,21 @@ if ($RequirePhysical -and -not $displayApiBaseUrl.StartsWith("https://", [System
 }
 
 if ($RequireRelease) {
-    if (-not $ReleaseManifestPath.Trim()) {
-        throw "-RequireRelease needs -ReleaseManifestPath from build-android-release.ps1"
+    if (-not $ArtifactManifestPath.Trim()) {
+        throw "-RequireRelease needs -ArtifactManifestPath from build-android-release.ps1"
     }
-    $resolvedManifest = Resolve-InputPath $ReleaseManifestPath "ReleaseManifestPath"
+}
+if ($RequirePhysical -and -not $ArtifactManifestPath.Trim()) {
+    throw "-RequirePhysical needs -ArtifactManifestPath so the field APK origin and checksum are verified before installation"
+}
+if ($ArtifactManifestPath.Trim()) {
+    $resolvedManifest = Resolve-InputPath $ArtifactManifestPath "ArtifactManifestPath"
     $releaseManifest = Get-Content -Raw -LiteralPath $resolvedManifest | ConvertFrom-Json
-    if ($releaseManifest.format -ne "way-memory.android-release-manifest.v1" -or $releaseManifest.buildType -ne "release") {
-        throw "The release manifest is not a signed way-memory release artifact: $resolvedManifest"
+    if ($releaseManifest.format -ne "way-memory.android-release-manifest.v1") {
+        throw "The Android manifest is not a way-memory release artifact: $resolvedManifest"
+    }
+    if ($RequireRelease -and $releaseManifest.buildType -ne "release") {
+        throw "-RequireRelease needs a release artifact manifest: $resolvedManifest"
     }
     $manifestOrigin = ([Uri]$releaseManifest.apiBaseUrl).GetLeftPart([UriPartial]::Authority)
     $expectedOrigin = ([Uri]$displayApiBaseUrl).GetLeftPart([UriPartial]::Authority)
@@ -49,11 +58,11 @@ if ($RequireRelease) {
     }
     $manifestApk = Join-Path (Split-Path -Parent $resolvedManifest) $releaseManifest.apkPath
     if ((Resolve-Path $manifestApk).Path -ne $resolvedApk) {
-        throw "APK path does not match the release manifest"
+        throw "APK path does not match the artifact manifest"
     }
     $manifestHash = (Get-FileHash -LiteralPath $resolvedApk -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($manifestHash -ne ([string]$releaseManifest.apkSha256).ToLowerInvariant()) {
-        throw "APK SHA256 does not match the release manifest"
+        throw "APK SHA256 does not match the artifact manifest"
     }
 }
 
