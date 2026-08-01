@@ -88,7 +88,7 @@ $env:WAY_MEMORY_RELEASE_DIR = ".release/way-memory"
 bun run release:build
 ```
 
-The generated directory contains `web/`, the Bun-bundled `api/way-memory-api.js`, the authenticated systemd and HTTPS Nginx templates under `deploy/tencent-cloud/`, and `RELEASE-MANIFEST.json` with the source commit and SHA-256 for every payload file. The bundle deliberately excludes `.env` files, database data, certificates, private keys, Android signing material, and user capture data. Copy only this generated directory to a staging location on the Tencent Cloud host, review the protected environment file independently, and compare the manifest before restarting the service.
+The generated directory contains `web/`, the Bun-bundled `api/way-memory-api.js`, the authenticated systemd/HTTPS Nginx templates and guarded `install-release.sh` under `deploy/tencent-cloud/`, plus `RELEASE-MANIFEST.json` with the source commit and SHA-256 for every payload file. The bundle deliberately excludes `.env` files, database data, certificates, private keys, Android signing material, and user capture data. Copy only this generated directory to a staging location on the Tencent Cloud host, review the protected environment file independently, and compare the manifest before restarting the service.
 
 The release bundle is a packaging step, not proof of a public deployment. The public proof still requires DNS, ACME, Nginx, authenticated WebSocket, cross-network route smoke, and a physical Android device matrix to pass.
 
@@ -99,3 +99,12 @@ bun run smoke:release
 ```
 
 This starts only the generated API with an isolated temporary SQLite file, checks both loopback health endpoints, and removes the temporary process and data when the probe finishes.
+
+On the host, run the installer in check-only mode first:
+
+```bash
+sudo bash /tmp/way-memory-release-<commit>/deploy/tencent-cloud/install-release.sh \
+  /tmp/way-memory-release-<commit> --check-only
+```
+
+It refuses to write anything until the domain resolves to the expected host, the ACME certificate covers the domain and has matching private key material, and the root-owned protected environment file contains enforced authentication and bounded retention settings. Once that check passes, rerun the same command without `--check-only`; it keeps a timestamped backup and verifies local API health, HTTP-to-HTTPS redirect, HTTPS API health, and the web entry point before reporting success. It does not perform the authenticated WSS or physical-phone acceptance gates.
