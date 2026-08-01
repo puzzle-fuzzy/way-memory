@@ -108,6 +108,14 @@ export interface RouteNode {
 export type NavigationStatus = "on-route" | "near-route" | "off-route" | "no-fix" | "route-not-ready";
 export type NavigationSource = "gnss" | "local-pose" | "none";
 
+export interface NavigationNodeHint {
+  nodeId: string;
+  nodeType: RouteNodeType;
+  instruction: string;
+  distanceM: number;
+  confidence: number;
+}
+
 export interface NavigationState {
   routeId: string;
   status: NavigationStatus;
@@ -121,6 +129,7 @@ export interface NavigationState {
   nearestAltitudeM?: number;
   altitudeDeltaM?: number;
   accuracyM?: number;
+  nextNode?: NavigationNodeHint;
   updatedAt: string;
 }
 

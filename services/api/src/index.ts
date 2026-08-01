@@ -8,6 +8,7 @@ import type {
   MotionEvent,
   MotionMode,
   NavigationHandoffGrant,
+  NavigationNodeHint,
   NavigationState,
   ObservationSession,
   PoseEstimate,
@@ -232,12 +233,18 @@ const navigationStateFor = (route: StoredRoute, location: TrackPoint, altitudeOf
     : bestDistanceM <= 25
       ? "near-route"
       : "off-route";
+  const navigationProgressM = Math.min(totalM, bestProgressM);
+  const geographicTotalM = geographicPathTotalM(route.track);
+  const geographicProgressM = useVerticalProjection && totalM > 0.01
+    ? Math.min(geographicTotalM, navigationProgressM / totalM * geographicTotalM)
+    : navigationProgressM;
+  const nextNode = navigationNodeHintFor(route, geographicProgressM);
   return {
     routeId: route.routeId,
     status,
     source: "gnss",
-    progressM: Math.min(totalM, bestProgressM),
-    remainingM: Math.max(0, totalM - bestProgressM),
+    progressM: navigationProgressM,
+    remainingM: Math.max(0, totalM - navigationProgressM),
     distanceToRouteM: bestDistanceM,
     nearestPointIndex: bestIndex,
     nearestLat,
@@ -245,6 +252,7 @@ const navigationStateFor = (route: StoredRoute, location: TrackPoint, altitudeOf
     ...(nearestAltitudeM === undefined ? {} : { nearestAltitudeM }),
     ...(targetAltitudeM !== undefined && nearestAltitudeM !== undefined ? { altitudeDeltaM: targetAltitudeM - nearestAltitudeM } : {}),
     accuracyM,
+    ...(nextNode ? { nextNode } : {}),
     updatedAt,
   };
 };
@@ -311,6 +319,105 @@ const trackPointAtGeographicProgress = (track: TrackPoint[], targetProgressM: nu
   return track.at(-1);
 };
 
+const geographicProgressForPoint = (track: TrackPoint[], latitude: number, longitude: number): number | undefined => {
+  if (track.length < 2 || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined;
+  const origin = track[0];
+  const latitudeScale = Math.PI / 180 * 6_371_000;
+  const longitudeScale = latitudeScale * Math.cos(origin.lat * Math.PI / 180);
+  const targetX = (longitude - origin.lng) * longitudeScale;
+  const targetY = (latitude - origin.lat) * latitudeScale;
+  let cumulativeM = 0;
+  let bestDistanceM = Number.POSITIVE_INFINITY;
+  let bestProgressM = 0;
+  for (let index = 1; index < track.length; index += 1) {
+    const previous = track[index - 1];
+    const current = track[index];
+    const startX = (previous.lng - origin.lng) * longitudeScale;
+    const startY = (previous.lat - origin.lat) * latitudeScale;
+    const endX = (current.lng - origin.lng) * longitudeScale;
+    const endY = (current.lat - origin.lat) * latitudeScale;
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const segmentM = Math.hypot(dx, dy);
+    if (segmentM < 0.01) continue;
+    const ratio = Math.max(0, Math.min(1, ((targetX - startX) * dx + (targetY - startY) * dy) / (segmentM ** 2)));
+    const distanceM = Math.hypot(targetX - (startX + dx * ratio), targetY - (startY + dy * ratio));
+    if (distanceM < bestDistanceM) {
+      bestDistanceM = distanceM;
+      bestProgressM = cumulativeM + segmentM * ratio;
+    }
+    cumulativeM += segmentM;
+  }
+  return Number.isFinite(bestDistanceM) ? bestProgressM : undefined;
+};
+
+const poseProgressForPoint = (poses: PoseEstimate[], point: PoseVector): number | undefined => {
+  if (poses.length < 2) return undefined;
+  let cumulativeM = 0;
+  let bestDistanceM = Number.POSITIVE_INFINITY;
+  let bestProgressM = 0;
+  for (let index = 1; index < poses.length; index += 1) {
+    const previous = poses[index - 1];
+    const current = poses[index];
+    const dx = current.xM - previous.xM;
+    const dy = current.yM - previous.yM;
+    const dz = current.zM - previous.zM;
+    const segmentM = Math.hypot(dx, dy, dz);
+    if (segmentM < 0.001) continue;
+    const ratio = Math.max(0, Math.min(1, (
+      (point.xM - previous.xM) * dx
+      + (point.yM - previous.yM) * dy
+      + (point.zM - previous.zM) * dz
+    ) / (segmentM ** 2)));
+    const distanceM = Math.hypot(
+      point.xM - (previous.xM + dx * ratio),
+      point.yM - (previous.yM + dy * ratio),
+      point.zM - (previous.zM + dz * ratio),
+    );
+    if (distanceM < bestDistanceM) {
+      bestDistanceM = distanceM;
+      bestProgressM = cumulativeM + segmentM * ratio;
+    }
+    cumulativeM += segmentM;
+  }
+  return Number.isFinite(bestDistanceM) ? bestProgressM : undefined;
+};
+
+const navigationNodeHintFor = (route: StoredRoute, progressM: number): NavigationNodeHint | undefined => {
+  if (!route.nodeRecords.length || route.track.length < 2) return undefined;
+  const geographicTotalM = geographicPathTotalM(route.track);
+  const poseTotalM = posePathTotalM(route.poseTrack);
+  if (geographicTotalM < 0.01) return undefined;
+  const candidates = route.nodeRecords.flatMap((node) => {
+    const geographicProgressM = typeof node.lat === "number" && typeof node.lng === "number"
+      ? geographicProgressForPoint(route.track, node.lat, node.lng)
+      : undefined;
+    const poseProgressM = geographicProgressM === undefined && poseTotalM > 0.01
+      ? poseProgressForPoint(route.poseTrack, node)
+      : undefined;
+    const nodeProgressM = geographicProgressM !== undefined
+      ? geographicProgressM
+      : poseProgressM === undefined
+        ? undefined
+        : poseProgressM / poseTotalM * geographicTotalM;
+    if (nodeProgressM === undefined || nodeProgressM <= progressM + 0.5) return [];
+    return [{
+      node,
+      distanceM: Math.max(0, nodeProgressM - progressM),
+    }];
+  });
+  const next = candidates.sort((left, right) => left.distanceM - right.distanceM)[0];
+  return next
+    ? {
+      nodeId: next.node.nodeId,
+      nodeType: next.node.nodeType,
+      instruction: next.node.instruction,
+      distanceM: next.distanceM,
+      confidence: next.node.confidence,
+    }
+    : undefined;
+};
+
 const navigationStateForPose = (
   route: StoredRoute,
   pose: PoseEstimate,
@@ -369,6 +476,7 @@ const navigationStateForPose = (
       : bestDistanceM <= Math.max(10, accuracyM * 3)
         ? "near-route"
         : "off-route";
+  const nextNode = navigationNodeHintFor(route, geographicProgressM);
   return {
     routeId: route.routeId,
     status,
@@ -381,6 +489,7 @@ const navigationStateForPose = (
     nearestLng: nearest.lng,
     ...(typeof nearest.altitudeM === "number" ? { nearestAltitudeM: nearest.altitudeM } : {}),
     accuracyM,
+    ...(nextNode ? { nextNode } : {}),
     updatedAt: new Date().toISOString(),
   };
 };

@@ -183,7 +183,8 @@ const navigationLabel = computed(() => {
       : "等待锚定";
   const progress = typeof navigation.progressM === "number" ? `${navigation.progressM.toFixed(1)}m` : "等待定位";
   const distance = typeof navigation.distanceToRouteM === "number" ? ` · 偏离 ${navigation.distanceToRouteM.toFixed(1)}m` : "";
-  return `导航 ${navigation.status} · ${source} · ${progress}${distance}`;
+  const nextNode = navigation.nextNode ? ` · 下一节点 ${navigation.nextNode.instruction}（${navigation.nextNode.distanceM.toFixed(1)}m）` : "";
+  return `导航 ${navigation.status} · ${source} · ${progress}${distance}${nextNode}`;
 });
 
 const track = computed(() => session.value?.track ?? []);

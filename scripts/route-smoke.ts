@@ -216,14 +216,14 @@ try {
       deviceTimestampNs: 100,
       sensorType: "location",
       values: [],
-      location: { lat: 31.230405, lng: 121.470001, accuracyM: 4, altitudeM: 100.5 },
+      location: { lat: 31.2304, lng: 121.47, accuracyM: 4, altitudeM: 100.5 },
       pose: { deviceTimestampNs: 100, xM: 0, yM: 0, zM: 0, velocityXMps: 0, velocityYMps: 0, velocityZMps: 0, accuracyM: 1, confidence: 0.9, source: "fused", frame: "local-enu", sourceFlags: ["gnss"], motionMode: "walking", stationary: false },
     }],
   }));
   const navigationAccepted = await nextMessage(navigator);
   if (navigationAccepted.type !== "samples.accepted") throw new Error(`navigation sample failed: ${JSON.stringify(navigationAccepted)}`);
   const navigationSession = await requestJson(`/api/sessions/${navigationSessionId}`);
-  if (navigationSession.response.status !== 200 || navigationSession.body.navigation?.status !== "on-route" || navigationSession.body.navigation?.source !== "gnss" || typeof navigationSession.body.navigation?.progressM !== "number" || typeof navigationSession.body.navigation?.remainingM !== "number") throw new Error(`navigation projection failed: ${JSON.stringify(navigationSession.body.navigation)}`);
+  if (navigationSession.response.status !== 200 || navigationSession.body.navigation?.status !== "on-route" || navigationSession.body.navigation?.source !== "gnss" || navigationSession.body.navigation?.nextNode?.instruction !== "进入大门后向前" || typeof navigationSession.body.navigation?.progressM !== "number" || typeof navigationSession.body.navigation?.remainingM !== "number") throw new Error(`navigation projection failed: ${JSON.stringify(navigationSession.body.navigation)}`);
   navigator.send(JSON.stringify({
     type: "samples",
     sessionId: navigationSessionId,
@@ -238,7 +238,7 @@ try {
   const localPoseAccepted = await nextMessage(navigator);
   if (localPoseAccepted.type !== "samples.accepted") throw new Error(`local-pose navigation sample failed: ${JSON.stringify(localPoseAccepted)}`);
   const localPoseSession = await requestJson(`/api/sessions/${navigationSessionId}`);
-  if (localPoseSession.body.track?.length !== 1 || localPoseSession.body.navigation?.source !== "local-pose" || localPoseSession.body.navigation?.status !== "near-route" || typeof localPoseSession.body.navigation?.progressM !== "number") throw new Error(`local-pose navigation fallback failed: ${JSON.stringify(localPoseSession.body.navigation)}`);
+  if (localPoseSession.body.track?.length !== 1 || localPoseSession.body.navigation?.source !== "local-pose" || localPoseSession.body.navigation?.status !== "near-route" || localPoseSession.body.navigation?.nextNode?.nodeType !== "door" || typeof localPoseSession.body.navigation?.progressM !== "number") throw new Error(`local-pose navigation fallback failed: ${JSON.stringify(localPoseSession.body.navigation)}`);
   navigator.send(JSON.stringify({
     type: "samples",
     sessionId: navigationSessionId,
