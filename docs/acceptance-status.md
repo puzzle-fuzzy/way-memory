@@ -19,7 +19,7 @@
 - 本轮构建基线提交：`4094672`；导航实现提交：`896c785`；本轮闭环距离与恢复证据修复提交：`42a5850`（均已推送到 `origin/main`）。
 - Android 隔离全量门禁通过：5 项仪器测试、单元测试、Debug/Release 构建。
 - 服务端门禁通过：实时 WebSocket、重启持久化、动态传感器清单、鉴权/角色隔离、原始回放、幂等、重连、生命周期、保留策略、闭环、路线交接和 10 个合成场景验收；闭环累计距离和 `process-recovery`/`network-interruption` 报告契约已覆盖。
-- 本机模拟器协议链路已用本轮本地 Debug APK 实测：17 个可用传感器、17 个模拟 GPS 点、422 个 Pose 点、16,721 个样本，WebSocket 上传成功并正常停止；会话为 `77b08781-e655-4f9a-ba29-9b529b9cbb39`，API origin 为 `http://10.0.2.2:8787`，APK 来源提交为 `b7d3864`，SHA-256 为 `0566c4ea7e185fa9718c71993b24ea0c63bba7246fa72a9b1acaf374b753d2e4`。模拟器不支持 ARCore，且该证据不计入实体手机传感器验收。
+- 本机模拟器协议链路已用本轮本地 Debug APK 实测：17 个可用传感器、17 个模拟 GPS 点、422 个 Pose 点、16,721 个样本，WebSocket 上传成功并正常停止；会话为 `77b08781-e655-4f9a-ba29-9b529b9cbb39`，API origin 为 `http://10.0.2.2:8787`，APK 来源提交为 `b7d3864`，SHA-256 为 `0566c4ea7e185fa9718c71993b24ea0c63bba7246fa72a9b1acaf374b753d2e4`。同一会话的 raw replay 接口只返回上限 1,024 条，未随 16,721 条总样本无限增长。模拟器不支持 ARCore，且该证据不计入实体手机传感器验收。
 - 当前线上 HTTPS Debug APK 来源提交为 `4094672`，API origin 为 `https://way-memory.yxswy.com`，SHA-256 为 `481a3832d516ebb11ec2caee723fb29c67fc614e7207f1b30ae665f81f26c884`；已完成安装启动检查，但公网入口未通过，因此没有把它计入协议会话或真实传感器验收。
 - 公网预检仍未通过：`way-memory.yxswy.com` 没有有效 A 记录，HTTP 入口返回 `502`；腾讯云临时发布包的 `--check-only` 也因缺少受保护的 `/etc/way-memory/way-memory.env` 而拒绝继续。未执行生产重启。
 
